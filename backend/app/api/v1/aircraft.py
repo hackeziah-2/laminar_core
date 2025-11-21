@@ -1,6 +1,6 @@
 from math import ceil
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,8 +23,16 @@ async def api_list_aircraft(limit: int = Query(10, ge=1, le=100), page: int = Qu
 
 
 @router.get("/paged")
-async def api_list_paged(limit: int = Query(10, ge=1, le=100), page: int = Query(1, ge=1), search: Optional[str] = None, session: AsyncSession = Depends(get_session)):
+async def api_list_paged(
+    limit: int = Query(10, ge=1, le=100), 
+    page: int = Query(1, ge=1), 
+    search: Optional[str] = None, 
+    status: aircraft_schema.AircrarftStatus | None = Query(
+        None, description="Filter by status", enum=["active", "inactive", "maintenance"]),
+    session: AsyncSession = Depends(get_session)
+):
     offset = (page - 1) * limit
-    items, total = await list_aircraft(session, limit=limit, offset=offset, search=search)
+    items, total = await list_aircraft(session, limit=limit, offset=offset, search=search, status=status)
     pages = ceil(total / limit) if total else 0
     return {"items": items, "total": total, "page": page, "pages": pages}
+    

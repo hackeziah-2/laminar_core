@@ -4,25 +4,26 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum
 from app.database import Base, TimestampMixin, SoftDeleteMixin
 
 
-class AircraftStatus(str, enum.Enum):
+class Status(str, enum.Enum):
     ACTIVE = "Active"
+    INACTIVE = "Inactive"
     MAINTENANCE = "Maintenance"
-    GROUNDED = "Grounded"
 
 class Aircraft(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "aircrafts"
+    
     id = Column(Integer, primary_key=True, index=True)
-    aircraft_registry = Column(String(89), nullable=False, index=True)
+    registration = Column(String(89), nullable=False, index=True)
     manufacturer = Column(String(89), nullable=False, index=True)
     report_description = Column(Text)
-    
+
     type = Column(String, nullable=False, index=True)
     model = Column(String, nullable=False, index=True)
     msn = Column(String, nullable=False, unique=True, index=True)
     reg_no = Column(String, nullable=False, unique=True, index=True)
     base = Column(String, nullable=False, index=True)
     ownership = Column(String, nullable=False)
-    status = Column(SQLEnum(AircraftStatus), default=AircraftStatus.ACTIVE, nullable=False)
+    status = Column(SQLEnum(Status), default=Status.ACTIVE, nullable=True)
 
     # Airframe Information
     airframe_model = Column(String, nullable=True)

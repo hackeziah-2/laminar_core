@@ -1,4 +1,6 @@
-from sqlalchemy import select
+from sqlalchemy import select, or_, cast, String
+from fastapi import Query
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.aircraft import Aircraft
 from app.schemas.aircraft_schema import AircraftCreate
@@ -14,16 +16,24 @@ async def create_aircraft(session: AsyncSession, aircraft_data: AircraftCreate) 
     await session.refresh(obj)
     return obj
 
-async def list_aircraft(session: AsyncSession, limit: int =10, offset: int=0, search: Optional[str]=None)->  Tuple[List[Aircraft], int]:
+async def list_aircraft(session: AsyncSession, limit: int =0, offset: int=0,
+    search: Optional[str]=None, status: Optional[str] = "all"):
     stmt = select(Aircraft)
     if search:
         q = f"%{search}%"
         stmt = stmt.where(
-            (Aircraft.aircraft_registry.ilike(q))
-            # (Aircraft.origin.ilike(q)) |
-            # (Aircraft.destination.ilike(q)) |
-            # (Aircraft.status.ilike(q))
+            or_(Aircraft.registration.ilike(q),
+                (Aircraft.base.ilike(q)),
+                (Aircraft.model.ilike(q)),
+                (Aircraft.reg_no.ilike(q)),
+            )
         )
+    
+    # Status filter
+    if status and status.lower() != "all":
+        status_value = f"%{status.strip()}%"
+        stmt = stmt.where(cast(Aircraft.status, String).ilike(status_value))
+        
     total = await session.execute(select(Aircraft))
     total_count = len(total.scalars().all())
     stmt = stmt.limit(limit).offset(offset)

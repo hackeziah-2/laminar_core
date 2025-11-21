@@ -1,10 +1,16 @@
+
+from sqlalchemy import Enum
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
 
+class AircrarftStatus(str, Enum):
+    active = "Active"
+    inactive = "Inactive"
+    maintenance = "Maintenance"
 
 class AircraftBase(BaseModel):
-    aircraft_registry: str
+    registration: str
     manufacturer: str
     report_description: str
 
