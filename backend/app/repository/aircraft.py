@@ -1,12 +1,13 @@
 from sqlalchemy import select, or_, cast, String
+from sqlalchemy.sql import func
 from fastapi import Query
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.aircraft import Aircraft
-from app.schemas.aircraft_schema import AircraftCreate
+from app.schemas.aircraft_schema import AircraftCreate, AircraftOut
 from typing import List, Optional, Tuple
 
-async def get_aircraft(session: AsyncSession, id: int) -> Optional[Aircraft]:
+async def get_aircraft(session: AsyncSession, id: int) -> Optional[AircraftOut]:
     return await session.get(Aircraft, id)
 
 async def create_aircraft(session: AsyncSession, aircraft_data: AircraftCreate) -> Aircraft:
@@ -31,8 +32,7 @@ async def list_aircraft(session: AsyncSession, limit: int =0, offset: int=0,
     
     # Status filter
     if status and status.lower() != "all":
-        status_value = f"%{status.strip()}%"
-        stmt = stmt.where(cast(Aircraft.status, String).ilike(status_value))
+        stmt = stmt.where(func.lower(cast(Aircraft.status, String)) == status.lower())
         
     total = await session.execute(select(Aircraft))
     total_count = len(total.scalars().all())
