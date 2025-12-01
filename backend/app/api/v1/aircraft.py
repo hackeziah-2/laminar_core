@@ -5,7 +5,7 @@ from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas import aircraft_schema
-from app.repository.aircraft import create_aircraft, list_aircraft, get_aircraft
+from app.repository.aircraft import create_aircraft, list_aircraft, get_aircraft, update_aircraft
 from app.database import get_session
 
 router = APIRouter(prefix="/api/v1/aircraft", tags=["aircrafts"])
@@ -22,6 +22,12 @@ async def api_list_aircraft(limit: int = Query(10, ge=1, le=100), page: int = Qu
     # items, total = await list_aircraft(session, limit=limit, offset=offset, search=search)
     # return items
 
+@router.put("/{aircraft_id}", response_model=aircraft_schema.AircraftUpdate)
+async def api_update(aircraft_id: int, aircraft_in: aircraft_schema.AircraftUpdate, session: AsyncSession = Depends(get_session)):
+    obj = await update_aircraft(session, aircraft_id, aircraft_in)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Flight not found")
+    return obj
 
 @router.get("/paged")
 async def api_list_paged(

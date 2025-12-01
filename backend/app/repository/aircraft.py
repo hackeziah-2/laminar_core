@@ -4,7 +4,7 @@ from fastapi import Query
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.aircraft import Aircraft
-from app.schemas.aircraft_schema import AircraftCreate, AircraftOut
+from app.schemas.aircraft_schema import AircraftCreate, AircraftOut, AircraftUpdate
 from typing import List, Optional, Tuple
 
 async def get_aircraft(session: AsyncSession, id: int) -> Optional[AircraftOut]:
@@ -40,3 +40,15 @@ async def list_aircraft(session: AsyncSession, limit: int =0, offset: int=0,
     res = await session.execute(stmt)
     items = res.scalars().all()
     return items, total_count
+
+
+async def update_aircraft(session: AsyncSession, aircraft_id: int, aircraft_in: AircraftUpdate) -> Optional[Aircraft]:
+    obj = await session.get(Aircraft, aircraft_id)
+    if not obj:
+        return None
+    for k, v in aircraft_in.dict(exclude_unset=True).items():
+        setattr(obj, k, v)
+    session.add(obj)
+    await session.commit()
+    await session.refresh(obj)
+    return obj
