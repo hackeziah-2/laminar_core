@@ -1,8 +1,7 @@
 
 from sqlalchemy import Enum
 from pydantic import BaseModel
-from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any
 
 class AircrarftStatus(str, Enum):
     active = "Active"
@@ -17,7 +16,6 @@ class AircraftBase(BaseModel):
     type: Optional[str]
     model: Optional[str]
     msn : Optional[str]
-    reg_no: Optional[str]
     base: Optional[str]
     ownership : Optional[str]
     status: Optional[str] = "Active"
@@ -31,16 +29,19 @@ class AircraftBase(BaseModel):
     # Engine Information
     engine_model: Optional[str]
     engine_serial_number: Optional[str]
-    engine_arc: Optional[str]
     
     # Propeller Information
     propeller_model: Optional[str]
     propeller_serial_number: Optional[str]
-    propeller_arc: Optional[str]
+
+    engine_arc: Optional[str] = None
+    propeller_arc: Optional[str] = None
 
 
 class AircraftCreate(AircraftBase):
-    pass
+    class Config:
+        orm_mode = True
+    
 
 class AircraftUpdate(AircraftBase):
     class Config:

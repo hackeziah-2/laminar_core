@@ -13,14 +13,12 @@ class Aircraft(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "aircrafts"
     
     id = Column(Integer, primary_key=True, index=True)
-    registration = Column(String(89), nullable=False, index=True)
+    registration = Column(String(89), nullable=False, unique=True, index=True)
     manufacturer = Column(String(89), nullable=False, index=True)
-    report_description = Column(Text)
-
+    report_description = Column(Text, nullable=True)
     type = Column(String, nullable=False, index=True)
     model = Column(String, nullable=False, index=True)
     msn = Column(String, nullable=False, unique=True, index=True)
-    reg_no = Column(String, nullable=False, unique=True, index=True)
     base = Column(String, nullable=False, index=True)
     ownership = Column(String, nullable=False)
     status = Column(SQLEnum(Status), default=Status.ACTIVE, nullable=True)
@@ -42,7 +40,7 @@ class Aircraft(Base, TimestampMixin, SoftDeleteMixin):
     propeller_arc = Column(String, nullable=True)
 
     def __repr__(self):
-        return f"<Aircraft(reg_no='{self.reg_no}', type='{self.type}', model='{self.model}')>"
+        return f"<Aircraft(reg='{self.registration}', type='{self.type}', model='{self.model}')>"
 
 
 class Airframe(Base, TimestampMixin, SoftDeleteMixin):
