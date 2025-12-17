@@ -194,3 +194,65 @@ async def create_aircraft_with_file(
     await session.commit()
     await session.refresh(aircraft)
     return AircraftOut.from_orm(aircraft)
+
+
+async def update_aircraft_with_file(
+    session: AsyncSession,
+    aircraft_id: int,
+    data: AircraftUpdate,
+    engine_file: UploadFile = None,
+    propeller_file: UploadFile = None,
+):
+    result = await session.execute(
+        select(Aircraft).where(Aircraft.id == aircraft_id)
+    )
+    aircraft = result.scalar_one_or_none()
+
+    if not aircraft:
+        raise HTTPException(status_code=404, detail="Aircraft not found")
+
+    update_data = data.dict(exclude_unset=True)
+
+    # --- Handle engine file ---
+    if engine_file:
+        engine_path = os.path.join(UPLOAD_DIR, engine_file.filename)
+        with open(engine_path, "wb") as f:
+            f.write(await engine_file.read())
+        update_data["engine_arc"] = engine_path
+
+    # --- Handle propeller file ---
+    if propeller_file:
+        propeller_path = os.path.join(UPLOAD_DIR, propeller_file.filename)
+        with open(propeller_path, "wb") as f:
+            f.write(await propeller_file.read())
+        update_data["propeller_arc"] = propeller_path
+
+    # --- Uniqueness checks (exclude current aircraft) ---
+    if "registration" in update_data:
+        result = await session.execute(
+            select(Aircraft).where(
+                Aircraft.registration == update_data["registration"],
+                Aircraft.id != aircraft_id
+            )
+        )
+        if result.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Registration already exists")
+
+    if "msn" in update_data:
+        result = await session.execute(
+            select(Aircraft).where(
+                Aircraft.msn == update_data["msn"],
+                Aircraft.id != aircraft_id
+            )
+        )
+        if result.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="MSN already exists")
+
+    # --- Apply updates ---
+    for key, value in update_data.items():
+        setattr(aircraft, key, value)
+    print("newsss")
+    await session.commit()
+    await session.refresh(aircraft)
+
+    return AircraftOut.from_orm(aircraft)

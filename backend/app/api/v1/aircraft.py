@@ -12,7 +12,8 @@ from app.schemas import aircraft_schema
 from app.repository.aircraft import (
     list_aircraft,
     get_aircraft, update_aircraft, 
-    create_aircraft_with_file
+    create_aircraft_with_file,
+    update_aircraft_with_file
 )
 from app.database import get_session
 from app.services.generate_report_excel import generate_excel
@@ -62,12 +63,12 @@ async def api_list_aircraft(limit: int = Query(10, ge=1, le=100), page: int = Qu
     pass
 
 
-@router.put("/{aircraft_id}", response_model=aircraft_schema.AircraftUpdate)
-async def api_update(aircraft_id: int, aircraft_in: aircraft_schema.AircraftUpdate, session: AsyncSession = Depends(get_session)):
-    obj = await update_aircraft(session, aircraft_id, aircraft_in)
-    if not obj:
-        raise HTTPException(status_code=404, detail="Flight not found")
-    return obj
+# @router.put("/{aircraft_id}", response_model=aircraft_schema.AircraftUpdate)
+# async def api_update(aircraft_id: int, aircraft_in: aircraft_schema.AircraftUpdate, session: AsyncSession = Depends(get_session)):
+#     obj = await update_aircraft(session, aircraft_id, aircraft_in)
+#     if not obj:
+#         raise HTTPException(status_code=404, detail="Flight not found")
+#     return obj
 
 @router.get("/paged")
 async def api_list_paged(
@@ -107,4 +108,22 @@ async def api_create_aircraft_with_file(
         data=aircraft_data,
         engine_file=engine_arc_file,
         propeller_file=propeller_arc_file
+    )
+
+@router.put("/{aircraft_id}", response_model=aircraft_schema.AircraftOut)
+async def api_update_aircraft_with_file(
+    aircraft_id: int,
+    json_data: str = Form(...),
+    engine_arc_file: UploadFile = File(None),
+    propeller_arc_file: UploadFile = File(None),
+    session: AsyncSession = Depends(get_session),
+):  
+    parsed = json.loads(json_data)
+    aircraft_data = aircraft_schema.AircraftUpdate(**parsed)
+    return await update_aircraft_with_file(
+        session=session,
+        aircraft_id=aircraft_id,
+        data=aircraft_data,
+        engine_file=engine_arc_file,
+        propeller_file=propeller_arc_file,
     )
