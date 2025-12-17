@@ -15,27 +15,121 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 async def get_aircraft(session: AsyncSession, id: int) -> Optional[AircraftOut]:
     return await session.get(Aircraft, id)
 
-async def list_aircraft(session: AsyncSession, limit: int =0, offset: int=0,
-    search: Optional[str]=None, status: Optional[str] = "all"):
+# async def list_aircraft(session: AsyncSession, limit: int =0, offset: int=0,
+#     search: Optional[str]=None, status: Optional[str] = "all", sort: str = "created_at", order: str = "desc"):
+#     stmt = select(Aircraft)
+#     if search:
+#         q = f"%{search}%"
+#         stmt = stmt.where(
+#             or_(Aircraft.registration.ilike(q),
+#                 (Aircraft.base.ilike(q)),
+#                 (Aircraft.model.ilike(q)),
+#             )
+#         )
+    
+#     # Status filter
+#     if status and status.lower() != "all":
+#         stmt = stmt.where(func.lower(cast(Aircraft.status, String)) == status.lower())
+
+#     sort_column  = getattr(Aircraft, sort, None)
+
+#     if sort_column is not None:
+#         if order.lower() == "asc":
+#             stmt = stmt.order_by(sort_column.asc())
+#         else:
+#             stmt = stmt.order_by(sort_column.desc())
+#     else:
+#         # fallback default
+#         stmt = stmt.order_by(Aircraft.created_at.desc())
+
+#     total = await session.execute(select(Aircraft).order_by(Aircraft.created_at.asc()))
+#     total_count = len(total.scalars().all())
+#     stmt = stmt.limit(limit).offset(offset)
+#     res = await session.execute(stmt)
+#     items = res.scalars().all()
+#     return items, total_count
+
+async def list_aircraft(
+    session: AsyncSession,
+    limit: int = 0,
+    offset: int = 0,
+    search: Optional[str] = None,
+    status: Optional[str] = "all",
+    sort: Optional[str] = "",
+):
     stmt = select(Aircraft)
+
+    # Search
     if search:
         q = f"%{search}%"
         stmt = stmt.where(
-            or_(Aircraft.registration.ilike(q),
-                (Aircraft.base.ilike(q)),
-                (Aircraft.model.ilike(q)),
+            or_(
+                Aircraft.registration.ilike(q),
+                Aircraft.base.ilike(q),
+                Aircraft.model.ilike(q),
             )
         )
-    
+
     # Status filter
     if status and status.lower() != "all":
-        stmt = stmt.where(func.lower(cast(Aircraft.status, String)) == status.lower())
-        
-    total = await session.execute(select(Aircraft).order_by(Aircraft.created_at.asc()))
-    total_count = len(total.scalars().all())
+        stmt = stmt.where(
+            func.lower(cast(Aircraft.status, String)) == status.lower()
+        )
+
+    # Whitelist sortable fields (IMPORTANT)
+    sortable_fields = {
+        "registration": Aircraft.registration,
+        "base": Aircraft.base,
+        "model": Aircraft.model,
+        "status": Aircraft.status,
+        "created_at": Aircraft.created_at,
+        "updated_at": Aircraft.updated_at,
+    }
+    
+    print(sort, "kkdsk")
+
+    # Multi-sort logic
+    if sort:
+        for field in sort.split(","):
+            desc_order = field.startswith("-")
+            field_name = field.lstrip("-")
+
+            column = sortable_fields.get(field_name)
+            if column is None:
+                continue  # ignore invalid fields safely
+
+            stmt = stmt.order_by(
+                column.desc() if desc_order else column.asc()
+            )
+    else:
+        stmt = stmt.order_by(Aircraft.created_at.desc())
+
+    # Total count (same filters, no ORDER BY)
+    count_stmt = select(func.count()).select_from(Aircraft)
+
+    if search:
+        q = f"%{search}%"
+        count_stmt = count_stmt.where(
+            or_(
+                Aircraft.registration.ilike(q),
+                Aircraft.base.ilike(q),
+                Aircraft.model.ilike(q),
+            )
+        )
+
+    if status and status.lower() != "all":
+        count_stmt = count_stmt.where(
+            func.lower(cast(Aircraft.status, String)) == status.lower()
+        )
+
+    total_count = (await session.execute(count_stmt)).scalar()
+
+    # Pagination
     stmt = stmt.limit(limit).offset(offset)
-    res = await session.execute(stmt)
-    items = res.scalars().all()
+
+    result = await session.execute(stmt)
+    items = result.scalars().all()
+
     return items, total_count
 
 

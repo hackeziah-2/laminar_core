@@ -1,7 +1,10 @@
 import json
 
 from math import ceil
+from typing import List, Dict
 from fastapi import APIRouter, Depends, Query, HTTPException, UploadFile, File, Form, Depends
+from fastapi.responses import StreamingResponse
+
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,9 +15,47 @@ from app.repository.aircraft import (
     create_aircraft_with_file
 )
 from app.database import get_session
+from app.services.generate_report_excel import generate_excel
+from app.services.generate_report_pdf import generate_pdf_report
 
 router = APIRouter(prefix="/api/v1/aircraft", tags=["aircrafts"])
 
+
+@router.post("/reports/excel")
+async def export_excel(data: List[Dict]):
+
+    title = "Aircraft Report"
+    file = generate_excel(data, title)
+    return StreamingResponse(
+        file,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=report_aircraft.xlsx"},
+    )
+
+@router.post("/reports/pdf")
+def export_pdf(aircraft_data: List[Dict]):
+    # Prepare headers and rows dynamically
+    headers = ["AC REG", "AIRCRAFT TYPE", "MODEL", "MSN", "BASE LOCATION", "STATUS", "CREATED AT"]
+    data_rows = [
+        [
+            ac["registration"],
+            ac["type"],
+            ac["model"],
+            ac["msn"],
+            ac["base"],
+            ac["status"],
+            ac["created_at"].split("T")[0]
+        ]
+        for ac in aircraft_data
+    ]
+    
+    pdf_file = generate_pdf_report("Aircraft Report", headers, data_rows, header_color="#007BFF")
+    
+    return StreamingResponse(
+        pdf_file,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=aircraft_report.pdf"},
+    )
 
 @router.get("/", response_model=List[aircraft_schema.AircraftOut])
 async def api_list_aircraft(limit: int = Query(10, ge=1, le=100), page: int = Query(1, ge=1), search: Optional[str] = None, session: AsyncSession = Depends(get_session)):
@@ -35,10 +76,11 @@ async def api_list_paged(
     search: Optional[str] = None, 
     status: aircraft_schema.AircrarftStatus | None = Query(
         None, description="Filter by status", enum=["active", "inactive", "maintenance"]),
+    sort: Optional[str] = "",
     session: AsyncSession = Depends(get_session)
 ):
     offset = (page - 1) * limit
-    items, total = await list_aircraft(session, limit=limit, offset=offset, search=search, status=status)
+    items, total = await list_aircraft(session,limit=limit, offset=offset, search=search, status=status, sort=sort)
     pages = ceil(total / limit) if total else 0
     return {"items": items, "total": total, "page": page, "pages": pages}
 
