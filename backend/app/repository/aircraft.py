@@ -15,40 +15,6 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 async def get_aircraft(session: AsyncSession, id: int) -> Optional[AircraftOut]:
     return await session.get(Aircraft, id)
 
-# async def list_aircraft(session: AsyncSession, limit: int =0, offset: int=0,
-#     search: Optional[str]=None, status: Optional[str] = "all", sort: str = "created_at", order: str = "desc"):
-#     stmt = select(Aircraft)
-#     if search:
-#         q = f"%{search}%"
-#         stmt = stmt.where(
-#             or_(Aircraft.registration.ilike(q),
-#                 (Aircraft.base.ilike(q)),
-#                 (Aircraft.model.ilike(q)),
-#             )
-#         )
-    
-#     # Status filter
-#     if status and status.lower() != "all":
-#         stmt = stmt.where(func.lower(cast(Aircraft.status, String)) == status.lower())
-
-#     sort_column  = getattr(Aircraft, sort, None)
-
-#     if sort_column is not None:
-#         if order.lower() == "asc":
-#             stmt = stmt.order_by(sort_column.asc())
-#         else:
-#             stmt = stmt.order_by(sort_column.desc())
-#     else:
-#         # fallback default
-#         stmt = stmt.order_by(Aircraft.created_at.desc())
-
-#     total = await session.execute(select(Aircraft).order_by(Aircraft.created_at.asc()))
-#     total_count = len(total.scalars().all())
-#     stmt = stmt.limit(limit).offset(offset)
-#     res = await session.execute(stmt)
-#     items = res.scalars().all()
-#     return items, total_count
-
 async def list_aircraft(
     session: AsyncSession,
     limit: int = 0,
@@ -86,8 +52,6 @@ async def list_aircraft(
         "updated_at": Aircraft.updated_at,
     }
     
-    print(sort, "kkdsk")
-
     # Multi-sort logic
     if sort:
         for field in sort.split(","):
@@ -195,7 +159,6 @@ async def create_aircraft_with_file(
     await session.refresh(aircraft)
     return AircraftOut.from_orm(aircraft)
 
-
 async def update_aircraft_with_file(
     session: AsyncSession,
     aircraft_id: int,
@@ -256,3 +219,15 @@ async def update_aircraft_with_file(
     await session.refresh(aircraft)
 
     return AircraftOut.from_orm(aircraft)
+
+async def soft_delete_aircraft(
+    session: AsyncSession, id: int
+) -> bool:
+    aircraft = await get_aircraft(session, id)
+
+    if not aircraft:
+        return False
+
+    aircraft.soft_delete()
+    await session.commit()
+    return True

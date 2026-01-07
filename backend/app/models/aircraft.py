@@ -1,10 +1,13 @@
 import enum
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, Text, Enum as SQLEnum
+from sqlalchemy.dialects.postgresql import ENUM as PGEnum
+from sqlalchemy.orm import relationship
+
 from app.database import Base, TimestampMixin, SoftDeleteMixin
 
 
-class Status(str, enum.Enum):
+class StatusEnum(str, enum.Enum):
     ACTIVE = "Active"
     INACTIVE = "Inactive"
     MAINTENANCE = "Maintenance"
@@ -21,7 +24,11 @@ class Aircraft(Base, TimestampMixin, SoftDeleteMixin):
     msn = Column(String, nullable=False, unique=True, index=True)
     base = Column(String, nullable=False, index=True)
     ownership = Column(String, nullable=False)
-    status = Column(SQLEnum(Status), default=Status.ACTIVE, nullable=True)
+    status = Column(
+        PGEnum(StatusEnum, name="status", create_type=True),  # PostgreSQL enum
+        default=StatusEnum.ACTIVE,
+        nullable=False
+    )
 
     # Airframe Information
     airframe_model = Column(String, nullable=True)
@@ -38,6 +45,8 @@ class Aircraft(Base, TimestampMixin, SoftDeleteMixin):
     propeller_model = Column(String, nullable=True)
     propeller_serial_number = Column(String, nullable=True)
     propeller_arc = Column(String, nullable=True)
+
+    logbook_entries = relationship("AircraftLogbookEntry", back_populates="aircraft")
 
     def __repr__(self):
         return f"<Aircraft(reg='{self.registration}', type='{self.type}', model='{self.model}')>"
@@ -62,6 +71,15 @@ class Engine(Base, TimestampMixin, SoftDeleteMixin):
 
 class Propeller(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "propeller"
+    id = Column(Integer, primary_key=True, index=True)
+    model = Column(String(144), nullable=False, index=True)
+    msd = Column(String(144), nullable=False, index=True)
+    arc = Column(String(144), nullable=False, index=True)
+    report_description = Column(Text)
+
+
+class AirframeTable(Base, TimestampMixin, SoftDeleteMixin):
+    __tablename__ = "airframe_tables"
     id = Column(Integer, primary_key=True, index=True)
     model = Column(String(144), nullable=False, index=True)
     msd = Column(String(144), nullable=False, index=True)

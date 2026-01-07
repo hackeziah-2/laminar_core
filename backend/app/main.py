@@ -5,6 +5,7 @@ from app.api.v1 import (
     flights as flights_router,
     aircraft as aircraft_router,
     auth as auth_router,
+    aircraft_technical_logbook as atl_router
 )
 from app.database import engine, Base
 
@@ -24,6 +25,7 @@ app.add_middleware(
 app.include_router(flights_router.router)
 app.include_router(auth_router.router)
 app.include_router(aircraft_router.router)
+app.include_router(atl_router.router)
 
 @app.on_event("startup")
 async def startup():
