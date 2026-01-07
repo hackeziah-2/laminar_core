@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: laminardb
+      POSTGRES_DB: laminar_database
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
