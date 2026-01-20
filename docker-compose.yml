@@ -1,53 +1,118 @@
-# version: '3.8'
 services:
   db:
-    image: postgres:15
+    image: postgres:15-alpine
+    container_name: laminar_db
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: laminar_database
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./backend/docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d
     ports:
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - laminar_network
 
   redis:
-    image: redis:7
+    image: redis:7-alpine
+    container_name: laminar_redis
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - laminar_network
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: laminar_backend
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
-      - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=${REDIS_URL}
-      - SECRET_KEY=${SECRET_KEY}
-      - DEBUG=${DEBUG}
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/laminar_database
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-in-production}
+      - DEBUG=${DEBUG:-False}
+      - PYTHONPATH=/app
     volumes:
       - ./backend:/app
+      - ./backend/uploads:/app/uploads
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/docs')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - laminar_network
 
   celery:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: laminar_celery
     command: celery -A app.worker.celery_app worker --loglevel=info
     depends_on:
-      - redis
-      - db
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
-      - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=${REDIS_URL}
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/laminar_database
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - PYTHONPATH=/app
+    volumes:
+      - ./backend:/app
+      - ./backend/uploads:/app/uploads
+    restart: unless-stopped
+    networks:
+      - laminar_network
 
   # flower:
-    # image: mher/flower:latest
-    # command: ["flower", "--broker=redis://redis:6379/0", "--port=5555"]
-    # ports:
-    #   - "5555:5555"
-    # depends_on:
-    #   - redis
+  #   build:
+  #     context: ./backend
+  #     dockerfile: Dockerfile
+  #   container_name: laminar_flower
+  #   command: celery -A app.worker.celery_app flower --port=5555
+  #   depends_on:
+  #     - redis
+  #     - celery
+  #   ports:
+  #     - "5555:5555"
+  #   environment:
+  #     - CELERY_BROKER_URL=redis://redis:6379/0
+  #     - CELERY_RESULT_BACKEND=redis://redis:6379/0
+  #   restart: unless-stopped
+  #   networks:
+  #     - laminar_network
 
 volumes:
   pgdata:
+    driver: local
+
+networks:
+  laminar_network:
+    driver: bridge

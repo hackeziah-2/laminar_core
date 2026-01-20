@@ -1,0 +1,212 @@
+from datetime import date, time, datetime
+from typing import Optional, List
+from pydantic import BaseModel, Field
+from app.models.aircraft_techinical_log import TypeEnum
+
+
+# ---------- Component Parts Record Schemas ----------
+class ComponentPartsRecordBase(BaseModel):
+    qty: float
+    unit: str = Field(..., max_length=20)
+    nomenclature: str = Field(..., max_length=255)
+    removed_part_no: Optional[str] = Field(None, max_length=100)
+    removed_serial_no: Optional[str] = Field(None, max_length=100)
+    installed_part_no: Optional[str] = Field(None, max_length=100)
+    installed_serial_no: Optional[str] = Field(None, max_length=100)
+    part_description: Optional[str] = None
+    ata_chapter: Optional[str] = Field(None, max_length=50)
+
+
+class ComponentPartsRecordCreate(ComponentPartsRecordBase):
+    pass
+
+
+class ComponentPartsRecordUpdate(BaseModel):
+    qty: Optional[float] = None
+    unit: Optional[str] = Field(None, max_length=20)
+    nomenclature: Optional[str] = Field(None, max_length=255)
+    removed_part_no: Optional[str] = Field(None, max_length=100)
+    removed_serial_no: Optional[str] = Field(None, max_length=100)
+    installed_part_no: Optional[str] = Field(None, max_length=100)
+    installed_serial_no: Optional[str] = Field(None, max_length=100)
+    part_description: Optional[str] = None
+    ata_chapter: Optional[str] = Field(None, max_length=50)
+
+
+class ComponentPartsRecordRead(ComponentPartsRecordBase):
+    id: int
+
+    class Config:
+        orm_mode = True
+
+
+# ---------- Aircraft Technical Log Base Schema ----------
+class AircraftTechnicalLogBase(BaseModel):
+    aircraft_fk: int
+    sequence_no: str = Field(..., max_length=50)
+    nature_of_flight: TypeEnum = TypeEnum.TR
+    next_inspection_due: Optional[str] = Field(None, max_length=100)
+    tach_time_due: Optional[float] = None
+
+    origin_station: str = Field(..., max_length=50)
+    origin_date: date
+    origin_time: time
+
+    destination_station: str = Field(..., max_length=50)
+    destination_date: date
+    destination_time: time
+
+    number_of_landings: int
+
+    hobbs_meter_start: float
+    hobbs_meter_end: float
+    hobbs_meter_total: float
+
+    tachometer_start: float
+    tachometer_end: float
+    tachometer_total: float
+
+    # Airframe time fields
+    airframe_prev_time: Optional[float] = None
+    airframe_flight_time: Optional[float] = None
+    airframe_total_time: Optional[float] = None
+
+    # Engine time fields
+    engine_prev_time: Optional[float] = None
+    engine_flight_time: Optional[float] = None
+    engine_total_time: Optional[float] = None
+
+    # Propeller time fields
+    propeller_prev_time: Optional[float] = None
+    propeller_flight_time: Optional[float] = None
+    propeller_total_time: Optional[float] = None
+
+    fuel_qty_left_uplift_qty: Optional[float] = None
+    fuel_qty_right_uplift_qty: Optional[float] = None
+    fuel_qty_left_prior_departure: Optional[float] = None
+    fuel_qty_right_prior_departure: Optional[float] = None
+    fuel_qty_left_after_on_blks: Optional[float] = None
+    fuel_qty_right_after_on_blks: Optional[float] = None
+
+    oil_qty_uplift_qty: Optional[float] = None
+    oil_qty_prior_departure: Optional[float] = None
+    oil_qty_after_on_blks: Optional[float] = None
+
+    remarks: Optional[str] = None
+    actions_taken: Optional[str] = None
+
+    pilot_fk: Optional[int] = None
+    maintenance_fk: Optional[int] = None
+
+    pilot_accepted_by: Optional[int] = None
+    pilot_accept_date: Optional[date] = None
+    pilot_accept_time: Optional[time] = None
+
+    rts_signed_by: Optional[int] = None
+    rts_date: Optional[date] = None
+    rts_time: Optional[time] = None
+
+    white_atl: Optional[str] = None
+    dfp: Optional[str] = None
+
+    component_parts: Optional[List[ComponentPartsRecordCreate]] = []
+
+
+# ---------- Aircraft Technical Log Create Schema ----------
+class AircraftTechnicalLogCreate(AircraftTechnicalLogBase):
+    pass
+
+
+# ---------- Aircraft Technical Log Update Schema ----------
+class AircraftTechnicalLogUpdate(BaseModel):
+    aircraft_fk: Optional[int] = None
+    sequence_no: Optional[str] = Field(None, max_length=50)
+    nature_of_flight: Optional[TypeEnum] = None
+    next_inspection_due: Optional[str] = Field(None, max_length=100)
+    tach_time_due: Optional[float] = None
+
+    origin_station: Optional[str] = Field(None, max_length=50)
+    origin_date: Optional[date] = None
+    origin_time: Optional[time] = None
+
+    destination_station: Optional[str] = Field(None, max_length=50)
+    destination_date: Optional[date] = None
+    destination_time: Optional[time] = None
+
+    number_of_landings: Optional[int] = None
+
+    hobbs_meter_start: Optional[float] = None
+    hobbs_meter_end: Optional[float] = None
+    hobbs_meter_total: Optional[float] = None
+
+    tachometer_start: Optional[float] = None
+    tachometer_end: Optional[float] = None
+    tachometer_total: Optional[float] = None
+
+    # Airframe time fields
+    airframe_prev_time: Optional[float] = None
+    airframe_flight_time: Optional[float] = None
+    airframe_total_time: Optional[float] = None
+
+    # Engine time fields
+    engine_prev_time: Optional[float] = None
+    engine_flight_time: Optional[float] = None
+    engine_total_time: Optional[float] = None
+
+    # Propeller time fields
+    propeller_prev_time: Optional[float] = None
+    propeller_flight_time: Optional[float] = None
+    propeller_total_time: Optional[float] = None
+
+    fuel_qty_left_uplift_qty: Optional[float] = None
+    fuel_qty_right_uplift_qty: Optional[float] = None
+    fuel_qty_left_prior_departure: Optional[float] = None
+    fuel_qty_right_prior_departure: Optional[float] = None
+    fuel_qty_left_after_on_blks: Optional[float] = None
+    fuel_qty_right_after_on_blks: Optional[float] = None
+
+    oil_qty_uplift_qty: Optional[float] = None
+    oil_qty_prior_departure: Optional[float] = None
+    oil_qty_after_on_blks: Optional[float] = None
+
+    remarks: Optional[str] = None
+    actions_taken: Optional[str] = None
+
+    pilot_fk: Optional[int] = None
+    maintenance_fk: Optional[int] = None
+
+    pilot_accepted_by: Optional[int] = None
+    pilot_accept_date: Optional[date] = None
+    pilot_accept_time: Optional[time] = None
+
+    rts_signed_by: Optional[int] = None
+    rts_date: Optional[date] = None
+    rts_time: Optional[time] = None
+
+    white_atl: Optional[str] = None
+    dfp: Optional[str] = None
+
+    component_parts: Optional[List[ComponentPartsRecordCreate]] = None
+
+
+# ---------- Aircraft Read Schema (for nested display) ----------
+class AircraftRead(BaseModel):
+    id: int
+    registration: str
+    model: str
+    type: str
+
+    class Config:
+        orm_mode = True
+
+
+# ---------- Aircraft Technical Log Read Schema ----------
+class AircraftTechnicalLogRead(AircraftTechnicalLogBase):
+    id: int
+    aircraft: AircraftRead
+    component_parts: List[ComponentPartsRecordRead] = []
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        orm_mode = True
