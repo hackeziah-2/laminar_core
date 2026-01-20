@@ -13,7 +13,13 @@ UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)  
 
 async def get_aircraft(session: AsyncSession, id: int) -> Optional[AircraftOut]:
-    return await session.get(Aircraft, id)
+    result = await session.execute(
+        select(Aircraft).where(Aircraft.id == id).where(Aircraft.is_deleted == False)
+    )
+    aircraft = result.scalar_one_or_none()
+    if not aircraft:
+        return None
+    return AircraftOut.from_orm(aircraft)
 
 async def list_aircraft(
     session: AsyncSession,
@@ -23,7 +29,7 @@ async def list_aircraft(
     status: Optional[str] = "all",
     sort: Optional[str] = "",
 ):
-    stmt = select(Aircraft)
+    stmt = select(Aircraft).where(Aircraft.is_deleted == False)
 
     # Search
     if search:
@@ -69,7 +75,11 @@ async def list_aircraft(
         stmt = stmt.order_by(Aircraft.created_at.desc())
 
     # Total count (same filters, no ORDER BY)
-    count_stmt = select(func.count()).select_from(Aircraft)
+    count_stmt = (
+        select(func.count())
+        .select_from(Aircraft)
+        .where(Aircraft.is_deleted == False)
+    )
 
     if search:
         q = f"%{search}%"

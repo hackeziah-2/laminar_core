@@ -1,44 +1,47 @@
-# FROM python:3.11-slim
-# WORKDIR /app
-# COPY ./ /app
-# ENV PYTHONPATH=/app
-# RUN apt-get update \
-#     && apt-get install -y --no-install-recommends \
-#         build-essential \
-#         libpq-dev \
-#     && apt-get clean \
-#     && rm -rf /var/lib/apt/lists/*
-
-# RUN pip install --upgrade pip
-# RUN pip install --no-cache-dir -r requirements.txt
-# ENV PYTHONUNBUFFERED=1
-# CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
-# # "celery", "--broker=redis://redis:6379/0", "flower", 
-
-
 FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies for psycopg2, pycairo/reportlab
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
     libcairo2-dev \
     pkg-config \
     python3-dev \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip
-RUN pip install --upgrade pip
+RUN pip install --upgrade pip setuptools wheel
+
+# Copy requirements first for better layer caching
+COPY requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy application code
 COPY . .
 
-ENV PYTHONUNBUFFERED=1
+# Create non-root user for security
+RUN useradd -m -u 1000 appuser && \
+    chown -R appuser:appuser /app
 
+USER appuser
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/docs')" || exit 1
+
+# Run the application
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

@@ -6,7 +6,10 @@ from alembic import context
 from dotenv import load_dotenv
 
 load_dotenv()
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql+asyncpg://postgres:postgres@db:5432/laminar_database"
+)
 
 config = context.config
 fileConfig(config.config_file_name)
@@ -16,6 +19,9 @@ from app.models.aircraft import Aircraft
 from app.models.flight import Flight
 from app.models.user import User
 from app.models.aircraft_logbook_entries import AircraftLogbookEntry
+from app.models.aircraft_techinical_log import AircraftTechnicalLog, ComponentPartsRecord
+from app.models.atl_monitoring import LDNDMonitoring
+from app.models.account import AccountInformation
 
 target_metadata = Base.metadata
 
