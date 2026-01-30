@@ -18,10 +18,16 @@ from app.api.v1 import (
 from app.database import engine, Base
 
 app = FastAPI(title="Laminar API")
-origins = [
+
+# CORS: allow localhost (dev) and deployment frontend; override via ALLOWED_ORIGINS env (comma-separated)
+_default_origins = [
     "http://localhost:3000",
-    "http://127.0.0.1:3000"
+    "http://127.0.0.1:3000",
+    "http://120.89.33.51:3000",   # Deployment frontend
+    "http://120.89.33.51:8000",   # Backend (e.g. for docs from same host)
 ]
+_env_origins = os.getenv("ALLOWED_ORIGINS", "").strip()
+origins = [o.strip() for o in _env_origins.split(",") if o.strip()] if _env_origins else _default_origins
 
 app.add_middleware(
     CORSMiddleware,
