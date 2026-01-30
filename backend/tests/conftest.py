@@ -97,6 +97,20 @@ def test_aircraft_data():
 
 
 @pytest.fixture(scope="function")
+def aircraft_id(client: TestClient, test_aircraft_data: dict) -> int:
+    """Create an aircraft and return its ID for use in logbook tests."""
+    import json
+    json_data = json.dumps(test_aircraft_data)
+    response = client.post(
+        "/api/v1/aircraft/",
+        data={"json_data": json_data},
+        files={}
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
+
+
+@pytest.fixture(scope="function")
 def test_aircraft_technical_log_data():
     """Sample aircraft technical log data for testing."""
     return {

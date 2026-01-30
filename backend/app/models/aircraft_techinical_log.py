@@ -44,11 +44,11 @@ class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin):
 
     origin_station = Column(String(50), nullable=False)
     origin_date = Column(Date, nullable=False)
-    origin_time = Column(Time(timezone=True), nullable=False)
+    origin_time = Column(Time(timezone=False), nullable=False)
 
     destination_station = Column(String(50), nullable=False)
     destination_date = Column(Date, nullable=False)
-    destination_time = Column(Time(timezone=True), nullable=False)
+    destination_time = Column(Time(timezone=False), nullable=False)
 
     number_of_landings = Column(Integer, nullable=False)
 
@@ -91,16 +91,19 @@ class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin):
     remarks = Column(Text)
     actions_taken = Column(Text)
 
+    remark_person = Column(Integer, ForeignKey("account_information.id"), nullable=True)
+    actiontaken_person = Column(Integer, ForeignKey("account_information.id"), nullable=True)
+
     pilot_fk = Column(Integer, ForeignKey("account_information.id"), nullable=True)
     maintenance_fk = Column(Integer, ForeignKey("account_information.id"), nullable=True)
 
     pilot_accepted_by = Column(Integer, ForeignKey("account_information.id"), nullable=True)
     pilot_accept_date = Column(Date, nullable=True)
-    pilot_accept_time = Column(Time(timezone=True), nullable=True)
+    pilot_accept_time = Column(Time(timezone=False), nullable=True)
 
     rts_signed_by = Column(Integer, ForeignKey("account_information.id"), nullable=True)
     rts_date = Column(Date, nullable=True)
-    rts_time = Column(Time(timezone=True), nullable=True)
+    rts_time = Column(Time(timezone=False), nullable=True)
 
     white_atl = Column(Text)
     dfp =  Column(Text)
@@ -140,4 +143,4 @@ class ComponentPartsRecord(Base, TimestampMixin, SoftDeleteMixin):
     atl = relationship("AircraftTechnicalLog", back_populates="component_parts")
     
     def __repr__(self):
-        return f"{self.id}'- {self.part_description}>"
+        return f"<ComponentPartsRecord(id={self.id}, desc='{self.part_description}')>"

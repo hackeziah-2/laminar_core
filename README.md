@@ -15,10 +15,42 @@ Inside `backend/`:
 
 The scaffold includes an initial migration in `backend/alembic/versions/`.
 
+**Alembic setup & Docker deployment (step by step):** See **[backend/README_DATABASE.md](backend/README_DATABASE.md)** for:
+- **Alembic setup** – config, creating migrations, running migrations (local and Docker)
+- **Docker run for deployment** – prerequisites, build, start, verify migrations, access API
+- **Clean database** – reset to empty and regenerate tables for a fresh deployment
+
 ## Authentication
 - Register: POST /api/v1/auth/register
 - Token: POST /api/v1/auth/token (use OAuth2 password flow)
 - Use `Authorization: Bearer <token>` to access protected endpoints.
+
+## Document On Board
+
+Documents-on-board can be accessed globally or scoped to a specific aircraft.
+
+### Global endpoints (`/api/v1/documents-on-board/`)
+- **List (paginated):** GET `/api/v1/documents-on-board/paged?limit=10&page=1&aircraft_id=&search=&status=&sort=`
+- **Get by ID:** GET `/api/v1/documents-on-board/{document_id}`
+- **Create:** POST `/api/v1/documents-on-board/` (form: `json_data`, optional `upload_file`)
+- **Update:** PUT `/api/v1/documents-on-board/{document_id}` (form: `json_data`, optional `upload_file`)
+- **Delete:** DELETE `/api/v1/documents-on-board/{document_id}`
+
+### Document-on-board aircraft (scoped by aircraft)
+All operations are scoped to a specific aircraft. Use these when working with documents for one aircraft.
+
+- **List (paginated):** GET `/api/v1/aircraft/{aircraft_id}/documents-on-board/paged?limit=10&page=1&search=&status=&sort=`
+- **Get by ID:** GET `/api/v1/aircraft/{aircraft_id}/documents-on-board/{document_id}`
+- **Create:** POST `/api/v1/aircraft/{aircraft_id}/documents-on-board/` (form: `json_data`, optional `upload_file`; `aircraft_id` in path overrides body)
+- **Update:** PUT `/api/v1/aircraft/{aircraft_id}/documents-on-board/{document_id}` (form: `json_data`, optional `upload_file`)
+- **Delete:** DELETE `/api/v1/aircraft/{aircraft_id}/documents-on-board/{document_id}`
+
+Example (aircraft ID 5):
+- List: `GET http://localhost:8000/api/v1/aircraft/5/documents-on-board/paged?limit=10&page=1`
+- Get: `GET http://localhost:8000/api/v1/aircraft/5/documents-on-board/3`
+- Create: `POST http://localhost:8000/api/v1/aircraft/5/documents-on-board/`
+- Update: `PUT http://localhost:8000/api/v1/aircraft/5/documents-on-board/3`
+- Delete: `DELETE http://localhost:8000/api/v1/aircraft/5/documents-on-board/3`
 
 ## Testing
 

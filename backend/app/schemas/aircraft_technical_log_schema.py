@@ -1,7 +1,25 @@
 from datetime import date, time, datetime
-from typing import Optional, List
-from pydantic import BaseModel, Field
+from typing import Optional, List, Any
+from pydantic import BaseModel, Field, validator
 from app.models.aircraft_techinical_log import TypeEnum
+
+
+def parse_zulu_time_to_time(value: Any) -> Optional[time]:
+    """Parse Zulu time string (HH:MM or HH:MM:SS, 24-hour) to Python time object."""
+    if value is None:
+        return None
+    if isinstance(value, time):
+        return value
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return None
+        if len(s) == 5:  # HH:MM
+            return datetime.strptime(s, "%H:%M").time()
+        if len(s) == 8:  # HH:MM:SS
+            return datetime.strptime(s, "%H:%M:%S").time()
+        raise ValueError(f"Invalid time format: '{value}'. Use HH:MM or HH:MM:SS (24-hour).")
+    return value
 
 
 # ---------- Component Parts Record Schemas ----------
@@ -58,11 +76,11 @@ class AircraftTechnicalLogBase(BaseModel):
 
     number_of_landings: int
 
-    hobbs_meter_start: float
+    hobbs_meter_start: Optional[float] = Field(None, description="Auto-populated from previous ATL entry if not provided")
     hobbs_meter_end: float
     hobbs_meter_total: float
 
-    tachometer_start: float
+    tachometer_start: Optional[float] = Field(None, description="Auto-populated from previous ATL entry if not provided")
     tachometer_end: float
     tachometer_total: float
 
@@ -95,6 +113,9 @@ class AircraftTechnicalLogBase(BaseModel):
     remarks: Optional[str] = None
     actions_taken: Optional[str] = None
 
+    remark_person: Optional[int] = None
+    actiontaken_person: Optional[int] = None
+
     pilot_fk: Optional[int] = None
     maintenance_fk: Optional[int] = None
 
@@ -110,6 +131,11 @@ class AircraftTechnicalLogBase(BaseModel):
     dfp: Optional[str] = None
 
     component_parts: Optional[List[ComponentPartsRecordCreate]] = []
+
+    @validator("origin_time", "destination_time", "pilot_accept_time", "rts_time", pre=True)
+    def parse_time_fields(cls, v: Any) -> Any:
+        """Accept Zulu time strings (HH:MM or HH:MM:SS, 24-hour) and convert to time."""
+        return parse_zulu_time_to_time(v)
 
 
 # ---------- Aircraft Technical Log Create Schema ----------
@@ -172,6 +198,9 @@ class AircraftTechnicalLogUpdate(BaseModel):
     remarks: Optional[str] = None
     actions_taken: Optional[str] = None
 
+    remark_person: Optional[int] = None
+    actiontaken_person: Optional[int] = None
+
     pilot_fk: Optional[int] = None
     maintenance_fk: Optional[int] = None
 
@@ -188,6 +217,11 @@ class AircraftTechnicalLogUpdate(BaseModel):
 
     component_parts: Optional[List[ComponentPartsRecordCreate]] = None
 
+    @validator("origin_time", "destination_time", "pilot_accept_time", "rts_time", pre=True)
+    def parse_time_fields(cls, v: Any) -> Any:
+        """Accept Zulu time strings (HH:MM or HH:MM:SS) and convert to time."""
+        return parse_zulu_time_to_time(v)
+
 
 # ---------- Aircraft Read Schema (for nested display) ----------
 class AircraftRead(BaseModel):
@@ -203,7 +237,7 @@ class AircraftRead(BaseModel):
 # ---------- Aircraft Technical Log Read Schema ----------
 class AircraftTechnicalLogRead(AircraftTechnicalLogBase):
     id: int
-    aircraft: AircraftRead
+    aircraft: Optional[AircraftRead] = None
     component_parts: List[ComponentPartsRecordRead] = []
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

@@ -22,6 +22,8 @@ from app.models.aircraft_logbook_entries import AircraftLogbookEntry
 from app.models.aircraft_techinical_log import AircraftTechnicalLog, ComponentPartsRecord
 from app.models.atl_monitoring import LDNDMonitoring
 from app.models.account import AccountInformation
+from app.models.logbooks import EngineLogbook, AirframeLogbook, AvionicsLogbook, PropellerLogbook
+from app.models.document_on_board import DocumentOnBoard
 
 target_metadata = Base.metadata
 

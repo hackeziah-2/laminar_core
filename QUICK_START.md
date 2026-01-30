@@ -112,6 +112,9 @@ docker-compose exec backend alembic current
 - **Database**: localhost:5432
 - **Redis**: localhost:6379
 
+### Document-on-board aircraft
+Documents for a specific aircraft: `/api/v1/aircraft/{aircraft_id}/documents-on-board/` (list: `.../paged`, get: `.../{document_id}`, create: POST `.../`, update: PUT `.../{document_id}`, delete: DELETE `.../{document_id}`). See README **Document On Board** section for full details.
+
 ---
 
 ## 🧪 Running Tests

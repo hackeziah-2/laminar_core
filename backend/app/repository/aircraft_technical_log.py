@@ -25,10 +25,12 @@ async def create_aircraft_technical_log(
     data: AircraftTechnicalLogCreate
 ) -> AircraftTechnicalLogRead:
     """Create a new Aircraft Technical Log entry."""
-    # Check duplicate sequence_no
+    # Check duplicate sequence_no (only check non-deleted records)
     result = await session.execute(
         select(AircraftTechnicalLog).where(
             AircraftTechnicalLog.sequence_no == data.sequence_no
+        ).where(
+            AircraftTechnicalLog.is_deleted == False
         )
     )
     existing = result.scalar_one_or_none()
@@ -36,13 +38,45 @@ async def create_aircraft_technical_log(
     if existing:
         raise HTTPException(
             status_code=400,
-            detail="Aircraft Technical Log with this Sequence Number already exists"
+            detail=f"Sequence No. {data.sequence_no} already exists. Please use a different Sequence No."
         )
 
     # Convert enum string to enum if needed
     log_data = data.dict(exclude={'component_parts'})
     if isinstance(log_data.get('nature_of_flight'), str):
         log_data['nature_of_flight'] = TypeEnum(log_data['nature_of_flight'])
+
+    # Auto-populate hobbs_meter_start and tachometer_start from latest ATL if not provided
+    if log_data.get('hobbs_meter_start') is None or log_data.get('tachometer_start') is None:
+        # Get the latest ATL entry for this aircraft
+        latest_stmt = (
+            select(AircraftTechnicalLog)
+            .where(AircraftTechnicalLog.aircraft_fk == data.aircraft_fk)
+            .where(AircraftTechnicalLog.is_deleted == False)
+            .order_by(AircraftTechnicalLog.sequence_no.desc())
+            .limit(1)
+        )
+        latest_result = await session.execute(latest_stmt)
+        latest_atl = latest_result.scalar_one_or_none()
+
+        if latest_atl:
+            # Use end values from previous entry as start values for new entry
+            if log_data.get('hobbs_meter_start') is None:
+                log_data['hobbs_meter_start'] = latest_atl.hobbs_meter_end
+            if log_data.get('tachometer_start') is None:
+                log_data['tachometer_start'] = latest_atl.tachometer_end
+        else:
+            # No previous entry exists, require these fields
+            if log_data.get('hobbs_meter_start') is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="hobbs_meter_start is required for the first ATL entry of this aircraft"
+                )
+            if log_data.get('tachometer_start') is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="tachometer_start is required for the first ATL entry of this aircraft"
+                )
 
     # Create main log entry
     entry = AircraftTechnicalLog(**log_data)
@@ -98,6 +132,10 @@ async def update_aircraft_technical_log(
     # Update main fields
     update_data = log_in.dict(exclude_unset=True, exclude={'component_parts'})
     
+    # Remove hobbs_meter_start and tachometer_start from updates (read-only fields)
+    update_data.pop('hobbs_meter_start', None)
+    update_data.pop('tachometer_start', None)
+    
     # Handle enum conversion
     if 'nature_of_flight' in update_data and isinstance(update_data['nature_of_flight'], str):
         update_data['nature_of_flight'] = TypeEnum(update_data['nature_of_flight'])
@@ -144,7 +182,10 @@ async def list_aircraft_technical_logs(
     """List Aircraft Technical Log entries with pagination."""
     stmt = (
         select(AircraftTechnicalLog)
-        .options(selectinload(AircraftTechnicalLog.aircraft))
+        .options(
+            selectinload(AircraftTechnicalLog.aircraft),
+            selectinload(AircraftTechnicalLog.component_parts)
+        )
         .where(AircraftTechnicalLog.is_deleted == False)
     )
 
@@ -237,6 +278,39 @@ async def list_aircraft_technical_logs(
     items = result.scalars().all()
 
     return items, total
+
+
+async def get_latest_aircraft_technical_log(
+    session: AsyncSession,
+    aircraft_fk: Optional[int] = None
+) -> Optional[AircraftTechnicalLogRead]:
+    """Get the latest Aircraft Technical Log entry by sequence_no."""
+    stmt = (
+        select(AircraftTechnicalLog)
+        .options(
+            selectinload(AircraftTechnicalLog.aircraft),
+            selectinload(AircraftTechnicalLog.component_parts)
+        )
+        .where(AircraftTechnicalLog.is_deleted == False)
+    )
+    
+    # Filter by aircraft if provided
+    if aircraft_fk:
+        stmt = stmt.where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
+    
+    # Order by sequence_no descending to get the latest
+    stmt = stmt.order_by(AircraftTechnicalLog.sequence_no.desc())
+    
+    # Get the first result
+    stmt = stmt.limit(1)
+    
+    result = await session.execute(stmt)
+    obj = result.scalar_one_or_none()
+    
+    if not obj:
+        return None
+    
+    return AircraftTechnicalLogRead.from_orm(obj)
 
 
 async def soft_delete_aircraft_technical_log(

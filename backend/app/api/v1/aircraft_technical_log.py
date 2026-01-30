@@ -15,6 +15,7 @@ from app.schemas import aircraft_technical_log_schema
 from app.repository.aircraft_technical_log import (
     list_aircraft_technical_logs,
     get_aircraft_technical_log,
+    get_latest_aircraft_technical_log,
     create_aircraft_technical_log,
     update_aircraft_technical_log,
     soft_delete_aircraft_technical_log
@@ -50,12 +51,37 @@ async def api_list_paged(
         sort=sort,
     )
     pages = ceil(total / limit) if total else 0
+    
+    # Convert items to Pydantic schemas to include component_parts
+    items_schemas = [
+        aircraft_technical_log_schema.AircraftTechnicalLogRead.from_orm(item)
+        for item in items
+    ]
+    
     return {
-        "items": items,
+        "items": items_schemas,
         "total": total,
         "page": page,
         "pages": pages
     }
+
+
+@router.get(
+    "/latest",
+    response_model=aircraft_technical_log_schema.AircraftTechnicalLogRead
+)
+async def api_get_latest(
+    aircraft_fk: Optional[int] = Query(None, description="Filter by aircraft ID"),
+    session: AsyncSession = Depends(get_session)
+):
+    """Get the latest Aircraft Technical Log entry by sequence_no."""
+    obj = await get_latest_aircraft_technical_log(session, aircraft_fk=aircraft_fk)
+    if not obj:
+        raise HTTPException(
+            status_code=404,
+            detail="No Aircraft Technical Log entries found"
+        )
+    return obj
 
 
 @router.get(
