@@ -100,7 +100,7 @@ async def api_delet_aircraft(aircraft_id: int, session: AsyncSession = Depends(g
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Aircraft not found",
         )
-    return {"ok": True}
+    return None
 
 # @router.delete("/{flight_id}")
 # async def api_delete(flight_id: int, session: AsyncSession = Depends(get_session)):

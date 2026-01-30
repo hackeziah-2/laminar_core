@@ -4,21 +4,79 @@ Complete deployment commands for the Laminar Core application.
 
 ## Prerequisites
 
-- Docker and Docker Compose installed
+- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) installed
 - Git (for cloning the repository)
 - Environment variables configured (optional)
 
 ## Table of Contents
 
-1. [Initial Setup](#initial-setup)
-2. [Development Deployment](#development-deployment)
-3. [Database Setup](#database-setup)
-4. [Running Migrations](#running-migrations)
-5. [Starting Services](#starting-services)
-6. [Collation Fix](#collation-fix)
-7. [Production Deployment](#production-deployment)
-8. [Maintenance Commands](#maintenance-commands)
-9. [Troubleshooting](#troubleshooting)
+1. [Deployment Steps (Command Summary)](#deployment-steps-command-summary)
+2. [Initial Setup](#initial-setup)
+3. [Development Deployment](#development-deployment)
+4. [Database Setup](#database-setup)
+5. [Running Migrations](#running-migrations)
+6. [Starting Services](#starting-services)
+7. [Collation Fix](#collation-fix)
+8. [Production Deployment](#production-deployment)
+9. [Maintenance Commands](#maintenance-commands)
+10. [Troubleshooting](#troubleshooting)
+
+---
+
+## Deployment Steps (Command Summary)
+
+Run these commands in order for a full deployment from scratch.
+
+### Step 1: Clone the repository
+```bash
+git clone <repository-url>
+cd laminar_core
+```
+
+### Step 2: (Optional) Create `.env` file
+```bash
+# Create .env in project root with:
+# DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/laminar_database
+# SECRET_KEY=your-secret-key-change-in-production
+# DEBUG=False
+```
+
+### Step 3: Stop any existing containers and volumes
+```bash
+docker-compose down -v
+```
+
+### Step 4: Build and start all services
+```bash
+docker-compose up --build -d
+```
+
+### Step 5: Wait for services to be healthy (optional check)
+```bash
+docker-compose ps
+```
+
+### Step 6: Run database migrations
+```bash
+docker-compose exec backend alembic upgrade head
+```
+
+### Step 7: Verify deployment
+```bash
+# Check migration status (optional)
+docker-compose exec backend alembic current
+
+# Open API docs in browser
+# http://localhost:8000/docs
+
+# Or check with curl
+curl http://localhost:8000/docs
+```
+
+### One-line deployment (all steps)
+```bash
+docker-compose down -v && docker-compose up --build -d && docker-compose exec backend alembic upgrade head
+```
 
 ---
 

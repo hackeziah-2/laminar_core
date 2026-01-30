@@ -233,11 +233,14 @@ async def update_aircraft_with_file(
 async def soft_delete_aircraft(
     session: AsyncSession, id: int
 ) -> bool:
-    aircraft = await get_aircraft(session, id)
-
+    result = await session.execute(
+        select(Aircraft).where(Aircraft.id == id).where(Aircraft.is_deleted == False)
+    )
+    aircraft = result.scalar_one_or_none()
     if not aircraft:
         return False
 
     aircraft.soft_delete()
+    session.add(aircraft)
     await session.commit()
     return True

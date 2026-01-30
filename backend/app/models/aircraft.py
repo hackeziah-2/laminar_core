@@ -51,6 +51,11 @@ class Aircraft(Base, TimestampMixin, SoftDeleteMixin):
     atl_logs = relationship("AircraftTechnicalLog", back_populates="aircraft")
     ldnd_records = relationship("LDNDMonitoring", back_populates="aircraft")
 
+    engine_logbooks = relationship("EngineLogbook", foreign_keys="EngineLogbook.aircraft_fk", back_populates="aircraft")
+    airframe_logbooks = relationship("AirframeLogbook", foreign_keys="AirframeLogbook.aircraft_fk", back_populates="aircraft")
+    avionics_logbooks = relationship("AvionicsLogbook", foreign_keys="AvionicsLogbook.aircraft_fk", back_populates="aircraft")
+    propeller_logbooks = relationship("PropellerLogbook", foreign_keys="PropellerLogbook.aircraft_fk", back_populates="aircraft")
+
     def __repr__(self):
         return f"<Aircraft(reg='{self.registration}', type='{self.type}', model='{self.model}')>"
 
