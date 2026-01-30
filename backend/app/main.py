@@ -36,6 +36,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/api/v1/", tags=["health"])
+async def api_v1_root():
+    """Health/connectivity check for API v1. Use this to verify backend is running and CORS allows the request."""
+    return {"status": "ok", "version": "v1", "message": "Laminar API v1"}
+
+
 app.include_router(flights_router.router)
 app.include_router(auth_router.router)
 app.include_router(aircraft_router.router)
