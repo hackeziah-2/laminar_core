@@ -7,6 +7,64 @@ Quick start:
 2. docker compose up --build
 3. API docs: http://localhost:8000/docs
 
+---
+
+## How to Deploy
+
+### Prerequisites
+- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) installed
+- Git (for cloning the repository)
+
+### Step 1: Clone and enter the project
+```bash
+git clone <repository-url>
+cd laminar_core
+```
+
+### Step 2: Environment variables (optional)
+Create a `.env` file in the project root if you need to override defaults:
+```bash
+# Example .env
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/laminar_database
+SECRET_KEY=your-secret-key-change-in-production
+DEBUG=False
+```
+
+### Step 3: Build and start services
+```bash
+# Build and run all services (db, redis, backend, celery)
+docker-compose up --build -d
+
+# Check that services are running
+docker-compose ps
+```
+
+### Step 4: Run database migrations
+```bash
+# Apply all migrations (creates/updates tables)
+docker-compose exec backend alembic upgrade head
+
+# Optional: verify migration status
+docker-compose exec backend alembic current
+```
+
+### Step 5: Verify deployment
+- **API docs:** http://localhost:8000/docs  
+- **Health:** Open the docs URL or `curl http://localhost:8000/docs`  
+- **Logs:** `docker-compose logs -f backend`
+
+### Quick deploy (one-shot)
+```bash
+docker-compose up -d --build && docker-compose exec backend alembic upgrade head
+```
+
+### Production notes
+- Set a strong `SECRET_KEY` in `.env`.
+- Use a managed PostgreSQL and Redis in production if possible.
+- Run behind a reverse proxy (e.g. Nginx) with HTTPS.
+- See **[DEPLOYMENT.md](DEPLOYMENT.md)** for production deployment, collation fix, and troubleshooting.
+
+---
 
 ## Alembic Migrations
 Inside `backend/`:
