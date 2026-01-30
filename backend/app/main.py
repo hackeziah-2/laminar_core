@@ -21,8 +21,8 @@ app = FastAPI(title="Laminar API")
 
 # CORS: allow localhost (dev) and deployment frontend; override via ALLOWED_ORIGINS env (comma-separated)
 _default_origins = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
+    # "http://localhost:3000",
+    # "http://127.0.0.1:3000",
     "http://120.89.33.51:3000",   # Deployment frontend
     "http://120.89.33.51:8000",   # Backend (e.g. for docs from same host)
 ]
