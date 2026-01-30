@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from fastapi import HTTPException, UploadFile
 
+from app.models.aircraft import Aircraft
 from app.models.document_on_board import DocumentOnBoard, DocumentStatusEnum
 from app.schemas.document_on_board_schema import (
     DocumentOnBoardCreate,
@@ -67,13 +68,14 @@ async def list_documents_on_board(
         .where(DocumentOnBoard.is_deleted == False)
     )
 
-    # Search
-    if search:
-        q = f"%{search}%"
-        stmt = stmt.where(
+    # Search (strip whitespace; treat empty as no search): document_name, description, aircraft registration
+    if search and search.strip():
+        q = f"%{search.strip()}%"
+        stmt = stmt.join(Aircraft, DocumentOnBoard.aircraft_id == Aircraft.id).where(
             or_(
                 DocumentOnBoard.document_name.ilike(q),
-                cast(DocumentOnBoard.description, String).ilike(q),
+                func.coalesce(cast(DocumentOnBoard.description, String), "").ilike(q),
+                Aircraft.registration.ilike(q),
             )
         )
 
@@ -118,12 +120,13 @@ async def list_documents_on_board(
         .where(DocumentOnBoard.is_deleted == False)
     )
 
-    if search:
-        q = f"%{search}%"
-        count_stmt = count_stmt.where(
+    if search and search.strip():
+        q = f"%{search.strip()}%"
+        count_stmt = count_stmt.join(Aircraft, DocumentOnBoard.aircraft_id == Aircraft.id).where(
             or_(
                 DocumentOnBoard.document_name.ilike(q),
-                cast(DocumentOnBoard.description, String).ilike(q),
+                func.coalesce(cast(DocumentOnBoard.description, String), "").ilike(q),
+                Aircraft.registration.ilike(q),
             )
         )
 
