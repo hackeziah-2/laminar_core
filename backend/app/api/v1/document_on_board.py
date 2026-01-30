@@ -56,7 +56,7 @@ def clean_parsed_data(parsed: dict) -> dict:
 async def api_list_documents_on_board_paged(
     limit: int = Query(10, ge=1, le=100, description="Number of items per page"),
     page: int = Query(1, ge=1, description="Page number (1-indexed)"),
-    search: Optional[str] = Query(None, description="Search in document_name and description fields"),
+    search: Optional[str] = Query(None, description="Search in document_name, description, and aircraft registration"),
     aircraft_id: Optional[int] = Query(None, description="Filter by aircraft ID"),
     status: Optional[str] = Query(None, description="Filter by status"),
     sort: Optional[str] = Query("", description="Sort fields (comma-separated). Prefix with '-' for descending. Example: -created_at,document_name"),
@@ -64,11 +64,12 @@ async def api_list_documents_on_board_paged(
 ):
     """Get paginated list of DocumentOnBoard entries."""
     offset = (page - 1) * limit
+    search_param = search.strip() if search and search.strip() else None
     items, total = await list_documents_on_board(
         session=session,
         limit=limit,
         offset=offset,
-        search=search,
+        search=search_param,
         aircraft_id=aircraft_id,
         status=status,
         sort=sort,
@@ -234,11 +235,12 @@ async def api_list_documents_on_board_by_aircraft_paged(
     if not aircraft:
         raise HTTPException(status_code=404, detail="Aircraft not found")
     offset = (page - 1) * limit
+    search_param = search.strip() if search and search.strip() else None
     items, total = await list_documents_on_board(
         session=session,
         limit=limit,
         offset=offset,
-        search=search,
+        search=search_param,
         aircraft_id=aircraft_id,
         status=status,
         sort=sort,
