@@ -24,6 +24,7 @@ from app.models.atl_monitoring import LDNDMonitoring
 from app.models.account import AccountInformation
 from app.models.logbooks import EngineLogbook, AirframeLogbook, AvionicsLogbook, PropellerLogbook
 from app.models.document_on_board import DocumentOnBoard
+from app.models.ad_monitoring import ADMonitoring, WorkOrderADMonitoring
 
 target_metadata = Base.metadata
 
