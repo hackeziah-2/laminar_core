@@ -50,6 +50,7 @@ class Aircraft(Base, TimestampMixin, SoftDeleteMixin):
 
     atl_logs = relationship("AircraftTechnicalLog", back_populates="aircraft")
     ldnd_records = relationship("LDNDMonitoring", back_populates="aircraft")
+    ad_records = relationship("ADMonitoring", back_populates="aircraft")
 
     engine_logbooks = relationship("EngineLogbook", foreign_keys="EngineLogbook.aircraft_fk", back_populates="aircraft")
     airframe_logbooks = relationship("AirframeLogbook", foreign_keys="AirframeLogbook.aircraft_fk", back_populates="aircraft")

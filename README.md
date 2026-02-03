@@ -5,7 +5,7 @@ Run locally with Docker Compose.
 Quick start:
 1. Copy `.env.example` to `.env` and adjust if needed.
 2. docker compose up --build
-3. API docs: http://localhost:8000/docs
+3. API docs: http://localhost:8000/docs (interactive: [/docs](http://localhost:8000/docs#/))
 
 ---
 
@@ -49,7 +49,7 @@ docker-compose exec backend alembic current
 ```
 
 ### Step 5: Verify deployment
-- **API docs:** http://localhost:8000/docs  
+- **API docs (interactive):** http://localhost:8000/docs#/  
 - **Health:** Open the docs URL or `curl http://localhost:8000/docs`  
 - **Logs:** `docker-compose logs -f backend`
 
@@ -109,6 +109,42 @@ Example (aircraft ID 5):
 - Create: `POST http://localhost:8000/api/v1/aircraft/5/documents-on-board/`
 - Update: `PUT http://localhost:8000/api/v1/aircraft/5/documents-on-board/3`
 - Delete: `DELETE http://localhost:8000/api/v1/aircraft/5/documents-on-board/3`
+
+## AD Monitoring
+
+AD monitoring is scoped by aircraft; work-order AD monitoring has `ad_monitoring_fk` (FK to AD) and can be used globally or scoped under aircraft → ad_monitoring. Interactive API: [http://localhost:8000/docs#/](http://localhost:8000/docs#/).
+
+### Aircraft-scoped AD monitoring – `api/v1/aircraft/{aircraft_fk}/ad_monitoring/` (CRUD)
+
+| Method        | Path |
+|---------------|------|
+| GET (paged)   | `GET /api/v1/aircraft/{aircraft_fk}/ad_monitoring/paged` |
+| GET one       | `GET /api/v1/aircraft/{aircraft_fk}/ad_monitoring/{ad_id}` |
+| POST          | `POST /api/v1/aircraft/{aircraft_fk}/ad_monitoring/` |
+| PUT           | `PUT /api/v1/aircraft/{aircraft_fk}/ad_monitoring/{ad_id}` |
+| DELETE        | `DELETE /api/v1/aircraft/{aircraft_fk}/ad_monitoring/{ad_id}` |
+
+### Work-order AD monitoring (global) – `api/v1/work-order-ad-monitoring/` (CRUD)
+
+Body/query includes `ad_monitoring_fk`. Filter list by `?ad_monitoring_fk=`.
+
+| Method        | Path |
+|---------------|------|
+| GET (paged)   | `GET /api/v1/work-order-ad-monitoring/paged?ad_monitoring_fk=` |
+| GET one       | `GET /api/v1/work-order-ad-monitoring/{work_order_id}` |
+| POST          | `POST /api/v1/work-order-ad-monitoring/` |
+| PUT           | `PUT /api/v1/work-order-ad-monitoring/{work_order_id}` |
+| DELETE        | `DELETE /api/v1/work-order-ad-monitoring/{work_order_id}` |
+
+### Work-order AD monitoring (aircraft-scoped) – `api/v1/aircraft/{aircraft_fk}/ad_monitoring/{ad_monitoring_fk}/work-order-ad-monitoring/` (CRUD)
+
+| Method        | Path |
+|---------------|------|
+| GET (paged)   | `GET /api/v1/aircraft/{aircraft_fk}/ad_monitoring/{ad_monitoring_fk}/work-order-ad-monitoring/paged` |
+| GET one       | `GET /api/v1/aircraft/{aircraft_fk}/ad_monitoring/{ad_monitoring_fk}/work-order-ad-monitoring/{work_order_id}` |
+| POST          | `POST /api/v1/aircraft/{aircraft_fk}/ad_monitoring/{ad_monitoring_fk}/work-order-ad-monitoring/` |
+| PUT           | `PUT /api/v1/aircraft/{aircraft_fk}/ad_monitoring/{ad_monitoring_fk}/work-order-ad-monitoring/{work_order_id}` |
+| DELETE        | `DELETE /api/v1/aircraft/{aircraft_fk}/ad_monitoring/{ad_monitoring_fk}/work-order-ad-monitoring/{work_order_id}` |
 
 ## Testing
 
