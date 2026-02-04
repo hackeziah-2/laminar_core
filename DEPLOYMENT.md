@@ -484,6 +484,29 @@ After deployment, access the application at:
 
 ---
 
+## Frontend and file uploads
+
+When the frontend (e.g. FLEET_MANAGEMENT) is served at **http://120.89.33.51:3000/** and the backend at **http://120.89.33.51:8000/**:
+
+- **All API requests (including file uploads) must go to the backend URL (port 8000).**
+- If the frontend is configured with `baseURL` or API base pointing to the same host as the app (e.g. `http://120.89.33.51:3000`), upload requests will hit the frontend server, which does not have the API routes. The file will never reach the backend and will not be saved to the `uploads` folder.
+
+**Fix:** In the frontend project, set the API base URL to the backend, for example:
+
+- `VITE_API_BASE_URL=http://120.89.33.51:8000/api/v1` (or equivalent env for your build)
+- Or ensure your reverse proxy forwards `/api` from port 3000 to the backend on port 8000.
+
+**Verify backend and uploads:**
+
+```bash
+# Health (confirms backend is reachable and uploads dir is writable)
+curl http://120.89.33.51:8000/api/v1/health
+```
+
+The response includes `uploads_exists` and `uploads_writable`; both should be `true` for uploads to work.
+
+---
+
 ## Notes
 
 - Always backup the database before running migrations in production
