@@ -50,27 +50,12 @@ async def api_v1_root():
     return {"status": "ok", "version": "v1", "message": "Laminar API v1"}
 
 
-app.include_router(flights_router.router)
-app.include_router(auth_router.router)
-# Aircraft-scoped sub-routes first (longer paths) so /api/v1/aircraft/{id}/.../ is matched correctly
-app.include_router(document_on_board_router.router_aircraft_scoped)
-app.include_router(ldnd_monitoring_router.router_aircraft_scoped)
-app.include_router(ad_monitoring_router.router_aircraft_scoped)
-app.include_router(aircraft_router.router)
-app.include_router(atl_router.router)
-app.include_router(atl_new_router.router)
-app.include_router(account_router.router)
-app.include_router(logbooks_router.router)
-app.include_router(document_on_board_router.router)
-app.include_router(ldnd_monitoring_router.router)
-app.include_router(ad_monitoring_router.router)
-app.include_router(ad_monitoring_router.router_work_order)
-
 # Shared upload directory
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-
+# Register download route BEFORE module routers so /api/v1/{module}/download/{filename}
+# is matched here instead of being claimed by a module router (e.g. /api/v1/logbooks) and returning 404.
 @app.get(
     "/api/v1/{module_folder}/download/{filename:path}",
     summary="Download uploaded file",
@@ -82,7 +67,7 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 )
 async def download_file(module_folder: str, filename: str):
     """Download an uploaded file from the uploads directory.
-    
+
     Args:
         module_folder: The module name (e.g., 'logbooks', 'aircraft') - used for organization
         filename: The filename or path to the file (e.g., 'myfile.pdf' or 'uploads/myfile.pdf')
@@ -101,6 +86,23 @@ async def download_file(module_folder: str, filename: str):
         filename=file_path.name,
         media_type="application/octet-stream"
     )
+
+
+app.include_router(flights_router.router)
+app.include_router(auth_router.router)
+# Aircraft-scoped sub-routes first (longer paths) so /api/v1/aircraft/{id}/.../ is matched correctly
+app.include_router(document_on_board_router.router_aircraft_scoped)
+app.include_router(ldnd_monitoring_router.router_aircraft_scoped)
+app.include_router(ad_monitoring_router.router_aircraft_scoped)
+app.include_router(aircraft_router.router)
+app.include_router(atl_router.router)
+app.include_router(atl_new_router.router)
+app.include_router(account_router.router)
+app.include_router(logbooks_router.router)
+app.include_router(document_on_board_router.router)
+app.include_router(ldnd_monitoring_router.router)
+app.include_router(ad_monitoring_router.router)
+app.include_router(ad_monitoring_router.router_work_order)
 
 @app.on_event("startup")
 async def startup():
