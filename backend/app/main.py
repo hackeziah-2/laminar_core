@@ -50,8 +50,8 @@ async def api_v1_root():
     return {"status": "ok", "version": "v1", "message": "Laminar API v1"}
 
 
-# Shared upload directory
-UPLOAD_DIR = Path("uploads")
+# Shared upload directory (absolute so path resolution does not depend on CWD)
+UPLOAD_DIR = (Path(__file__).resolve().parent.parent / "uploads").resolve()
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 # Register download route BEFORE module routers so /api/v1/{module}/download/{filename}
@@ -72,13 +72,16 @@ async def download_file(module_folder: str, filename: str):
         module_folder: The module name (e.g., 'logbooks', 'aircraft') - used for organization
         filename: The filename or path to the file (e.g., 'myfile.pdf' or 'uploads/myfile.pdf')
     """
-    # Handle both cases: just filename or full path (e.g., "uploads/filename.pdf")
-    if filename.startswith("uploads/") or filename.startswith("uploads\\"):
-        file_path = Path(filename)
-    else:
-        file_path = UPLOAD_DIR / filename
+    # Normalize: strip path traversal and resolve relative to UPLOAD_DIR
+    filename = filename.lstrip("/").replace("\\", "/")
+    if filename.startswith("uploads/"):
+        filename = filename[8:]  # strip leading "uploads/"
+    if not filename or ".." in filename:
+        raise HTTPException(status_code=404, detail="File not found")
 
-    if not file_path.is_file():
+    file_path = (UPLOAD_DIR / filename).resolve()
+    # Ensure resolved path stays inside UPLOAD_DIR (path traversal safety)
+    if not str(file_path).startswith(str(UPLOAD_DIR)) or not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
 
     return FileResponse(
