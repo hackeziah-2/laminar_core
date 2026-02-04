@@ -50,6 +50,28 @@ async def api_v1_root():
     return {"status": "ok", "version": "v1", "message": "Laminar API v1"}
 
 
+@app.get("/api/v1/health", tags=["health"])
+async def api_v1_health():
+    """Health check including uploads directory. Use this URL from the BACKEND host (e.g. :8000), not the frontend (:3000)."""
+    uploads_ok = UPLOAD_DIR.is_dir()
+    try:
+        # Probe write access (create then remove a file)
+        probe = UPLOAD_DIR / ".write_probe"
+        probe.touch()
+        probe.unlink()
+        uploads_writable = True
+    except OSError:
+        uploads_writable = False
+    return {
+        "status": "ok",
+        "version": "v1",
+        "uploads_dir": str(UPLOAD_DIR),
+        "uploads_exists": uploads_ok,
+        "uploads_writable": uploads_writable,
+        "note": "File uploads and all API calls must target this backend (e.g. http://host:8000), not the frontend (e.g. :3000).",
+    }
+
+
 # Shared upload directory (absolute so path resolution does not depend on CWD)
 UPLOAD_DIR = (Path(__file__).resolve().parent.parent / "uploads").resolve()
 UPLOAD_DIR.mkdir(exist_ok=True)
@@ -65,23 +87,49 @@ UPLOAD_DIR.mkdir(exist_ok=True)
     response_description="File download",
     tags=["files"]
 )
+def _is_safe_module(name: str) -> bool:
+    """Allow only alphanumeric and underscore (no path traversal)."""
+    return bool(name) and name.replace("_", "").replace("-", "").isalnum()
+
+
+def _safe_under_uploads(base: Path, *parts: str) -> Path | None:
+    """Build path under UPLOAD_DIR; return None if invalid or file missing."""
+    try:
+        path = base
+        for p in parts:
+            if not p or ".." in p or "/" in p or "\\" in p:
+                return None
+            path = path / p
+        path = path.resolve()
+        if not str(path).startswith(str(base)) or not path.is_file():
+            return None
+        return path
+    except Exception:
+        return None
+
+
 async def download_file(module_folder: str, filename: str):
     """Download an uploaded file from the uploads directory.
 
     Args:
-        module_folder: The module name (e.g., 'logbooks', 'aircraft') - used for organization
+        module_folder: The module name (e.g., 'logbooks', 'white_atl') - used for lookup and organization
         filename: The filename or path to the file (e.g., 'myfile.pdf' or 'uploads/myfile.pdf')
     """
     # Normalize: strip path traversal and resolve relative to UPLOAD_DIR
     filename = filename.lstrip("/").replace("\\", "/")
     if filename.startswith("uploads/"):
         filename = filename[8:]  # strip leading "uploads/"
-    if not filename or ".." in filename:
+    # Strip any leading module path so we only have the base name for lookup
+    base_name = filename.split("/")[-1] if "/" in filename else filename
+    if not base_name or ".." in base_name:
         raise HTTPException(status_code=404, detail="File not found")
 
-    file_path = (UPLOAD_DIR / filename).resolve()
-    # Ensure resolved path stays inside UPLOAD_DIR (path traversal safety)
-    if not str(file_path).startswith(str(UPLOAD_DIR)) or not file_path.is_file():
+    # Try 1: flat path (uploads/ATL.jpg) – how repositories currently save
+    file_path = _safe_under_uploads(UPLOAD_DIR, filename)
+    # Try 2: module subfolder (uploads/white_atl/ATL.jpg) – if files are stored per module
+    if file_path is None and module_folder and _is_safe_module(module_folder):
+        file_path = _safe_under_uploads(UPLOAD_DIR, module_folder, base_name)
+    if file_path is None:
         raise HTTPException(status_code=404, detail="File not found")
 
     return FileResponse(
