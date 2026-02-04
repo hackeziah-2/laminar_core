@@ -8,13 +8,14 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies
+# Install system dependencies (gosu for dropping root in entrypoint)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
     libcairo2-dev \
     pkg-config \
     python3-dev \
+    gosu \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -34,11 +35,12 @@ COPY . .
 RUN useradd -m -u 1000 appuser && \
     chown -R appuser:appuser /app
 
-# Entrypoint runs migrations then starts the app
+# Entrypoint runs as root to fix uploads permissions, then drops to appuser
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
-USER appuser
+# Run as root so entrypoint can chown uploads; entrypoint drops to appuser
+# USER appuser
 
 # Expose port
 EXPOSE 8000
