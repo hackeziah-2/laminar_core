@@ -7,6 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from fastapi import HTTPException, UploadFile
 
+from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
+
+ensure_uploads_dir()
+
 from app.models.aircraft import Aircraft
 from app.models.document_on_board import DocumentOnBoard, DocumentStatusEnum
 from app.schemas.document_on_board_schema import (
@@ -14,10 +18,6 @@ from app.schemas.document_on_board_schema import (
     DocumentOnBoardUpdate,
     DocumentOnBoardRead,
 )
-
-UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
 
 async def get_document_on_board(
     session: AsyncSession, document_id: int
@@ -175,8 +175,8 @@ async def create_document_on_board(
 
     # Handle file upload
     if upload_file and upload_file.filename:
-        file_path = os.path.join(UPLOAD_DIR, upload_file.filename)
-        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
+        ensure_uploads_dir()
         with open(file_path, "wb") as f:
             content = await upload_file.read()
             f.write(content)
@@ -231,8 +231,8 @@ async def update_document_on_board(
 
     # Handle file upload
     if upload_file and upload_file.filename:
-        file_path = os.path.join(UPLOAD_DIR, upload_file.filename)
-        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
+        ensure_uploads_dir()
         with open(file_path, "wb") as f:
             content = await upload_file.read()
             f.write(content)

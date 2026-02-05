@@ -7,8 +7,9 @@ from sqlalchemy import select, func, or_, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
+
+ensure_uploads_dir()
 
 from app.models.logbooks import (
     EngineLogbook,
@@ -43,7 +44,7 @@ async def create_engine_logbook(
     
     # Handle file upload
     if upload_file:
-        file_path = os.path.join(UPLOAD_DIR, upload_file.filename)
+        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
         with open(file_path, "wb") as f:
             f.write(await upload_file.read())
         logbook_data["upload_file"] = file_path
@@ -162,7 +163,7 @@ async def update_engine_logbook(
     
     # Handle file upload
     if upload_file:
-        file_path = os.path.join(UPLOAD_DIR, upload_file.filename)
+        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
         with open(file_path, "wb") as f:
             f.write(await upload_file.read())
         update_data["upload_file"] = file_path
@@ -206,7 +207,7 @@ async def create_airframe_logbook(
     
     # Handle file upload
     if upload_file:
-        file_path = os.path.join(UPLOAD_DIR, upload_file.filename)
+        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
         with open(file_path, "wb") as f:
             f.write(await upload_file.read())
         logbook_data["upload_file"] = file_path
@@ -325,7 +326,7 @@ async def update_airframe_logbook(
     
     # Handle file upload
     if upload_file:
-        file_path = os.path.join(UPLOAD_DIR, upload_file.filename)
+        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
         with open(file_path, "wb") as f:
             f.write(await upload_file.read())
         update_data["upload_file"] = file_path
@@ -369,7 +370,7 @@ async def create_avionics_logbook(
     
     # Handle file upload
     if upload_file:
-        file_path = os.path.join(UPLOAD_DIR, upload_file.filename)
+        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
         with open(file_path, "wb") as f:
             f.write(await upload_file.read())
         logbook_data["upload_file"] = file_path
@@ -494,7 +495,7 @@ async def update_avionics_logbook(
     
     # Handle file upload
     if upload_file:
-        file_path = os.path.join(UPLOAD_DIR, upload_file.filename)
+        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
         with open(file_path, "wb") as f:
             f.write(await upload_file.read())
         update_data["upload_file"] = file_path
@@ -538,7 +539,7 @@ async def create_propeller_logbook(
     
     # Handle file upload
     if upload_file:
-        file_path = os.path.join(UPLOAD_DIR, upload_file.filename)
+        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
         with open(file_path, "wb") as f:
             f.write(await upload_file.read())
         logbook_data["upload_file"] = file_path
@@ -657,7 +658,7 @@ async def update_propeller_logbook(
     
     # Handle file upload
     if upload_file:
-        file_path = os.path.join(UPLOAD_DIR, upload_file.filename)
+        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
         with open(file_path, "wb") as f:
             f.write(await upload_file.read())
         update_data["upload_file"] = file_path
