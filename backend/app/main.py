@@ -66,9 +66,7 @@ app.include_router(ldnd_monitoring_router.router)
 app.include_router(ad_monitoring_router.router)
 app.include_router(ad_monitoring_router.router_work_order)
 
-# Shared upload directory
-UPLOAD_DIR = Path("uploads")
-UPLOAD_DIR.mkdir(exist_ok=True)
+from app.core.upload_path import UPLOAD_DIR
 
 
 @app.get(
@@ -87,13 +85,14 @@ async def download_file(module_folder: str, filename: str):
         module_folder: The module name (e.g., 'logbooks', 'aircraft') - used for organization
         filename: The filename or path to the file (e.g., 'myfile.pdf' or 'uploads/myfile.pdf')
     """
-    # Handle both cases: just filename or full path (e.g., "uploads/filename.pdf")
-    if filename.startswith("uploads/") or filename.startswith("uploads\\"):
-        file_path = Path(filename)
-    else:
-        file_path = UPLOAD_DIR / filename
-
-    if not file_path.is_file():
+    # Resolve filename under UPLOAD_DIR (accept "filename" or "uploads/filename")
+    filename = filename.lstrip("/").replace("\\", "/")
+    if filename.startswith("uploads/"):
+        filename = filename[8:]
+    if not filename or ".." in filename:
+        raise HTTPException(status_code=404, detail="File not found")
+    file_path = (UPLOAD_DIR / filename).resolve()
+    if not str(file_path).startswith(str(UPLOAD_DIR)) or not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
 
     return FileResponse(

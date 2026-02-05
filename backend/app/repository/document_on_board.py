@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from fastapi import HTTPException, UploadFile
 
+from app.core.upload_path import UPLOAD_DIR
 from app.models.aircraft import Aircraft
 from app.models.document_on_board import DocumentOnBoard, DocumentStatusEnum
 from app.schemas.document_on_board_schema import (
@@ -14,9 +15,6 @@ from app.schemas.document_on_board_schema import (
     DocumentOnBoardUpdate,
     DocumentOnBoardRead,
 )
-
-UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 async def get_document_on_board(
@@ -173,14 +171,13 @@ async def create_document_on_board(
     else:
         document_data.pop("status", None)
 
-    # Handle file upload
+    # Handle file upload (absolute path for write; store relative for DB/download)
     if upload_file and upload_file.filename:
-        file_path = os.path.join(UPLOAD_DIR, upload_file.filename)
-        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        file_path = UPLOAD_DIR / upload_file.filename
+        file_path.parent.mkdir(parents=True, exist_ok=True)
         with open(file_path, "wb") as f:
-            content = await upload_file.read()
-            f.write(content)
-        document_data["file_path"] = file_path
+            f.write(await upload_file.read())
+        document_data["file_path"] = f"uploads/{upload_file.filename}"
 
     try:
         document = DocumentOnBoard(**document_data)
@@ -229,14 +226,13 @@ async def update_document_on_board(
         except (KeyError, ValueError, AttributeError):
             update_data["status"] = DocumentStatusEnum.ACTIVE.value
 
-    # Handle file upload
+    # Handle file upload (absolute path for write; store relative for DB/download)
     if upload_file and upload_file.filename:
-        file_path = os.path.join(UPLOAD_DIR, upload_file.filename)
-        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        file_path = UPLOAD_DIR / upload_file.filename
+        file_path.parent.mkdir(parents=True, exist_ok=True)
         with open(file_path, "wb") as f:
-            content = await upload_file.read()
-            f.write(content)
-        update_data["file_path"] = file_path
+            f.write(await upload_file.read())
+        update_data["file_path"] = f"uploads/{upload_file.filename}"
 
     for k, v in update_data.items():
         setattr(obj, k, v)

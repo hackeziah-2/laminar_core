@@ -5,12 +5,11 @@ from sqlalchemy.sql import func
 from fastapi import Query, Depends, UploadFile, File, Form, HTTPException
 
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.upload_path import UPLOAD_DIR
 from app.models.aircraft import Aircraft
 from app.schemas.aircraft_schema import AircraftCreate, AircraftOut, AircraftUpdate
-from typing import List, Optional, Tuple
-
-UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)  
+from typing import List, Optional, Tuple  
 
 async def get_aircraft(session: AsyncSession, id: int) -> Optional[AircraftOut]:
     result = await session.execute(
@@ -125,16 +124,20 @@ async def create_aircraft_with_file(
     propeller_file: UploadFile = None,
 ):  
     engine_path = None
-    if engine_file:
-        engine_path = os.path.join(UPLOAD_DIR, engine_file.filename)
-        with open(engine_path, "wb") as f:
+    if engine_file and engine_file.filename:
+        file_path = UPLOAD_DIR / engine_file.filename
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(file_path, "wb") as f:
             f.write(await engine_file.read())
+        engine_path = f"uploads/{engine_file.filename}"
 
     propeller_path = None
-    if propeller_file:
-        propeller_path = os.path.join(UPLOAD_DIR, propeller_file.filename)
-        with open(propeller_path, "wb") as f:
+    if propeller_file and propeller_file.filename:
+        file_path = UPLOAD_DIR / propeller_file.filename
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(file_path, "wb") as f:
             f.write(await propeller_file.read())
+        propeller_path = f"uploads/{propeller_file.filename}"
 
     aircraft_data = data.dict()
 
@@ -187,18 +190,20 @@ async def update_aircraft_with_file(
     update_data = data.dict(exclude_unset=True)
 
     # --- Handle engine file ---
-    if engine_file:
-        engine_path = os.path.join(UPLOAD_DIR, engine_file.filename)
-        with open(engine_path, "wb") as f:
+    if engine_file and engine_file.filename:
+        file_path = UPLOAD_DIR / engine_file.filename
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(file_path, "wb") as f:
             f.write(await engine_file.read())
-        update_data["engine_arc"] = engine_path
+        update_data["engine_arc"] = f"uploads/{engine_file.filename}"
 
     # --- Handle propeller file ---
-    if propeller_file:
-        propeller_path = os.path.join(UPLOAD_DIR, propeller_file.filename)
-        with open(propeller_path, "wb") as f:
+    if propeller_file and propeller_file.filename:
+        file_path = UPLOAD_DIR / propeller_file.filename
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(file_path, "wb") as f:
             f.write(await propeller_file.read())
-        update_data["propeller_arc"] = propeller_path
+        update_data["propeller_arc"] = f"uploads/{propeller_file.filename}"
 
     # --- Uniqueness checks (exclude current aircraft) ---
     if "registration" in update_data:

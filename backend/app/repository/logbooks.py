@@ -7,9 +7,7 @@ from sqlalchemy import select, func, or_, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
+from app.core.upload_path import UPLOAD_DIR
 from app.models.logbooks import (
     EngineLogbook,
     AirframeLogbook,
@@ -41,12 +39,13 @@ async def create_engine_logbook(
     """Create a new Engine Logbook entry."""
     logbook_data = data.dict()
     
-    # Handle file upload
-    if upload_file:
-        file_path = os.path.join(UPLOAD_DIR, upload_file.filename)
+    # Handle file upload (absolute path for write; store relative for DB/download)
+    if upload_file and upload_file.filename:
+        file_path = UPLOAD_DIR / upload_file.filename
+        file_path.parent.mkdir(parents=True, exist_ok=True)
         with open(file_path, "wb") as f:
             f.write(await upload_file.read())
-        logbook_data["upload_file"] = file_path
+        logbook_data["upload_file"] = f"uploads/{upload_file.filename}"
     
     entry = EngineLogbook(**logbook_data)
     try:
@@ -161,11 +160,12 @@ async def update_engine_logbook(
     update_data = logbook_in.dict(exclude_unset=True)
     
     # Handle file upload
-    if upload_file:
-        file_path = os.path.join(UPLOAD_DIR, upload_file.filename)
+    if upload_file and upload_file.filename:
+        file_path = UPLOAD_DIR / upload_file.filename
+        file_path.parent.mkdir(parents=True, exist_ok=True)
         with open(file_path, "wb") as f:
             f.write(await upload_file.read())
-        update_data["upload_file"] = file_path
+        update_data["upload_file"] = f"uploads/{upload_file.filename}"
     
     for k, v in update_data.items():
         setattr(obj, k, v)
@@ -205,11 +205,12 @@ async def create_airframe_logbook(
     logbook_data = data.dict()
     
     # Handle file upload
-    if upload_file:
-        file_path = os.path.join(UPLOAD_DIR, upload_file.filename)
+    if upload_file and upload_file.filename:
+        file_path = UPLOAD_DIR / upload_file.filename
+        file_path.parent.mkdir(parents=True, exist_ok=True)
         with open(file_path, "wb") as f:
             f.write(await upload_file.read())
-        logbook_data["upload_file"] = file_path
+        logbook_data["upload_file"] = f"uploads/{upload_file.filename}"
     
     entry = AirframeLogbook(**logbook_data)
     try:
@@ -324,11 +325,12 @@ async def update_airframe_logbook(
     update_data = logbook_in.dict(exclude_unset=True)
     
     # Handle file upload
-    if upload_file:
-        file_path = os.path.join(UPLOAD_DIR, upload_file.filename)
+    if upload_file and upload_file.filename:
+        file_path = UPLOAD_DIR / upload_file.filename
+        file_path.parent.mkdir(parents=True, exist_ok=True)
         with open(file_path, "wb") as f:
             f.write(await upload_file.read())
-        update_data["upload_file"] = file_path
+        update_data["upload_file"] = f"uploads/{upload_file.filename}"
     
     for k, v in update_data.items():
         setattr(obj, k, v)
@@ -368,11 +370,12 @@ async def create_avionics_logbook(
     logbook_data = data.dict()
     
     # Handle file upload
-    if upload_file:
-        file_path = os.path.join(UPLOAD_DIR, upload_file.filename)
+    if upload_file and upload_file.filename:
+        file_path = UPLOAD_DIR / upload_file.filename
+        file_path.parent.mkdir(parents=True, exist_ok=True)
         with open(file_path, "wb") as f:
             f.write(await upload_file.read())
-        logbook_data["upload_file"] = file_path
+        logbook_data["upload_file"] = f"uploads/{upload_file.filename}"
     
     entry = AvionicsLogbook(**logbook_data)
     try:
@@ -493,11 +496,12 @@ async def update_avionics_logbook(
     update_data = logbook_in.dict(exclude_unset=True)
     
     # Handle file upload
-    if upload_file:
-        file_path = os.path.join(UPLOAD_DIR, upload_file.filename)
+    if upload_file and upload_file.filename:
+        file_path = UPLOAD_DIR / upload_file.filename
+        file_path.parent.mkdir(parents=True, exist_ok=True)
         with open(file_path, "wb") as f:
             f.write(await upload_file.read())
-        update_data["upload_file"] = file_path
+        update_data["upload_file"] = f"uploads/{upload_file.filename}"
     
     for k, v in update_data.items():
         setattr(obj, k, v)
@@ -537,11 +541,12 @@ async def create_propeller_logbook(
     logbook_data = data.dict()
     
     # Handle file upload
-    if upload_file:
-        file_path = os.path.join(UPLOAD_DIR, upload_file.filename)
+    if upload_file and upload_file.filename:
+        file_path = UPLOAD_DIR / upload_file.filename
+        file_path.parent.mkdir(parents=True, exist_ok=True)
         with open(file_path, "wb") as f:
             f.write(await upload_file.read())
-        logbook_data["upload_file"] = file_path
+        logbook_data["upload_file"] = f"uploads/{upload_file.filename}"
     
     entry = PropellerLogbook(**logbook_data)
     try:
@@ -656,11 +661,12 @@ async def update_propeller_logbook(
     update_data = logbook_in.dict(exclude_unset=True)
     
     # Handle file upload
-    if upload_file:
-        file_path = os.path.join(UPLOAD_DIR, upload_file.filename)
+    if upload_file and upload_file.filename:
+        file_path = UPLOAD_DIR / upload_file.filename
+        file_path.parent.mkdir(parents=True, exist_ok=True)
         with open(file_path, "wb") as f:
             f.write(await upload_file.read())
-        update_data["upload_file"] = file_path
+        update_data["upload_file"] = f"uploads/{upload_file.filename}"
     
     for k, v in update_data.items():
         setattr(obj, k, v)
