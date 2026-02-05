@@ -39,8 +39,7 @@ RUN useradd -m -u 1000 appuser && \
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
-# Run as root so entrypoint can chown uploads; entrypoint drops to appuser
-# USER appuser
+# Do not switch USER here; entrypoint creates uploads and chowns, then runs app as appuser
 
 # Expose port
 EXPOSE 8000

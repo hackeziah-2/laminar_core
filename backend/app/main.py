@@ -1,9 +1,11 @@
 import os
 from pathlib import Path
+from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi import UploadFile, File
 from sqlalchemy import text
 from app.api.v1 import (
     flights as flights_router,
@@ -18,6 +20,7 @@ from app.api.v1 import (
     ad_monitoring as ad_monitoring_router,
 )
 from app.database import engine, Base
+from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 
 OPENAPI_TAGS = [
     {"name": "ad-monitoring", "description": "**Aircraft-scoped AD monitoring** – `api/v1/aircraft/{aircraft_fk}/ad_monitoring/` (CRUD). **Work-order AD monitoring** – `api/v1/aircraft/{aircraft_fk}/ad_monitoring/{ad_monitoring_fk}/work-order-ad-monitoring/` (CRUD). See README **AD Monitoring** section."},
@@ -25,23 +28,35 @@ OPENAPI_TAGS = [
 ]
 app = FastAPI(title="Laminar API", openapi_tags=OPENAPI_TAGS)
 
-# CORS: allow localhost (dev) and deployment frontend; override via ALLOWED_ORIGINS env (comma-separated)
+# CORS: allow localhost (dev) and deployment; override via ALLOWED_ORIGINS env (comma-separated)
 _default_origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "http://120.89.33.51:3000",   # Deployment frontend
-    "http://120.89.33.51:8000",   # Backend (e.g. for docs from same host)
+    "http://120.89.33.51",
+    "http://120.89.33.51:3000",
+    "http://120.89.33.51:8000",
 ]
 _env_origins = os.getenv("ALLOWED_ORIGINS", "").strip()
 origins = [o.strip() for o in _env_origins.split(",") if o.strip()] if _env_origins else _default_origins
 
+# Allow deployment IP on any port (e.g. frontend on :80 or :3000) and localhost
+_origin_regex = r"^https?://(localhost|127\.0\.0\.1|120\.89\.33\.51)(:\d+)?$"
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
 )
+
+
+@app.get("/", tags=["health"])
+async def root():
+    """Root health check for public deployment (e.g. http://120.89.33.51:8000/)."""
+    return {"status": "ok", "message": "Laminar API", "docs": "/docs", "api": "/api/v1/"}
 
 
 @app.get("/api/v1/", tags=["health"])
@@ -52,10 +67,9 @@ async def api_v1_root():
 
 @app.get("/api/v1/health", tags=["health"])
 async def api_v1_health():
-    """Health check including uploads directory. Use this URL from the BACKEND host (e.g. :8000), not the frontend (:3000)."""
+    """Health check including uploads directory (for deployment debugging)."""
     uploads_ok = UPLOAD_DIR.is_dir()
     try:
-        # Probe write access (create then remove a file)
         probe = UPLOAD_DIR / ".write_probe"
         probe.touch()
         probe.unlink()
@@ -64,20 +78,54 @@ async def api_v1_health():
         uploads_writable = False
     return {
         "status": "ok",
-        "version": "v1",
         "uploads_dir": str(UPLOAD_DIR),
         "uploads_exists": uploads_ok,
         "uploads_writable": uploads_writable,
-        "note": "File uploads and all API calls must target this backend (e.g. http://host:8000), not the frontend (e.g. :3000).",
     }
 
 
-# Shared upload directory (absolute so path resolution does not depend on CWD)
-UPLOAD_DIR = (Path(__file__).resolve().parent.parent / "uploads").resolve()
-UPLOAD_DIR.mkdir(exist_ok=True)
+# Ensure uploads dir exists before any route uses it (absolute path, independent of CWD)
+ensure_uploads_dir()
 
-# Register download route BEFORE module routers so /api/v1/{module}/download/{filename}
-# is matched here instead of being claimed by a module router (e.g. /api/v1/logbooks) and returning 404.
+
+def _is_safe_module(name: str) -> bool:
+    """Allow only alphanumeric, underscore, hyphen (no path traversal)."""
+    return bool(name) and all(c.isalnum() or c in "_-" for c in name)
+
+
+def _resolve_and_serve_file(filename: str, module_folder: Optional[str] = None):
+    """Normalize filename, resolve path under UPLOAD_DIR, try flat then module subfolder; return FileResponse or raise 404."""
+    filename = filename.lstrip("/").replace("\\", "/")
+    if filename.startswith("uploads/"):
+        filename = filename[8:]
+    base_name = filename.split("/")[-1] if "/" in filename else filename
+    if not base_name or ".." in base_name or ".." in filename:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    def safe_path(*parts: str) -> Path:
+        for p in parts:
+            if not p or ".." in p or "/" in p or "\\" in p:
+                return None
+        path = (UPLOAD_DIR / "/".join(parts)).resolve()
+        if not str(path).startswith(str(UPLOAD_DIR)) or not path.is_file():
+            return None
+        return path
+
+    # Try 1: flat path (uploads/ATL.jpg)
+    file_path = safe_path(filename)
+    # Try 2: module subfolder (uploads/white_atl/ATL.jpg)
+    if file_path is None and module_folder and _is_safe_module(module_folder):
+        file_path = safe_path(module_folder, base_name)
+    if file_path is None:
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(
+        path=file_path,
+        filename=file_path.name,
+        media_type="application/octet-stream",
+    )
+
+
+# Download route (path): /api/v1/{module}/download/{filename} – BEFORE module routers
 @app.get(
     "/api/v1/{module_folder}/download/{filename:path}",
     summary="Download uploaded file",
@@ -87,56 +135,60 @@ UPLOAD_DIR.mkdir(exist_ok=True)
     response_description="File download",
     tags=["files"]
 )
-def _is_safe_module(name: str) -> bool:
-    """Allow only alphanumeric and underscore (no path traversal)."""
-    return bool(name) and name.replace("_", "").replace("-", "").isalnum()
-
-
-def _safe_under_uploads(base: Path, *parts: str) -> Path | None:
-    """Build path under UPLOAD_DIR; return None if invalid or file missing."""
-    try:
-        path = base
-        for p in parts:
-            if not p or ".." in p or "/" in p or "\\" in p:
-                return None
-            path = path / p
-        path = path.resolve()
-        if not str(path).startswith(str(base)) or not path.is_file():
-            return None
-        return path
-    except Exception:
-        return None
-
-
 async def download_file(module_folder: str, filename: str):
-    """Download an uploaded file from the uploads directory.
+    """Download an uploaded file from the uploads directory (filename in path)."""
+    return _resolve_and_serve_file(filename, module_folder)
 
-    Args:
-        module_folder: The module name (e.g., 'logbooks', 'white_atl') - used for lookup and organization
-        filename: The filename or path to the file (e.g., 'myfile.pdf' or 'uploads/myfile.pdf')
-    """
-    # Normalize: strip path traversal and resolve relative to UPLOAD_DIR
-    filename = filename.lstrip("/").replace("\\", "/")
-    if filename.startswith("uploads/"):
-        filename = filename[8:]  # strip leading "uploads/"
-    # Strip any leading module path so we only have the base name for lookup
-    base_name = filename.split("/")[-1] if "/" in filename else filename
-    if not base_name or ".." in base_name:
-        raise HTTPException(status_code=404, detail="File not found")
 
-    # Try 1: flat path (uploads/ATL.jpg) – how repositories currently save
-    file_path = _safe_under_uploads(UPLOAD_DIR, filename)
-    # Try 2: module subfolder (uploads/white_atl/ATL.jpg) – if files are stored per module
-    if file_path is None and module_folder and _is_safe_module(module_folder):
-        file_path = _safe_under_uploads(UPLOAD_DIR, module_folder, base_name)
-    if file_path is None:
-        raise HTTPException(status_code=404, detail="File not found")
+# Download route (query): /api/v1/{module}/download?name=filename – optional "name"
+@app.get(
+    "/api/v1/{module_folder}/download",
+    summary="Download uploaded file (by query param)",
+    description="Download a file by query parameter 'name' (filename). Use when the frontend calls .../download?name=filename.",
+    response_description="File download",
+    tags=["files"],
+)
+async def download_file_by_name(
+    module_folder: str,
+    name: Optional[str] = Query(None, description="Filename to download (e.g. ATL.jpg)"),
+):
+    """Download an uploaded file when filename is passed as query param 'name'."""
+    if not name or not name.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="Query parameter 'name' is required (e.g. ?name=ATL.jpg). Alternatively use path: .../download/{filename}",
+        )
+    return _resolve_and_serve_file(name.strip(), module_folder)
 
-    return FileResponse(
-        path=file_path,
-        filename=file_path.name,
-        media_type="application/octet-stream"
-    )
+
+# Generic upload: POST /api/v1/{module_folder}/upload – "name" is optional (avoids "field required" when frontend omits it)
+@app.post(
+    "/api/v1/{module_folder}/upload",
+    summary="Upload a file",
+    description="Upload a file. Query param 'name' is optional; when omitted, the uploaded filename is used.",
+    response_description="Uploaded file path",
+    tags=["files"],
+)
+async def upload_file(
+    module_folder: str,
+    file: UploadFile = File(...),
+    name: Optional[str] = Query(None, description="Optional filename override; when omitted, use the uploaded file's name"),
+):
+    """Upload a file to the shared uploads directory. 'name' query param is optional."""
+    ensure_uploads_dir()
+    save_name = (name.strip() if name and name.strip() else None) or (file.filename or "upload")
+    # Sanitize: keep only the base name to avoid path traversal
+    save_name = save_name.split("/")[-1].split("\\")[-1] if save_name else "upload"
+    if not save_name or ".." in save_name:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    file_path = UPLOAD_DIR / save_name
+    try:
+        content = await file.read()
+        file_path.write_bytes(content)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
+    # Return path that works for download (relative to uploads)
+    return {"file_path": f"uploads/{save_name}", "filename": save_name}
 
 
 app.include_router(flights_router.router)

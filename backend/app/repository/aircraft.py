@@ -5,12 +5,14 @@ from sqlalchemy.sql import func
 from fastapi import Query, Depends, UploadFile, File, Form, HTTPException
 
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
+
+ensure_uploads_dir()
+
 from app.models.aircraft import Aircraft
 from app.schemas.aircraft_schema import AircraftCreate, AircraftOut, AircraftUpdate
 from typing import List, Optional, Tuple
-
-UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)  
 
 async def get_aircraft(session: AsyncSession, id: int) -> Optional[AircraftOut]:
     result = await session.execute(
@@ -126,13 +128,13 @@ async def create_aircraft_with_file(
 ):  
     engine_path = None
     if engine_file:
-        engine_path = os.path.join(UPLOAD_DIR, engine_file.filename)
+        engine_path = os.path.join(str(UPLOAD_DIR), engine_file.filename)
         with open(engine_path, "wb") as f:
             f.write(await engine_file.read())
 
     propeller_path = None
     if propeller_file:
-        propeller_path = os.path.join(UPLOAD_DIR, propeller_file.filename)
+        propeller_path = os.path.join(str(UPLOAD_DIR), propeller_file.filename)
         with open(propeller_path, "wb") as f:
             f.write(await propeller_file.read())
 
@@ -188,14 +190,14 @@ async def update_aircraft_with_file(
 
     # --- Handle engine file ---
     if engine_file:
-        engine_path = os.path.join(UPLOAD_DIR, engine_file.filename)
+        engine_path = os.path.join(str(UPLOAD_DIR), engine_file.filename)
         with open(engine_path, "wb") as f:
             f.write(await engine_file.read())
         update_data["engine_arc"] = engine_path
 
     # --- Handle propeller file ---
     if propeller_file:
-        propeller_path = os.path.join(UPLOAD_DIR, propeller_file.filename)
+        propeller_path = os.path.join(str(UPLOAD_DIR), propeller_file.filename)
         with open(propeller_path, "wb") as f:
             f.write(await propeller_file.read())
         update_data["propeller_arc"] = propeller_path
