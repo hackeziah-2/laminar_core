@@ -13,9 +13,12 @@ ensure_uploads_dir()
 
 from app.models.logbooks import (
     EngineLogbook,
+    EngineComponentRecord,
     AirframeLogbook,
+    AirframeComponentRecord,
     AvionicsLogbook,
-    PropellerLogbook
+    AvionicsComponentRecord,
+    PropellerLogbook,
 )
 from app.schemas.logbook_schema import (
     EngineLogbookCreate,
@@ -39,22 +42,34 @@ async def create_engine_logbook(
     data: EngineLogbookCreate,
     upload_file: UploadFile = None
 ) -> EngineLogbookRead:
-    """Create a new Engine Logbook entry."""
-    logbook_data = data.dict()
-    
-    # Handle file upload
+    """Create a new Engine Logbook entry (with optional component_parts)."""
+    logbook_data = data.dict(exclude={"component_parts"})
     if upload_file:
         file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
         with open(file_path, "wb") as f:
             f.write(await upload_file.read())
         logbook_data["upload_file"] = file_path
-    
+
     entry = EngineLogbook(**logbook_data)
     try:
         session.add(entry)
+        await session.flush()
+        for cr in data.component_parts or []:
+            rec = EngineComponentRecord(**cr.dict())
+            entry.engine_component_parts.append(rec)
+        await session.flush()
         await session.commit()
-        await session.refresh(entry)
-        await session.refresh(entry, ['mechanic'])
+        # Re-fetch with component_parts so response includes them
+        result = await session.execute(
+            select(EngineLogbook)
+            .options(
+                selectinload(EngineLogbook.mechanic),
+                selectinload(EngineLogbook.engine_component_parts),
+            )
+            .where(EngineLogbook.id == entry.id)
+            .where(EngineLogbook.is_deleted == False)
+        )
+        entry = result.scalar_one_or_none() or entry
     except Exception as e:
         await session.rollback()
         raise HTTPException(status_code=400, detail=f"Failed to create engine logbook: {str(e)}")
@@ -65,10 +80,13 @@ async def get_engine_logbook(
     session: AsyncSession,
     logbook_id: int
 ) -> Optional[EngineLogbookRead]:
-    """Get an Engine Logbook entry by ID."""
+    """Get an Engine Logbook entry by ID (with component_records)."""
     result = await session.execute(
         select(EngineLogbook)
-        .options(selectinload(EngineLogbook.mechanic))
+        .options(
+            selectinload(EngineLogbook.mechanic),
+            selectinload(EngineLogbook.engine_component_parts),
+        )
         .where(EngineLogbook.id == logbook_id)
         .where(EngineLogbook.is_deleted == False)
     )
@@ -86,10 +104,13 @@ async def list_engine_logbooks(
     sort: Optional[str] = "",
     aircraft_fk: Optional[int] = None,
 ) -> Tuple[List[EngineLogbook], int]:
-    """List Engine Logbook entries with pagination."""
+    """List Engine Logbook entries with pagination (with component_records)."""
     stmt = (
         select(EngineLogbook)
-        .options(selectinload(EngineLogbook.mechanic))
+        .options(
+            selectinload(EngineLogbook.mechanic),
+            selectinload(EngineLogbook.engine_component_parts),
+        )
         .where(EngineLogbook.is_deleted == False)
     )
 
@@ -148,10 +169,13 @@ async def update_engine_logbook(
     logbook_in: EngineLogbookUpdate,
     upload_file: UploadFile = None
 ) -> Optional[EngineLogbookRead]:
-    """Update an Engine Logbook entry."""
+    """Update an Engine Logbook entry (optionally replace component_records)."""
     result = await session.execute(
         select(EngineLogbook)
-        .options(selectinload(EngineLogbook.mechanic))
+        .options(
+            selectinload(EngineLogbook.mechanic),
+            selectinload(EngineLogbook.engine_component_parts),
+        )
         .where(EngineLogbook.id == logbook_id)
         .where(EngineLogbook.is_deleted == False)
     )
@@ -159,23 +183,37 @@ async def update_engine_logbook(
     if not obj:
         return None
 
-    update_data = logbook_in.dict(exclude_unset=True)
-    
-    # Handle file upload
+    update_data = logbook_in.dict(exclude_unset=True, exclude={"component_parts"})
     if upload_file:
         file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
         with open(file_path, "wb") as f:
             f.write(await upload_file.read())
         update_data["upload_file"] = file_path
-    
+
     for k, v in update_data.items():
         setattr(obj, k, v)
+
+    if "component_parts" in logbook_in.dict(exclude_unset=True):
+        for existing in list(obj.engine_component_parts):
+            await session.delete(existing)
+        for cr in (logbook_in.component_parts or []):
+            rec = EngineComponentRecord(engine_log_fk=obj.id, **cr.dict())
+            session.add(rec)
 
     try:
         session.add(obj)
         await session.commit()
-        await session.refresh(obj)
-        await session.refresh(obj, ['mechanic'])
+        # Re-fetch with component_parts so response includes them
+        result = await session.execute(
+            select(EngineLogbook)
+            .options(
+                selectinload(EngineLogbook.mechanic),
+                selectinload(EngineLogbook.engine_component_parts),
+            )
+            .where(EngineLogbook.id == obj.id)
+            .where(EngineLogbook.is_deleted == False)
+        )
+        obj = result.scalar_one_or_none() or obj
     except Exception as e:
         await session.rollback()
         raise HTTPException(status_code=400, detail=f"Failed to update engine logbook: {str(e)}")
@@ -202,22 +240,34 @@ async def create_airframe_logbook(
     data: AirframeLogbookCreate,
     upload_file: UploadFile = None
 ) -> AirframeLogbookRead:
-    """Create a new Airframe Logbook entry."""
-    logbook_data = data.dict()
-    
-    # Handle file upload
+    """Create a new Airframe Logbook entry (with optional component_parts)."""
+    logbook_data = data.dict(exclude={"component_parts"})
     if upload_file:
         file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
         with open(file_path, "wb") as f:
             f.write(await upload_file.read())
         logbook_data["upload_file"] = file_path
-    
+
     entry = AirframeLogbook(**logbook_data)
     try:
         session.add(entry)
+        await session.flush()
+        for cr in data.component_parts or []:
+            rec = AirframeComponentRecord(**cr.dict())
+            entry.airframe_component_parts.append(rec)
+        await session.flush()
         await session.commit()
-        await session.refresh(entry)
-        await session.refresh(entry, ['mechanic'])
+        # Re-fetch with component_parts so response includes them
+        result = await session.execute(
+            select(AirframeLogbook)
+            .options(
+                selectinload(AirframeLogbook.mechanic),
+                selectinload(AirframeLogbook.airframe_component_parts),
+            )
+            .where(AirframeLogbook.id == entry.id)
+            .where(AirframeLogbook.is_deleted == False)
+        )
+        entry = result.scalar_one_or_none() or entry
     except Exception as e:
         await session.rollback()
         raise HTTPException(status_code=400, detail=f"Failed to create airframe logbook: {str(e)}")
@@ -228,10 +278,13 @@ async def get_airframe_logbook(
     session: AsyncSession,
     logbook_id: int
 ) -> Optional[AirframeLogbookRead]:
-    """Get an Airframe Logbook entry by ID."""
+    """Get an Airframe Logbook entry by ID (with component_records)."""
     result = await session.execute(
         select(AirframeLogbook)
-        .options(selectinload(AirframeLogbook.mechanic))
+        .options(
+            selectinload(AirframeLogbook.mechanic),
+            selectinload(AirframeLogbook.airframe_component_parts),
+        )
         .where(AirframeLogbook.id == logbook_id)
         .where(AirframeLogbook.is_deleted == False)
     )
@@ -249,10 +302,13 @@ async def list_airframe_logbooks(
     sort: Optional[str] = "",
     aircraft_fk: Optional[int] = None,
 ) -> Tuple[List[AirframeLogbook], int]:
-    """List Airframe Logbook entries with pagination."""
+    """List Airframe Logbook entries with pagination (with component_records)."""
     stmt = (
         select(AirframeLogbook)
-        .options(selectinload(AirframeLogbook.mechanic))
+        .options(
+            selectinload(AirframeLogbook.mechanic),
+            selectinload(AirframeLogbook.airframe_component_parts),
+        )
         .where(AirframeLogbook.is_deleted == False)
     )
 
@@ -311,10 +367,13 @@ async def update_airframe_logbook(
     logbook_in: AirframeLogbookUpdate,
     upload_file: UploadFile = None
 ) -> Optional[AirframeLogbookRead]:
-    """Update an Airframe Logbook entry."""
+    """Update an Airframe Logbook entry (optionally replace component_records)."""
     result = await session.execute(
         select(AirframeLogbook)
-        .options(selectinload(AirframeLogbook.mechanic))
+        .options(
+            selectinload(AirframeLogbook.mechanic),
+            selectinload(AirframeLogbook.airframe_component_parts),
+        )
         .where(AirframeLogbook.id == logbook_id)
         .where(AirframeLogbook.is_deleted == False)
     )
@@ -322,23 +381,37 @@ async def update_airframe_logbook(
     if not obj:
         return None
 
-    update_data = logbook_in.dict(exclude_unset=True)
-    
-    # Handle file upload
+    update_data = logbook_in.dict(exclude_unset=True, exclude={"component_parts"})
     if upload_file:
         file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
         with open(file_path, "wb") as f:
             f.write(await upload_file.read())
         update_data["upload_file"] = file_path
-    
+
     for k, v in update_data.items():
         setattr(obj, k, v)
+
+    if "component_parts" in logbook_in.dict(exclude_unset=True):
+        for existing in list(obj.airframe_component_parts):
+            await session.delete(existing)
+        for cr in (logbook_in.component_parts or []):
+            rec = AirframeComponentRecord(airframe_log_fk=obj.id, **cr.dict())
+            session.add(rec)
 
     try:
         session.add(obj)
         await session.commit()
-        await session.refresh(obj)
-        await session.refresh(obj, ['mechanic'])
+        # Re-fetch with component_parts so response includes them
+        result = await session.execute(
+            select(AirframeLogbook)
+            .options(
+                selectinload(AirframeLogbook.mechanic),
+                selectinload(AirframeLogbook.airframe_component_parts),
+            )
+            .where(AirframeLogbook.id == obj.id)
+            .where(AirframeLogbook.is_deleted == False)
+        )
+        obj = result.scalar_one_or_none() or obj
     except Exception as e:
         await session.rollback()
         raise HTTPException(status_code=400, detail=f"Failed to update airframe logbook: {str(e)}")
@@ -365,22 +438,34 @@ async def create_avionics_logbook(
     data: AvionicsLogbookCreate,
     upload_file: UploadFile = None
 ) -> AvionicsLogbookRead:
-    """Create a new Avionics Logbook entry."""
-    logbook_data = data.dict()
-    
-    # Handle file upload
+    """Create a new Avionics Logbook entry (with optional component_parts)."""
+    logbook_data = data.dict(exclude={"component_parts"})
     if upload_file:
         file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
         with open(file_path, "wb") as f:
             f.write(await upload_file.read())
         logbook_data["upload_file"] = file_path
-    
+
     entry = AvionicsLogbook(**logbook_data)
     try:
         session.add(entry)
+        await session.flush()
+        for cr in data.component_parts or []:
+            rec = AvionicsComponentRecord(**cr.dict())
+            entry.avionics_component_parts.append(rec)
+        await session.flush()
         await session.commit()
-        await session.refresh(entry)
-        await session.refresh(entry, ['mechanic'])
+        # Re-fetch with component_parts so response includes them
+        result = await session.execute(
+            select(AvionicsLogbook)
+            .options(
+                selectinload(AvionicsLogbook.mechanic),
+                selectinload(AvionicsLogbook.avionics_component_parts),
+            )
+            .where(AvionicsLogbook.id == entry.id)
+            .where(AvionicsLogbook.is_deleted == False)
+        )
+        entry = result.scalar_one_or_none() or entry
     except Exception as e:
         await session.rollback()
         raise HTTPException(status_code=400, detail=f"Failed to create avionics logbook: {str(e)}")
@@ -391,10 +476,13 @@ async def get_avionics_logbook(
     session: AsyncSession,
     logbook_id: int
 ) -> Optional[AvionicsLogbookRead]:
-    """Get an Avionics Logbook entry by ID."""
+    """Get an Avionics Logbook entry by ID (with component_records)."""
     result = await session.execute(
         select(AvionicsLogbook)
-        .options(selectinload(AvionicsLogbook.mechanic))
+        .options(
+            selectinload(AvionicsLogbook.mechanic),
+            selectinload(AvionicsLogbook.avionics_component_parts),
+        )
         .where(AvionicsLogbook.id == logbook_id)
         .where(AvionicsLogbook.is_deleted == False)
     )
@@ -412,10 +500,13 @@ async def list_avionics_logbooks(
     sort: Optional[str] = "",
     aircraft_fk: Optional[int] = None,
 ) -> Tuple[List[AvionicsLogbook], int]:
-    """List Avionics Logbook entries with pagination."""
+    """List Avionics Logbook entries with pagination (with component_records)."""
     stmt = (
         select(AvionicsLogbook)
-        .options(selectinload(AvionicsLogbook.mechanic))
+        .options(
+            selectinload(AvionicsLogbook.mechanic),
+            selectinload(AvionicsLogbook.avionics_component_parts),
+        )
         .where(AvionicsLogbook.is_deleted == False)
     )
 
@@ -480,10 +571,13 @@ async def update_avionics_logbook(
     logbook_in: AvionicsLogbookUpdate,
     upload_file: UploadFile = None
 ) -> Optional[AvionicsLogbookRead]:
-    """Update an Avionics Logbook entry."""
+    """Update an Avionics Logbook entry (optionally replace component_records)."""
     result = await session.execute(
         select(AvionicsLogbook)
-        .options(selectinload(AvionicsLogbook.mechanic))
+        .options(
+            selectinload(AvionicsLogbook.mechanic),
+            selectinload(AvionicsLogbook.avionics_component_parts),
+        )
         .where(AvionicsLogbook.id == logbook_id)
         .where(AvionicsLogbook.is_deleted == False)
     )
@@ -491,23 +585,37 @@ async def update_avionics_logbook(
     if not obj:
         return None
 
-    update_data = logbook_in.dict(exclude_unset=True)
-    
-    # Handle file upload
+    update_data = logbook_in.dict(exclude_unset=True, exclude={"component_parts"})
     if upload_file:
         file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
         with open(file_path, "wb") as f:
             f.write(await upload_file.read())
         update_data["upload_file"] = file_path
-    
+
     for k, v in update_data.items():
         setattr(obj, k, v)
+
+    if "component_parts" in logbook_in.dict(exclude_unset=True):
+        for existing in list(obj.avionics_component_parts):
+            await session.delete(existing)
+        for cr in (logbook_in.component_parts or []):
+            rec = AvionicsComponentRecord(avionics_log_fk=obj.id, **cr.dict())
+            session.add(rec)
 
     try:
         session.add(obj)
         await session.commit()
-        await session.refresh(obj)
-        await session.refresh(obj, ['mechanic'])
+        # Re-fetch with component_parts so response includes them
+        result = await session.execute(
+            select(AvionicsLogbook)
+            .options(
+                selectinload(AvionicsLogbook.mechanic),
+                selectinload(AvionicsLogbook.avionics_component_parts),
+            )
+            .where(AvionicsLogbook.id == obj.id)
+            .where(AvionicsLogbook.is_deleted == False)
+        )
+        obj = result.scalar_one_or_none() or obj
     except Exception as e:
         await session.rollback()
         raise HTTPException(status_code=400, detail=f"Failed to update avionics logbook: {str(e)}")

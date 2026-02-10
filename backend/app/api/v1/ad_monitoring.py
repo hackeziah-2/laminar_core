@@ -1,7 +1,8 @@
+import json
 from math import ceil
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, HTTPException, status
+from fastapi import APIRouter, Depends, Query, HTTPException, status, Form, File, UploadFile, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas import ad_monitoring_schema
@@ -98,19 +99,43 @@ async def api_get_ad_monitoring(
     status_code=status.HTTP_201_CREATED,
 )
 async def api_create_ad_monitoring(
-    data: ad_monitoring_schema.ADMonitoringCreate,
+    request: Request,
+    json_data: Optional[str] = Form(None),
+    upload_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
 ):
-    return await create_ad_monitoring(session, data)
+    try:
+        if json_data is not None:
+            parsed = json.loads(json_data)
+        else:
+            parsed = await request.json()
+        data = ad_monitoring_schema.ADMonitoringCreate(**parsed)
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
+    return await create_ad_monitoring(session, data, upload_file)
 
 
 @router.put("/{ad_id}", response_model=ad_monitoring_schema.ADMonitoringRead)
 async def api_update_ad_monitoring(
     ad_id: int,
-    data: ad_monitoring_schema.ADMonitoringUpdate,
+    request: Request,
+    json_data: Optional[str] = Form(None),
+    upload_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
 ):
-    updated = await update_ad_monitoring(session, ad_id, data)
+    try:
+        if json_data is not None:
+            parsed = json.loads(json_data)
+        else:
+            parsed = await request.json()
+        data = ad_monitoring_schema.ADMonitoringUpdate(**parsed)
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
+    updated = await update_ad_monitoring(session, ad_id, data, upload_file)
     if not updated:
         raise HTTPException(status_code=404, detail="ADMonitoring not found")
     return updated
@@ -180,16 +205,26 @@ async def api_get_ad_monitoring_by_aircraft(
 )
 async def api_create_ad_monitoring_by_aircraft(
     aircraft_fk: int,
-    data: ad_monitoring_schema.ADMonitoringCreate,
+    request: Request,
+    json_data: Optional[str] = Form(None),
+    upload_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
 ):
     aircraft = await get_aircraft(session, aircraft_fk)
     if not aircraft:
         raise HTTPException(status_code=404, detail="Aircraft not found")
-    create_data = ad_monitoring_schema.ADMonitoringCreate(
-        **{**data.dict(), "aircraft_fk": aircraft_fk}
-    )
-    return await create_ad_monitoring(session, create_data)
+    try:
+        if json_data is not None:
+            parsed = json.loads(json_data)
+        else:
+            parsed = await request.json()
+        parsed["aircraft_fk"] = aircraft_fk
+        create_data = ad_monitoring_schema.ADMonitoringCreate(**parsed)
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
+    return await create_ad_monitoring(session, create_data, upload_file)
 
 
 @router_aircraft_scoped.put(
@@ -199,13 +234,25 @@ async def api_create_ad_monitoring_by_aircraft(
 async def api_update_ad_monitoring_by_aircraft(
     aircraft_fk: int,
     ad_id: int,
-    data: ad_monitoring_schema.ADMonitoringUpdate,
+    request: Request,
+    json_data: Optional[str] = Form(None),
+    upload_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
 ):
     existing = await get_ad_monitoring_by_aircraft(session, ad_id, aircraft_fk)
     if not existing:
         raise HTTPException(status_code=404, detail="ADMonitoring not found")
-    updated = await update_ad_monitoring(session, ad_id, data)
+    try:
+        if json_data is not None:
+            parsed = json.loads(json_data)
+        else:
+            parsed = await request.json()
+        data = ad_monitoring_schema.ADMonitoringUpdate(**parsed)
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
+    updated = await update_ad_monitoring(session, ad_id, data, upload_file)
     if not updated:
         raise HTTPException(status_code=404, detail="ADMonitoring not found")
     return updated

@@ -18,6 +18,7 @@ class ADMonitoringBase(BaseModel):
     subject: str = Field(..., max_length=100)
     inspection_interval: str = Field(..., max_length=100)
     compli_date: Optional[date] = None
+    file_path: Optional[str] = Field(None, max_length=500)
 
     class Config:
         orm_mode = True
@@ -33,6 +34,7 @@ class ADMonitoringUpdate(BaseModel):
     subject: Optional[str] = Field(None, max_length=100)
     inspection_interval: Optional[str] = Field(None, max_length=100)
     compli_date: Optional[date] = None
+    file_path: Optional[str] = Field(None, max_length=500)
 
     class Config:
         orm_mode = True

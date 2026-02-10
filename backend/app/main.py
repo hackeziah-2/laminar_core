@@ -18,6 +18,7 @@ from app.api.v1 import (
     document_on_board as document_on_board_router,
     ldnd_monitoring as ldnd_monitoring_router,
     ad_monitoring as ad_monitoring_router,
+    tcc_maintenance as tcc_maintenance_router,
 )
 from app.database import engine, Base
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
@@ -197,12 +198,14 @@ app.include_router(auth_router.router)
 app.include_router(document_on_board_router.router_aircraft_scoped)
 app.include_router(ldnd_monitoring_router.router_aircraft_scoped)
 app.include_router(ad_monitoring_router.router_aircraft_scoped)
+app.include_router(tcc_maintenance_router.router_aircraft_scoped)
 app.include_router(aircraft_router.router)
 app.include_router(atl_router.router)
 app.include_router(atl_new_router.router)
 app.include_router(account_router.router)
 app.include_router(logbooks_router.router)
 app.include_router(document_on_board_router.router)
+app.include_router(tcc_maintenance_router.router)
 app.include_router(ldnd_monitoring_router.router)
 app.include_router(ad_monitoring_router.router)
 app.include_router(ad_monitoring_router.router_work_order)

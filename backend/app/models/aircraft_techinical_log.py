@@ -114,6 +114,7 @@ class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin):
         back_populates="atl",
         cascade="all, delete-orphan"
     )
+    tcc_maintenances = relationship("TCCMaintenance", foreign_keys="TCCMaintenance.atl_ref", back_populates="atl")
 
     def __repr__(self):
         return f"<ATL(seq='{self.sequence_no}')>"
