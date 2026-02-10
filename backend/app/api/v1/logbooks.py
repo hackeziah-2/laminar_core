@@ -61,6 +61,24 @@ def clean_parsed_data(parsed: dict) -> dict:
     return cleaned
 
 
+def normalize_logbook_payload(parsed: dict) -> dict:
+    """Parse component_parts if JSON string; support componentParts (camelCase)."""
+    out = dict(parsed)
+    # Accept componentParts (camelCase) as component_parts
+    if "componentParts" in out and "component_parts" not in out:
+        out["component_parts"] = out.pop("componentParts", None)
+    # Parse component_parts if it's a JSON string (common with form/multipart)
+    cp = out.get("component_parts")
+    if isinstance(cp, str) and cp.strip():
+        try:
+            out["component_parts"] = json.loads(cp)
+        except json.JSONDecodeError:
+            pass
+    elif isinstance(cp, str) and not cp.strip():
+        out["component_parts"] = []
+    return out
+
+
 def _parse_aircraft_fk(value: Optional[str]) -> Optional[int]:
     """Parse aircraft_fk query param; treat empty, '{}', or invalid as None."""
     if value is None:
@@ -119,8 +137,8 @@ async def api_list_engine_logbooks_paged(
     "/engine/{logbook_id}",
     response_model=logbook_schema.EngineLogbookRead,
     summary="Get Engine Logbook entry by ID",
-    description="Retrieve a single Engine Logbook entry by its ID. Returns 404 if not found or soft-deleted.",
-    response_description="Engine Logbook entry details"
+    description="Retrieve a single Engine Logbook entry by its ID. Response includes component_parts. Returns 404 if not found or soft-deleted.",
+    response_description="Engine Logbook entry details including component_parts"
 )
 async def api_get_engine_logbook(
     logbook_id: int,
@@ -154,6 +172,7 @@ async def api_create_engine_logbook(
     """Create a new Engine Logbook entry."""
     try:
         parsed = json.loads(json_data)
+        parsed = normalize_logbook_payload(parsed)
         payload = logbook_schema.EngineLogbookCreate(**parsed)
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
@@ -180,6 +199,7 @@ async def api_update_engine_logbook(
     try:
         parsed = json.loads(json_data)
         parsed = clean_parsed_data(parsed)
+        parsed = normalize_logbook_payload(parsed)
         logbook_in = logbook_schema.EngineLogbookUpdate(**parsed)
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
@@ -262,7 +282,10 @@ async def api_list_airframe_logbooks_paged(
 
 @router.get(
     "/airframe/{logbook_id}",
-    response_model=logbook_schema.AirframeLogbookRead
+    response_model=logbook_schema.AirframeLogbookRead,
+    summary="Get Airframe Logbook entry by ID",
+    description="Retrieve a single Airframe Logbook entry by its ID. Response includes component_parts. Returns 404 if not found or soft-deleted.",
+    response_description="Airframe Logbook entry details including component_parts"
 )
 async def api_get_airframe_logbook(
     logbook_id: int,
@@ -291,6 +314,7 @@ async def api_create_airframe_logbook(
     """Create a new Airframe Logbook entry."""
     try:
         parsed = json.loads(json_data)
+        parsed = normalize_logbook_payload(parsed)
         payload = logbook_schema.AirframeLogbookCreate(**parsed)
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
@@ -313,6 +337,7 @@ async def api_update_airframe_logbook(
     try:
         parsed = json.loads(json_data)
         parsed = clean_parsed_data(parsed)
+        parsed = normalize_logbook_payload(parsed)
         logbook_in = logbook_schema.AirframeLogbookUpdate(**parsed)
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
@@ -390,7 +415,10 @@ async def api_list_avionics_logbooks_paged(
 
 @router.get(
     "/avionics/{logbook_id}",
-    response_model=logbook_schema.AvionicsLogbookRead
+    response_model=logbook_schema.AvionicsLogbookRead,
+    summary="Get Avionics Logbook entry by ID",
+    description="Retrieve a single Avionics Logbook entry by its ID. Response includes component_parts. Returns 404 if not found or soft-deleted.",
+    response_description="Avionics Logbook entry details including component_parts"
 )
 async def api_get_avionics_logbook(
     logbook_id: int,
@@ -419,6 +447,7 @@ async def api_create_avionics_logbook(
     """Create a new Avionics Logbook entry."""
     try:
         parsed = json.loads(json_data)
+        parsed = normalize_logbook_payload(parsed)
         payload = logbook_schema.AvionicsLogbookCreate(**parsed)
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
@@ -441,6 +470,7 @@ async def api_update_avionics_logbook(
     try:
         parsed = json.loads(json_data)
         parsed = clean_parsed_data(parsed)
+        parsed = normalize_logbook_payload(parsed)
         logbook_in = logbook_schema.AvionicsLogbookUpdate(**parsed)
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")

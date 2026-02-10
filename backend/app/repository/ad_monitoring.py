@@ -1,10 +1,15 @@
+import os
 from typing import Optional, List, Tuple
 
+from fastapi import HTTPException, UploadFile
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 from app.models.ad_monitoring import ADMonitoring, WorkOrderADMonitoring
+
+ensure_uploads_dir()
 from app.schemas.ad_monitoring_schema import (
     ADMonitoringCreate,
     ADMonitoringUpdate,
@@ -123,21 +128,31 @@ async def list_ad_monitoring(
 
 
 async def create_ad_monitoring(
-    session: AsyncSession, data: ADMonitoringCreate
+    session: AsyncSession, data: ADMonitoringCreate, upload_file: UploadFile = None
 ) -> ADMonitoringRead:
-    """Create ADMonitoring."""
-    obj = ADMonitoring(**data.dict())
-    session.add(obj)
-    await session.commit()
-    await session.refresh(obj)
-    await session.refresh(obj, ["aircraft", "ad_works"])
+    """Create ADMonitoring with optional file upload."""
+    ad_data = data.dict()
+    if upload_file and getattr(upload_file, "filename", None):
+        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
+        with open(file_path, "wb") as f:
+            f.write(await upload_file.read())
+        ad_data["file_path"] = file_path
+    obj = ADMonitoring(**ad_data)
+    try:
+        session.add(obj)
+        await session.commit()
+        await session.refresh(obj)
+        await session.refresh(obj, ["aircraft", "ad_works"])
+    except Exception as e:
+        await session.rollback()
+        raise HTTPException(status_code=400, detail=f"Failed to create AD monitoring: {str(e)}")
     return ADMonitoringRead.from_orm(obj)
 
 
 async def update_ad_monitoring(
-    session: AsyncSession, ad_id: int, data: ADMonitoringUpdate
+    session: AsyncSession, ad_id: int, data: ADMonitoringUpdate, upload_file: UploadFile = None
 ) -> Optional[ADMonitoringRead]:
-    """Update ADMonitoring."""
+    """Update ADMonitoring with optional file upload."""
     result = await session.execute(
         select(ADMonitoring)
         .options(
@@ -150,12 +165,22 @@ async def update_ad_monitoring(
     obj = result.scalar_one_or_none()
     if not obj:
         return None
-    for k, v in data.dict(exclude_unset=True).items():
+    update_data = data.dict(exclude_unset=True)
+    if upload_file and getattr(upload_file, "filename", None):
+        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
+        with open(file_path, "wb") as f:
+            f.write(await upload_file.read())
+        update_data["file_path"] = file_path
+    for k, v in update_data.items():
         setattr(obj, k, v)
-    session.add(obj)
-    await session.commit()
-    await session.refresh(obj)
-    await session.refresh(obj, ["aircraft", "ad_works"])
+    try:
+        session.add(obj)
+        await session.commit()
+        await session.refresh(obj)
+        await session.refresh(obj, ["aircraft", "ad_works"])
+    except Exception as e:
+        await session.rollback()
+        raise HTTPException(status_code=400, detail=f"Failed to update AD monitoring: {str(e)}")
     return ADMonitoringRead.from_orm(obj)
 
 
