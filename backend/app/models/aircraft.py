@@ -56,6 +56,7 @@ class Aircraft(Base, TimestampMixin, SoftDeleteMixin):
     airframe_logbooks = relationship("AirframeLogbook", foreign_keys="AirframeLogbook.aircraft_fk", back_populates="aircraft")
     avionics_logbooks = relationship("AvionicsLogbook", foreign_keys="AvionicsLogbook.aircraft_fk", back_populates="aircraft")
     propeller_logbooks = relationship("PropellerLogbook", foreign_keys="PropellerLogbook.aircraft_fk", back_populates="aircraft")
+    tcc_maintenances = relationship("TCCMaintenance", foreign_keys="TCCMaintenance.aircraft_fk", back_populates="aircraft")
 
     def __repr__(self):
         return f"<Aircraft(reg='{self.registration}', type='{self.type}', model='{self.model}')>"
