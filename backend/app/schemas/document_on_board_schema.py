@@ -29,6 +29,8 @@ class DocumentOnBoardBase(BaseModel):
     warning_days: Optional[int] = Field(default=30, ge=0)
     status: Optional[str] = "Active"
     file_path: Optional[str] = Field(None, max_length=500)
+    web_link: Optional[str] = Field(None, max_length=2048)
+    is_aircraft_certificate: Optional[bool] = False
 
     @validator("status", pre=True)
     def validate_status(cls, v):
@@ -41,6 +43,13 @@ class DocumentOnBoardBase(BaseModel):
                 f"Invalid status: {v}. Must be one of: Active, Expired, Expiring Soon, Inactive"
             )
         return v
+
+    @validator("is_aircraft_certificate", pre=True)
+    def is_aircraft_certificate_bool(cls, v):
+        """Ensure boolean; coerce None to False for API/ORM consistency."""
+        if v is None:
+            return False
+        return bool(v)
 
     class Config:
         orm_mode = True
@@ -59,6 +68,8 @@ class DocumentOnBoardUpdate(BaseModel):
     warning_days: Optional[int] = Field(None, ge=0)
     status: Optional[str] = None
     file_path: Optional[str] = Field(None, max_length=500)
+    web_link: Optional[str] = Field(None, max_length=2048)
+    is_aircraft_certificate: Optional[bool] = None
 
     @validator("status", pre=True)
     def validate_status(cls, v):

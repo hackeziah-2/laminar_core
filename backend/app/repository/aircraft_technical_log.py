@@ -99,6 +99,30 @@ async def create_aircraft_technical_log(
     return AircraftTechnicalLogRead.from_orm(entry)
 
 
+async def search_atl_by_sequence_no(
+    session: AsyncSession,
+    search: str,
+    aircraft_fk: Optional[int] = None,
+    limit: int = 50,
+) -> List[AircraftTechnicalLog]:
+    """Search Aircraft Technical Log by ATL Sequence Number. Optionally filter by aircraft. Returns list with aircraft loaded."""
+    if not search or not str(search).strip():
+        return []
+    q = f"%{str(search).strip()}%"
+    stmt = (
+        select(AircraftTechnicalLog)
+        .options(selectinload(AircraftTechnicalLog.aircraft))
+        .where(AircraftTechnicalLog.is_deleted == False)
+        .where(AircraftTechnicalLog.sequence_no.ilike(q))
+        .order_by(AircraftTechnicalLog.sequence_no.asc())
+        .limit(limit)
+    )
+    if aircraft_fk is not None:
+        stmt = stmt.where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
 async def get_aircraft_technical_log(
     session: AsyncSession,
     id: int

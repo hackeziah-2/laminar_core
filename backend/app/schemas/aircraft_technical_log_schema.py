@@ -234,6 +234,17 @@ class AircraftRead(BaseModel):
         orm_mode = True
 
 
+# ---------- ATL Search response (id for atl_ref, sequence_no + aircraft summary) ----------
+class ATLSearchItem(BaseModel):
+    """Minimal ATL search result for TCC ATL Reference dropdown. id is aircraft_technical_log.id (use as atl_ref)."""
+    id: int
+    sequence_no: str
+    aircraft: AircraftRead
+
+    class Config:
+        orm_mode = True
+
+
 # ---------- Aircraft Technical Log Read Schema ----------
 class AircraftTechnicalLogRead(AircraftTechnicalLogBase):
     id: int

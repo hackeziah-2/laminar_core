@@ -154,8 +154,12 @@ async def create_document_on_board(
     data: DocumentOnBoardCreate,
     upload_file: UploadFile = None,
 ) -> DocumentOnBoardRead:
-    """Create a new DocumentOnBoard entry."""
+    """Create a new DocumentOnBoard entry. file_path and web_link are optional."""
     document_data = data.dict()
+
+    # is_aircraft_certificate must be bool (default False). file_path and web_link are optional.
+    if document_data.get("is_aircraft_certificate") is None:
+        document_data["is_aircraft_certificate"] = False
 
     # Convert status string to DB enum value (case-insensitive). PostgreSQL expects "Active", "Expired", etc.
     if "status" in document_data and document_data["status"]:
@@ -173,10 +177,10 @@ async def create_document_on_board(
     else:
         document_data.pop("status", None)
 
-    # Handle file upload
+    # Handle optional file upload (file_path remains None if no file)
     if upload_file and upload_file.filename:
-        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
         ensure_uploads_dir()
+        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
         with open(file_path, "wb") as f:
             content = await upload_file.read()
             f.write(content)
@@ -229,10 +233,10 @@ async def update_document_on_board(
         except (KeyError, ValueError, AttributeError):
             update_data["status"] = DocumentStatusEnum.ACTIVE.value
 
-    # Handle file upload
+    # Handle optional file upload (only set file_path if a file is provided)
     if upload_file and upload_file.filename:
-        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
         ensure_uploads_dir()
+        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
         with open(file_path, "wb") as f:
             content = await upload_file.read()
             f.write(content)
