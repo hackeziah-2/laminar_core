@@ -18,14 +18,15 @@ from fastapi.responses import StreamingResponse
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.schemas import aircraft_schema
+from app.schemas import aircraft_schema, aircraft_technical_log_schema
 from app.repository.aircraft import (
     list_aircraft,
-    get_aircraft, 
+    get_aircraft,
     create_aircraft_with_file,
     update_aircraft_with_file,
     soft_delete_aircraft
 )
+from app.repository.aircraft_technical_log import search_atl_by_sequence_no
 from app.database import get_session
 from app.services.generate_report_excel import generate_excel
 from app.services.generate_report_pdf import generate_pdf_report
@@ -46,6 +47,26 @@ async def api_list_paged(
     items, total = await list_aircraft(session,limit=limit, offset=offset, search=search, status=status, sort=sort)
     pages = ceil(total / limit) if total else 0
     return {"items": items, "total": total, "page": page, "pages": pages}
+
+@router.get(
+    "/{aircraft_id}/atl/",
+    response_model=List[aircraft_technical_log_schema.ATLSearchItem],
+    summary="Search ATL by sequence number (aircraft-scoped)",
+    description="Use GET /api/v1/aircraft-technical-log/search?search={sequence_no}&aircraft_id={id} instead. Returns same shape: id (atl_ref), sequence_no, aircraft.",
+)
+async def api_aircraft_atl_search(
+    aircraft_id: int,
+    sequence_number: Optional[str] = Query(None, description="Search by ATL sequence number"),
+    session: AsyncSession = Depends(get_session),
+):
+    """[Compatibility] Search ATL by sequence number for this aircraft. Prefer /api/v1/aircraft-technical-log/search?search={sequence_no}&aircraft_id={id} for new code."""
+    if not sequence_number or not str(sequence_number).strip():
+        return []
+    items = await search_atl_by_sequence_no(
+        session, search=sequence_number.strip(), aircraft_fk=aircraft_id
+    )
+    return [aircraft_technical_log_schema.ATLSearchItem.from_orm(item) for item in items]
+
 
 @router.get("/{aircraft_id}", response_model=aircraft_schema.AircraftOut)
 async def api_get(aircraft_id: int, session: AsyncSession = Depends(get_session)):

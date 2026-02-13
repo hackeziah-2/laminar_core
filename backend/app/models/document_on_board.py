@@ -1,5 +1,5 @@
 import enum
-from sqlalchemy import Column, Integer, String, Text, Date, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, Date, Boolean, ForeignKey
 from sqlalchemy.dialects.postgresql import ENUM as PGEnum
 from sqlalchemy.orm import relationship
 
@@ -36,6 +36,8 @@ class DocumentOnBoard(Base, TimestampMixin, SoftDeleteMixin):
         nullable=False,
     )
     file_path = Column(String(500), nullable=True)
+    web_link = Column(String(2048), nullable=True)
+    is_aircraft_certificate = Column(Boolean, default=False, nullable=False)
 
     aircraft = relationship("Aircraft", backref="documents_on_board")
 

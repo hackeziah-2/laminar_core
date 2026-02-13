@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.schemas import aircraft_technical_log_schema
 from app.repository.aircraft_technical_log import (
     list_aircraft_technical_logs,
+    search_atl_by_sequence_no,
     get_aircraft_technical_log,
     get_latest_aircraft_technical_log,
     create_aircraft_technical_log,
@@ -64,6 +65,24 @@ async def api_list_paged(
         "page": page,
         "pages": pages
     }
+
+
+@router.get(
+    "/search",
+    response_model=List[aircraft_technical_log_schema.ATLSearchItem]
+)
+async def api_search_by_sequence(
+    search: Optional[str] = Query(None, description="Search by ATL Sequence Number"),
+    aircraft_id: Optional[int] = Query(None, description="Filter by aircraft ID (e.g. when on aircraft-scoped TCC form)"),
+    session: AsyncSession = Depends(get_session)
+):
+    """Search by ATL Sequence Number for TCC ATL Reference dropdown. Returns id (use as atl_ref), sequence_no, and aircraft (id, registration, model, type)."""
+    if not search or not str(search).strip():
+        return []
+    items = await search_atl_by_sequence_no(
+        session, search=search.strip(), aircraft_fk=aircraft_id
+    )
+    return [aircraft_technical_log_schema.ATLSearchItem.from_orm(item) for item in items]
 
 
 @router.get(

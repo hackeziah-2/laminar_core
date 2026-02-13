@@ -21,10 +21,14 @@ def _enum_to_str(v):
     return str(v) if v is not None else None
 
 
+# ATL Reference: search by sequence number via GET /api/v1/aircraft-technical-log/search?search={sequence_no}; use returned `id` as atl_ref.
 class TCCMaintenanceBase(BaseModel):
     """Base schema for TCC Maintenance."""
     aircraft_fk: int
-    atl_ref: Optional[int] = None
+    atl_ref: Optional[int] = Field(
+        None,
+        description="ATL (aircraft_technical_log) ID. Search by sequence number: GET /api/v1/aircraft-technical-log/search?search={sequence_no}. Use response item id as atl_ref.",
+    )
     category: Optional[str] = Field(None, max_length=50, description="Powerplant, Airframe, Inspection Servicing")
     part_number: str = Field(..., max_length=255)
     serial_number: Optional[str] = Field(None, max_length=255)
@@ -55,7 +59,10 @@ class TCCMaintenanceCreate(TCCMaintenanceBase):
 class TCCMaintenanceUpdate(BaseModel):
     """Schema for updating a TCC Maintenance entry (all fields optional)."""
     aircraft_fk: Optional[int] = None
-    atl_ref: Optional[int] = None
+    atl_ref: Optional[int] = Field(
+        None,
+        description="ATL (aircraft_technical_log) ID. Search: GET /api/v1/aircraft-technical-log/search?search={sequence_no}; use response item id.",
+    )
     category: Optional[str] = Field(None, max_length=50)
     part_number: Optional[str] = Field(None, max_length=255)
     serial_number: Optional[str] = Field(None, max_length=255)
@@ -78,9 +85,18 @@ class TCCMaintenanceUpdate(BaseModel):
         orm_mode = True
 
 
+
+class AircraftTechinicalLogRead(BaseModel):
+    aircraft_fk: int
+    sequence_no: str = Field(..., max_length=50)
+
+    class Config:
+        orm_mode = True
+
 class TCCMaintenanceRead(TCCMaintenanceBase):
     """Schema for reading a TCC Maintenance entry."""
     id: int
+    atl: Optional[AircraftTechinicalLogRead] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

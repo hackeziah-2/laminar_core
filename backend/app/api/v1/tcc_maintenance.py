@@ -72,8 +72,8 @@ async def api_list_tcc_maintenances_paged(
 @router.get(
     "/{maintenance_id}",
     response_model=tcc_maintenance_schema.TCCMaintenanceRead,
-    summary="Get TCC Maintenance by ID",
-    description="Retrieve a single TCC Maintenance entry by ID. Returns 404 if not found or soft-deleted.",
+    summary="Get TCC Maintenance by ID (edit entry)",
+    description="Retrieve a single TCC Maintenance entry by ID. For ATL Reference in edit form: GET /api/v1/aircraft-technical-log/search?search={sequence_no} (optional &aircraft_id={id}); use response item id as atl_ref.",
 )
 async def api_get_tcc_maintenance(
     maintenance_id: int,
@@ -193,14 +193,15 @@ async def api_list_tcc_maintenances_by_aircraft_paged(
 @router_aircraft_scoped.get(
     "/{aircraft_id}/tcc-maintenance/{maintenance_id}",
     response_model=tcc_maintenance_schema.TCCMaintenanceRead,
-    summary="Get TCC Maintenance by ID for aircraft",
+    summary="Get TCC Maintenance by ID for aircraft (edit entry)",
+    description="Returns TCC entry for editing. ATL Reference: search via GET /api/v1/aircraft-technical-log/search?search={sequence_no}&aircraft_id={aircraft_id}; use response item id as atl_ref.",
 )
 async def api_get_tcc_maintenance_by_aircraft(
     aircraft_id: int,
     maintenance_id: int,
     session: AsyncSession = Depends(get_session),
 ):
-    """Get a single TCC Maintenance entry by ID for a specific aircraft."""
+    """Get a single TCC Maintenance entry by ID for a specific aircraft (e.g. for edit form)."""
     obj = await get_tcc_maintenance_by_aircraft(session, maintenance_id, aircraft_id)
     if not obj:
         raise HTTPException(status_code=404, detail="TCC Maintenance not found")
@@ -233,7 +234,8 @@ async def api_create_tcc_maintenance_by_aircraft(
 @router_aircraft_scoped.put(
     "/{aircraft_id}/tcc-maintenance/{maintenance_id}",
     response_model=tcc_maintenance_schema.TCCMaintenanceRead,
-    summary="Update TCC Maintenance for aircraft",
+    summary="Update TCC Maintenance for aircraft (edit entry)",
+    description="Update TCC entry. atl_ref: set from ATL search GET /api/v1/aircraft-technical-log/search?search={sequence_no}&aircraft_id={aircraft_id}; use response item id.",
 )
 async def api_update_tcc_maintenance_by_aircraft(
     aircraft_id: int,
@@ -241,7 +243,7 @@ async def api_update_tcc_maintenance_by_aircraft(
     payload: tcc_maintenance_schema.TCCMaintenanceUpdate,
     session: AsyncSession = Depends(get_session),
 ):
-    """Update a TCC Maintenance entry for a specific aircraft."""
+    """Update a TCC Maintenance entry for a specific aircraft. ATL Reference: use /api/v1/aircraft-technical-log/search?search={sequence_no} and set atl_ref to the chosen item id."""
     existing = await get_tcc_maintenance_by_aircraft(session, maintenance_id, aircraft_id)
     if not existing:
         raise HTTPException(status_code=404, detail="TCC Maintenance not found")
