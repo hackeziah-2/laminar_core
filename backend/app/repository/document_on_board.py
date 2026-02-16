@@ -71,7 +71,7 @@ async def list_documents_on_board(
     # Search (strip whitespace; treat empty as no search): document_name, description, aircraft registration
     if search and search.strip():
         q = f"%{search.strip()}%"
-        stmt = stmt.join(Aircraft, DocumentOnBoard.aircraft_id == Aircraft.id).where(
+        stmt = stmt.outerjoin(Aircraft, DocumentOnBoard.aircraft_id == Aircraft.id).where(
             or_(
                 DocumentOnBoard.document_name.ilike(q),
                 func.coalesce(cast(DocumentOnBoard.description, String), "").ilike(q),
@@ -122,7 +122,7 @@ async def list_documents_on_board(
 
     if search and search.strip():
         q = f"%{search.strip()}%"
-        count_stmt = count_stmt.join(Aircraft, DocumentOnBoard.aircraft_id == Aircraft.id).where(
+        count_stmt = count_stmt.outerjoin(Aircraft, DocumentOnBoard.aircraft_id == Aircraft.id).where(
             or_(
                 DocumentOnBoard.document_name.ilike(q),
                 func.coalesce(cast(DocumentOnBoard.description, String), "").ilike(q),
@@ -142,6 +142,122 @@ async def list_documents_on_board(
 
     # Pagination
     stmt = stmt.limit(limit).offset(offset)
+
+    result = await session.execute(stmt)
+    items = result.scalars().all()
+
+    return items, total_count
+
+
+async def list_documents_certi_on_board(
+    session: AsyncSession,
+    limit: int = 0,
+    offset: int = 0,
+    search: Optional[str] = None,
+    aircraft_id: Optional[int] = None,
+    status: Optional[str] = None,
+    sort: Optional[str] = "",
+) -> Tuple[List[DocumentOnBoard], int]:
+
+    base_stmt = select(DocumentOnBoard).where(
+        DocumentOnBoard.is_deleted.is_(False),
+        DocumentOnBoard.aircraft_id.is_(None)
+    )
+    filters = []
+
+    # Normalize inputs once
+    search = search.strip() if search else None
+    status = status.lower() if status and status.lower() != "all" else None
+
+    join_aircraft = False
+
+    # Search filter
+    if search:
+        q = f"%{search}%"
+        join_aircraft = True
+        filters.append(
+            or_(
+                DocumentOnBoard.document_name.ilike(q),
+                func.coalesce(
+                    cast(DocumentOnBoard.description, String), ""
+                ).ilike(q),
+                Aircraft.registration.ilike(q),
+            )
+        )
+
+    # Aircraft filter
+    if aircraft_id:
+        filters.append(DocumentOnBoard.aircraft_id == aircraft_id)
+
+    # Status filter
+    if status:
+        filters.append(
+            func.lower(cast(DocumentOnBoard.status, String)) == status
+        )
+
+    # Apply join only if needed
+    if join_aircraft:
+        base_stmt = base_stmt.outerjoin(
+            Aircraft, DocumentOnBoard.aircraft_id == Aircraft.id
+        )
+
+    # Apply filters
+    if filters:
+        base_stmt = base_stmt.where(*filters)
+
+    count_stmt = (
+        select(func.count())
+        .select_from(DocumentOnBoard)
+        .where(
+            DocumentOnBoard.is_deleted.is_(False),
+            DocumentOnBoard.aircraft_id.is_(None)
+        )
+    )
+
+    if join_aircraft:
+        count_stmt = count_stmt.outerjoin(
+            Aircraft, DocumentOnBoard.aircraft_id == Aircraft.id
+        )
+
+    if filters:
+        count_stmt = count_stmt.where(*filters)
+
+    total_count = (await session.execute(count_stmt)).scalar_one()
+
+    # -------- Sorting --------
+    sortable_fields = {
+        "document_name": DocumentOnBoard.document_name,
+        "issue_date": DocumentOnBoard.issue_date,
+        "expiry_date": DocumentOnBoard.expiry_date,
+        "status": DocumentOnBoard.status,
+        "created_at": DocumentOnBoard.created_at,
+        "updated_at": DocumentOnBoard.updated_at,
+    }
+
+    if sort:
+        order_clauses = []
+        for field in sort.split(","):
+            desc_order = field.startswith("-")
+            field_name = field.lstrip("-")
+
+            column = sortable_fields.get(field_name)
+            if column:
+                order_clauses.append(
+                    column.desc() if desc_order else column.asc()
+                )
+
+        if order_clauses:
+            base_stmt = base_stmt.order_by(*order_clauses)
+    else:
+        base_stmt = base_stmt.order_by(DocumentOnBoard.created_at.desc())
+
+    # -------- Pagination + Eager Load --------
+    stmt = (
+        base_stmt
+        .options(selectinload(DocumentOnBoard.aircraft))
+        .limit(limit)
+        .offset(offset)
+    )
 
     result = await session.execute(stmt)
     items = result.scalars().all()

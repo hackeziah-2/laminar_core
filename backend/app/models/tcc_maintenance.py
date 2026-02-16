@@ -77,7 +77,7 @@ class TCCMaintenance(Base, TimestampMixin, SoftDeleteMixin):
     serial_number = Column(String, nullable=True)
     description = Column(String, nullable=True)
 
-    component_limit_years = Column(Integer, nullable=True)
+    component_limit_years = Column(Float, nullable=True)
     component_limit_hours = Column(Float, nullable=True)
 
     component_method_of_compliance = Column(

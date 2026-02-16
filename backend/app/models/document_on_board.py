@@ -17,7 +17,7 @@ class DocumentOnBoard(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "documents_on_board"
 
     document_id = Column(Integer, primary_key=True, index=True)
-    aircraft_id = Column(Integer, ForeignKey("aircrafts.id"), nullable=False, index=True)
+    aircraft_id = Column(Integer, ForeignKey("aircrafts.id"), nullable=True, index=True)
     document_name = Column(String(255), nullable=False, index=True)
     description = Column(Text, nullable=True)
     issue_date = Column(Date, nullable=False)

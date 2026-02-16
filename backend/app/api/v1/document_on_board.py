@@ -22,6 +22,7 @@ from app.repository.document_on_board import (
     get_document_on_board,
     get_document_on_board_by_aircraft,
     list_documents_on_board,
+    list_documents_certi_on_board,
     update_document_on_board,
     soft_delete_document_on_board,
     soft_delete_document_on_board_by_aircraft,
@@ -88,6 +89,42 @@ async def api_list_documents_on_board_paged(
         "pages": pages
     }
 
+@router.get("/certificates/paged")
+async def api_list_documents_on_board_certificates_paged(
+    limit: int = Query(10, ge=1, le=100, description="Number of items per page"),
+    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+    search: Optional[str] = Query(None, description="Search in document_name, description, and aircraft registration"),
+    aircraft_id: Optional[int] = Query(None, description="Filter by aircraft ID"),
+    status: Optional[str] = Query(None, description="Filter by status"),
+    sort: Optional[str] = Query("", description="Sort fields (comma-separated). Prefix with '-' for descending. Example: -created_at,document_name"),
+    session: AsyncSession = Depends(get_session)
+):
+    """Get paginated list of DocumentOnBoard entries."""
+    offset = (page - 1) * limit
+    search_param = search.strip() if search and search.strip() else None
+    items, total = await list_documents_certi_on_board(
+        session=session,
+        limit=limit,
+        offset=offset,
+        search=search_param,
+        aircraft_id=aircraft_id,
+        status=status,
+        sort=sort,
+    )
+    pages = ceil(total / limit) if total else 0
+    
+    items_schemas = [
+        document_on_board_schema.DocumentOnBoardRead.from_orm(item)
+        for item in items
+    ]
+    
+    return {
+        "items": items_schemas,
+        "total": total,
+        "page": page,
+        "pages": pages
+    }
+
 
 @router.get(
     "/{document_id}",
@@ -115,8 +152,8 @@ async def api_get_document_on_board(
     response_model=document_on_board_schema.DocumentOnBoardRead,
     status_code=status.HTTP_201_CREATED,
     summary="Create DocumentOnBoard entry",
-    description="Create a new DocumentOnBoard entry. Required: aircraft_id, document_name, issue_date. "
-                "Optional: description, expiry_date, warning_days, status, file_path, web_link, is_aircraft_certificate. "
+    description="Create a new DocumentOnBoard entry. Required: document_name, issue_date. "
+                "Optional: aircraft_id, description, expiry_date, warning_days, status, file_path, web_link, is_aircraft_certificate. "
                 "Send JSON as 'json_data' form field and optional file as 'upload_file'.",
     response_description="Created DocumentOnBoard entry"
 )
