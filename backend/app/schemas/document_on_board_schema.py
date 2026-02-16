@@ -21,7 +21,7 @@ class AircraftDetail(BaseModel):
 
 
 class DocumentOnBoardBase(BaseModel):
-    aircraft_id: int
+    aircraft_id: Optional[int] = None
     document_name: str = Field(..., max_length=255)
     description: Optional[str] = None
     issue_date: date

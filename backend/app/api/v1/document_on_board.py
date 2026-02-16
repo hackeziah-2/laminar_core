@@ -115,8 +115,8 @@ async def api_get_document_on_board(
     response_model=document_on_board_schema.DocumentOnBoardRead,
     status_code=status.HTTP_201_CREATED,
     summary="Create DocumentOnBoard entry",
-    description="Create a new DocumentOnBoard entry. Required: aircraft_id, document_name, issue_date. "
-                "Optional: description, expiry_date, warning_days, status, file_path, web_link, is_aircraft_certificate. "
+    description="Create a new DocumentOnBoard entry. Required: document_name, issue_date. "
+                "Optional: aircraft_id, description, expiry_date, warning_days, status, file_path, web_link, is_aircraft_certificate. "
                 "Send JSON as 'json_data' form field and optional file as 'upload_file'.",
     response_description="Created DocumentOnBoard entry"
 )

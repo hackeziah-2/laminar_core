@@ -123,9 +123,17 @@ async def list_tcc_maintenances(
     if atl_ref is not None:
         stmt = stmt.where(TCCMaintenance.atl_ref == atl_ref)
     if category and str(category).strip():
-        cat_enum = _category_from_str(category)
-        if cat_enum is not None:
-            stmt = stmt.where(TCCMaintenance.category == cat_enum.value)
+        cat_str = str(category).strip()
+        # If "All" or "All Categories" (case-insensitive), do not filter at all
+        if cat_str.lower() in ["all", "all categories"]:
+            pass
+        else:
+            cat_enum = _category_from_str(cat_str)
+            if cat_enum is not None:
+                stmt = stmt.where(TCCMaintenance.category == cat_enum.value)
+            else:
+                # User asked for a specific category that is invalid/not found -> return empty result
+                stmt = stmt.where(1 == 0)
 
     if search and search.strip():
         q = f"%{search.strip()}%"
@@ -166,9 +174,16 @@ async def list_tcc_maintenances(
     if atl_ref is not None:
         count_stmt = count_stmt.where(TCCMaintenance.atl_ref == atl_ref)
     if category and str(category).strip():
-        cat_enum = _category_from_str(category)
-        if cat_enum is not None:
-            count_stmt = count_stmt.where(TCCMaintenance.category == cat_enum.value)
+        cat_str = str(category).strip()
+        if cat_str.lower() in ["all", "all categories"]:
+            pass
+        else:
+            cat_enum = _category_from_str(category)
+            if cat_enum is not None:
+                count_stmt = count_stmt.where(TCCMaintenance.category == cat_enum.value)
+            else:
+                # Invalid category -> return 0 count
+                count_stmt = count_stmt.where(1 == 0)
     if search and search.strip():
         q = f"%{search.strip()}%"
         count_stmt = count_stmt.where(

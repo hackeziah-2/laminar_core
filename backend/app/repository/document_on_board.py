@@ -71,7 +71,7 @@ async def list_documents_on_board(
     # Search (strip whitespace; treat empty as no search): document_name, description, aircraft registration
     if search and search.strip():
         q = f"%{search.strip()}%"
-        stmt = stmt.join(Aircraft, DocumentOnBoard.aircraft_id == Aircraft.id).where(
+        stmt = stmt.outerjoin(Aircraft, DocumentOnBoard.aircraft_id == Aircraft.id).where(
             or_(
                 DocumentOnBoard.document_name.ilike(q),
                 func.coalesce(cast(DocumentOnBoard.description, String), "").ilike(q),
@@ -122,7 +122,7 @@ async def list_documents_on_board(
 
     if search and search.strip():
         q = f"%{search.strip()}%"
-        count_stmt = count_stmt.join(Aircraft, DocumentOnBoard.aircraft_id == Aircraft.id).where(
+        count_stmt = count_stmt.outerjoin(Aircraft, DocumentOnBoard.aircraft_id == Aircraft.id).where(
             or_(
                 DocumentOnBoard.document_name.ilike(q),
                 func.coalesce(cast(DocumentOnBoard.description, String), "").ilike(q),

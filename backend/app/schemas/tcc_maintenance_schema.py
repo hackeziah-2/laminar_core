@@ -11,7 +11,7 @@ METHOD_OF_COMPLIANCE_VALUES = [
 ]
 
 # Category values for API (string): Powerplant, Airframe, Inspection Servicing
-TCC_CATEGORY_VALUES = ["Powerplant", "Airframe", "Inspection Servicing"]
+TCC_CATEGORY_VALUES = ["All Categories", "All", "Powerplant", "Airframe", "Inspection Servicing"]
 
 
 def _enum_to_str(v):
@@ -34,7 +34,7 @@ class TCCMaintenanceBase(BaseModel):
     serial_number: Optional[str] = Field(None, max_length=255)
     description: Optional[str] = None
 
-    component_limit_years: Optional[int] = None
+    component_limit_years: Optional[float] = None
     component_limit_hours: Optional[float] = None
     component_method_of_compliance: Optional[str] = Field(None, max_length=50)
 
@@ -68,7 +68,7 @@ class TCCMaintenanceUpdate(BaseModel):
     serial_number: Optional[str] = Field(None, max_length=255)
     description: Optional[str] = None
 
-    component_limit_years: Optional[int] = None
+    component_limit_years: Optional[float] = None
     component_limit_hours: Optional[float] = None
     component_method_of_compliance: Optional[str] = Field(None, max_length=50)
 
