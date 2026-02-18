@@ -13,6 +13,7 @@ from app.repository.cpcp_monitoring import (
     update_cpcp_monitoring,
     soft_delete_cpcp_monitoring,
 )
+from app.repository.aircraft import get_aircraft
 from app.database import get_session
 
 router = APIRouter(
@@ -29,13 +30,14 @@ async def api_list_paged(
         None,
         description="Search by Description or ATL Sequence NO",
     ),
+    aircraft_id: Optional[int] = Query(None, description="Filter by aircraft ID"),
     sort: Optional[str] = Query(
         "",
         description="Sort fields (comma-separated). Prefix '-' for descending. Example: -created_at,inspection_operation",
     ),
     session: AsyncSession = Depends(get_session),
 ):
-    """Get paginated list of CPCP Monitoring entries. Search by Sequence NO (ATL) and Description."""
+    """Get paginated list of CPCP Monitoring entries. Search by Sequence NO (ATL) and Description. Filter by aircraft_id."""
     offset = (page - 1) * limit
     items, total = await list_cpcp_monitorings(
         session=session,
@@ -43,6 +45,7 @@ async def api_list_paged(
         offset=offset,
         search=search.strip() if search and search.strip() else None,
         sort=sort or "",
+        aircraft_id=aircraft_id,
     )
     pages = ceil(total / limit) if total else 0
     items_schemas = [
@@ -86,7 +89,13 @@ async def api_create(
     payload: cpcp_monitoring_schema.CPCPMonitoringCreate,
     session: AsyncSession = Depends(get_session),
 ):
-    """Create a new CPCP Monitoring entry."""
+    """Create a new CPCP Monitoring entry. aircraft_id is required."""
+    aircraft = await get_aircraft(session, payload.aircraft_id)
+    if not aircraft:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Aircraft not found",
+        )
     return await create_cpcp_monitoring(session, payload)
 
 
@@ -100,7 +109,14 @@ async def api_update(
     payload: cpcp_monitoring_schema.CPCPMonitoringUpdate,
     session: AsyncSession = Depends(get_session),
 ):
-    """Update a CPCP Monitoring entry."""
+    """Update a CPCP Monitoring entry. If aircraft_id is provided, it must exist."""
+    if payload.aircraft_id is not None:
+        aircraft = await get_aircraft(session, payload.aircraft_id)
+        if not aircraft:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Aircraft not found",
+            )
     updated = await update_cpcp_monitoring(session, entry_id, payload)
     if not updated:
         raise HTTPException(

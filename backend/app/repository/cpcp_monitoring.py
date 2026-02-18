@@ -49,13 +49,16 @@ async def list_cpcp_monitorings(
     offset: int = 0,
     search: Optional[str] = None,
     sort: Optional[str] = "",
+    aircraft_id: Optional[int] = None,
 ) -> Tuple[List[CPCPMonitoring], int]:
-    """List CPCP Monitoring entries with pagination. Search by Description and ATL Sequence NO."""
+    """List CPCP Monitoring entries with pagination. Search by Description and ATL Sequence NO. Filter by aircraft_id."""
     stmt = (
         select(CPCPMonitoring)
         .options(selectinload(CPCPMonitoring.atl))
         .where(CPCPMonitoring.is_deleted == False)
     )
+    if aircraft_id is not None:
+        stmt = stmt.where(CPCPMonitoring.aircraft_id == aircraft_id)
 
     if search and search.strip():
         q = f"%{search.strip()}%"
@@ -94,6 +97,8 @@ async def list_cpcp_monitorings(
         .select_from(CPCPMonitoring)
         .where(CPCPMonitoring.is_deleted == False)
     )
+    if aircraft_id is not None:
+        count_stmt = count_stmt.where(CPCPMonitoring.aircraft_id == aircraft_id)
     if search and search.strip():
         q = f"%{search.strip()}%"
         count_stmt = count_stmt.outerjoin(

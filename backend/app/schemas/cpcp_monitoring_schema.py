@@ -15,6 +15,7 @@ class AtlRefRead(BaseModel):
 
 class CPCPMonitoringBase(BaseModel):
     """Base schema for CPCP Monitoring."""
+    aircraft_id: int = Field(..., description="Aircraft ID (required).")
     inspection_operation: str = Field(..., max_length=255)
     description: Optional[str] = None
 
@@ -41,6 +42,7 @@ class CPCPMonitoringCreate(CPCPMonitoringBase):
 
 class CPCPMonitoringUpdate(BaseModel):
     """Schema for updating a CPCP Monitoring entry (all fields optional)."""
+    aircraft_id: Optional[int] = None
     inspection_operation: Optional[str] = Field(None, max_length=255)
     description: Optional[str] = None
 
@@ -60,6 +62,7 @@ class CPCPMonitoringUpdate(BaseModel):
 class CPCPMonitoringRead(CPCPMonitoringBase):
     """Schema for reading a CPCP Monitoring entry."""
     id: int
+    aircraft_id: int
     atl: Optional[AtlRefRead] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

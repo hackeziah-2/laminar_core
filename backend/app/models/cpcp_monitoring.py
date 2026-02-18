@@ -13,6 +13,7 @@ class CPCPMonitoring(Base, TimestampMixin, SoftDeleteMixin):
 
     id = Column(Integer, primary_key=True, index=True)
 
+    aircraft_id = Column(Integer, ForeignKey("aircrafts.id"), nullable=False, index=True)
     inspection_operation = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
 
@@ -25,6 +26,7 @@ class CPCPMonitoring(Base, TimestampMixin, SoftDeleteMixin):
 
     atl_ref = Column(Integer, ForeignKey("aircraft_technical_log.id"), nullable=True, index=True)
 
+    aircraft = relationship("Aircraft", backref="cpcp_monitorings")
     atl = relationship("AircraftTechnicalLog", backref="cpcp_monitorings")
 
     def __repr__(self):
