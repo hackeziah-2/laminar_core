@@ -17,4 +17,5 @@ from .logbooks import (
 from .document_on_board import DocumentOnBoard
 from .ad_monitoring import ADMonitoring, WorkOrderADMonitoring
 from .tcc_maintenance import TCCMaintenance, MethodOfComplianceEnum
+from .cpcp_monitoring import CPCPMonitoring
 
