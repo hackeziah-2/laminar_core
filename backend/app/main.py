@@ -10,6 +10,7 @@ from sqlalchemy import text
 from app.api.v1 import (
     flights as flights_router,
     aircraft as aircraft_router,
+    aircraft_import as excel_data_router,
     auth as auth_router,
     aircraft_technical_logbook as atl_router,
     aircraft_technical_log as atl_new_router,
@@ -211,6 +212,7 @@ app.include_router(ldnd_monitoring_router.router)
 app.include_router(ad_monitoring_router.router)
 app.include_router(ad_monitoring_router.router_work_order)
 app.include_router(cpcp_monitoring_router.router)
+app.include_router(excel_data_router.router)
 
 @app.on_event("startup")
 async def startup():
