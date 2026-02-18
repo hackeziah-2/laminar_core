@@ -59,30 +59,31 @@ class ComponentPartsRecordRead(ComponentPartsRecordBase):
 
 
 # ---------- Aircraft Technical Log Base Schema ----------
+# Only sequence_no and aircraft_fk are required; all other fields are optional.
 class AircraftTechnicalLogBase(BaseModel):
-    aircraft_fk: int
-    sequence_no: str = Field(..., max_length=50)
-    nature_of_flight: TypeEnum = TypeEnum.TR
+    aircraft_fk: int = Field(..., description="Aircraft ID (required).")
+    sequence_no: str = Field(..., max_length=50, description="ATL sequence number (required).")
+    nature_of_flight: Optional[TypeEnum] = TypeEnum.TR
     next_inspection_due: Optional[str] = Field(None, max_length=100)
     tach_time_due: Optional[float] = None
 
-    origin_station: str = Field(..., max_length=50)
-    origin_date: date
-    origin_time: time
+    origin_station: Optional[str] = Field(None, max_length=50)
+    origin_date: Optional[date] = None
+    origin_time: Optional[time] = None
 
-    destination_station: str = Field(..., max_length=50)
-    destination_date: date
-    destination_time: time
+    destination_station: Optional[str] = Field(None, max_length=50)
+    destination_date: Optional[date] = None
+    destination_time: Optional[time] = None
 
-    number_of_landings: int
+    number_of_landings: Optional[int] = None
 
     hobbs_meter_start: Optional[float] = Field(None, description="Auto-populated from previous ATL entry if not provided")
-    hobbs_meter_end: float
-    hobbs_meter_total: float
+    hobbs_meter_end: Optional[float] = None
+    hobbs_meter_total: Optional[float] = None
 
     tachometer_start: Optional[float] = Field(None, description="Auto-populated from previous ATL entry if not provided")
-    tachometer_end: float
-    tachometer_total: float
+    tachometer_end: Optional[float] = None
+    tachometer_total: Optional[float] = None
 
     # Airframe time fields
     airframe_prev_time: Optional[float] = None

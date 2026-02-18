@@ -19,69 +19,86 @@ from app.schemas.aircraft_technical_log_schema import (
     ComponentPartsRecordCreate,
 )
 
+def generate_range(start_id: str, end_id: str) -> list[str]:
+    """
+    Generate a list of sequence IDs between start_id and end_id (exclusive).
+    Example: ATL-0001 -> ATL-0008 returns ATL-0002 to ATL-0007
+    """
+    prefix, start_num_str = start_id.split('-')
+    _, end_num_str = end_id.split('-')
+
+    start_num = int(start_num_str)
+    end_num = int(end_num_str)
+    width = len(start_num_str)
+
+    return [f"{prefix}-{str(i).zfill(width)}" for i in range(start_num + 1, end_num)]
+
 
 async def create_aircraft_technical_log(
     session: AsyncSession,
     data: AircraftTechnicalLogCreate
 ) -> AircraftTechnicalLogRead:
-    """Create a new Aircraft Technical Log entry."""
-    # Check duplicate sequence_no (only check non-deleted records)
-    result = await session.execute(
-        select(AircraftTechnicalLog).where(
-            AircraftTechnicalLog.sequence_no == data.sequence_no
-        ).where(
-            AircraftTechnicalLog.is_deleted == False
-        )
-    )
-    existing = result.scalar_one_or_none()
+    """Create a new Aircraft Technical Log entry with optional gap-fill (skipped when first ATL for aircraft)."""
 
+    # Check for duplicate sequence_no
+    existing = await session.scalar(
+        select(AircraftTechnicalLog)
+        .where(AircraftTechnicalLog.sequence_no == data.sequence_no)
+        .where(AircraftTechnicalLog.aircraft_fk == data.aircraft_fk)
+        .where(AircraftTechnicalLog.is_deleted.is_(False))
+    )
     if existing:
         raise HTTPException(
             status_code=400,
             detail=f"Sequence No. {data.sequence_no} already exists. Please use a different Sequence No."
         )
 
-    # Convert enum string to enum if needed
+    # Prepare log data dictionary
     log_data = data.dict(exclude={'component_parts'})
     if isinstance(log_data.get('nature_of_flight'), str):
         log_data['nature_of_flight'] = TypeEnum(log_data['nature_of_flight'])
 
-    # Auto-populate hobbs_meter_start and tachometer_start from latest ATL if not provided
-    if log_data.get('hobbs_meter_start') is None or log_data.get('tachometer_start') is None:
-        # Get the latest ATL entry for this aircraft
-        latest_stmt = (
-            select(AircraftTechnicalLog)
-            .where(AircraftTechnicalLog.aircraft_fk == data.aircraft_fk)
-            .where(AircraftTechnicalLog.is_deleted == False)
-            .order_by(AircraftTechnicalLog.sequence_no.desc())
-            .limit(1)
-        )
-        latest_result = await session.execute(latest_stmt)
-        latest_atl = latest_result.scalar_one_or_none()
+    # Get latest ATL for this aircraft (for hobbs/tach and for gap detection)
+    latest_stmt = (
+        select(AircraftTechnicalLog)
+        .where(AircraftTechnicalLog.aircraft_fk == data.aircraft_fk)
+        .where(AircraftTechnicalLog.is_deleted.is_(False))
+        .order_by(AircraftTechnicalLog.sequence_no.desc())
+        .limit(1)
+    )
+    latest_result = await session.execute(latest_stmt)
+    latest_atl = latest_result.scalar_one_or_none()
+    latest_sequence_no = latest_atl.sequence_no if latest_atl else None
 
+    # Auto-populate hobbs_meter_start and tachometer_start from latest ATL, or 0 for first entry
+    if log_data.get('hobbs_meter_start') is None or log_data.get('tachometer_start') is None:
         if latest_atl:
-            # Use end values from previous entry as start values for new entry
             if log_data.get('hobbs_meter_start') is None:
                 log_data['hobbs_meter_start'] = latest_atl.hobbs_meter_end
             if log_data.get('tachometer_start') is None:
                 log_data['tachometer_start'] = latest_atl.tachometer_end
         else:
-            # No previous entry exists, require these fields
             if log_data.get('hobbs_meter_start') is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail="hobbs_meter_start is required for the first ATL entry of this aircraft"
-                )
+                log_data['hobbs_meter_start'] = 0.0
             if log_data.get('tachometer_start') is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail="tachometer_start is required for the first ATL entry of this aircraft"
-                )
+                log_data['tachometer_start'] = 0.0
 
-    # Create main log entry
-    entry = AircraftTechnicalLog(**log_data)
+    # Create the main ATL entry (use model, not schema)
+    entry = AircraftTechnicalLog(**{**log_data, 'sequence_no': data.sequence_no})
     session.add(entry)
-    await session.flush()  # Flush to get the ID
+    await session.flush()
+
+    # Generate missing sequence IDs only when there is existing data (skip when first ATL for aircraft)
+    if latest_sequence_no is not None:
+        try:
+            missing_sequences = generate_range(latest_sequence_no, data.sequence_no)
+        except (ValueError, IndexError):
+            missing_sequences = []
+        if missing_sequences:
+            for seq_no in missing_sequences:
+                gap_entry = AircraftTechnicalLog(**{**log_data, 'sequence_no': seq_no})
+                session.add(gap_entry)
+                await session.flush()
 
     # Create component parts if provided
     if data.component_parts:
@@ -97,7 +114,6 @@ async def create_aircraft_technical_log(
     await session.refresh(entry, ['aircraft', 'component_parts'])
 
     return AircraftTechnicalLogRead.from_orm(entry)
-
 
 async def search_atl_by_sequence_no(
     session: AsyncSession,

@@ -36,29 +36,28 @@ class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin):
     nature_of_flight = Column(
         PGEnum(TypeEnum, name="nature_of_flight", create_type=True),
         default=TypeEnum.TR,
-        nullable=False
+        nullable=True,
     )
+    next_inspection_due = Column(String(100), nullable=True)
+    tach_time_due = Column(Float, nullable=True)
 
-    next_inspection_due = Column(String(100))
-    tach_time_due = Column(Float)
+    origin_station = Column(String(50), nullable=True)
+    origin_date = Column(Date, nullable=True)
+    origin_time = Column(Time(timezone=False), nullable=True)
 
-    origin_station = Column(String(50), nullable=False)
-    origin_date = Column(Date, nullable=False)
-    origin_time = Column(Time(timezone=False), nullable=False)
+    destination_station = Column(String(50), nullable=True)
+    destination_date = Column(Date, nullable=True)
+    destination_time = Column(Time(timezone=False), nullable=True)
 
-    destination_station = Column(String(50), nullable=False)
-    destination_date = Column(Date, nullable=False)
-    destination_time = Column(Time(timezone=False), nullable=False)
+    number_of_landings = Column(Integer, nullable=True)
 
-    number_of_landings = Column(Integer, nullable=False)
+    hobbs_meter_start = Column(Float, nullable=True)
+    hobbs_meter_end = Column(Float, nullable=True)
+    hobbs_meter_total = Column(Float, nullable=True)
 
-    hobbs_meter_start = Column(Float, nullable=False)
-    hobbs_meter_end = Column(Float, nullable=False)
-    hobbs_meter_total = Column(Float, nullable=False)
-
-    tachometer_start = Column(Float, nullable=False)
-    tachometer_end = Column(Float, nullable=False)
-    tachometer_total = Column(Float, nullable=False)
+    tachometer_start = Column(Float, nullable=True)
+    tachometer_end = Column(Float, nullable=True)
+    tachometer_total = Column(Float, nullable=True)
 
     # Airframe time fields
     airframe_prev_time = Column(Float, nullable=True)
