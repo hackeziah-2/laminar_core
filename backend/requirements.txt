@@ -16,7 +16,7 @@ python-jose[cryptography]
 pydantic<2.0
 pydantic[email]
 python-multipart==0.0.6
-openpyxl==3.1.2
+openpyxl>=3.1.5
 reportlab==4.0.0
 
 # Testing
@@ -25,3 +25,4 @@ pytest-asyncio>=0.21.0
 pytest-cov>=4.1.0
 httpx>=0.24.0
 aiosqlite>=0.19.0
+pandas
