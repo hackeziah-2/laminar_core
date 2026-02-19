@@ -11,6 +11,19 @@ from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 ensure_uploads_dir()
 
 from app.models.aircraft import Aircraft
+from app.models.aircraft_logbook_entries import AircraftLogbookEntry
+from app.models.aircraft_techinical_log import AircraftTechnicalLog
+from app.models.atl_monitoring import LDNDMonitoring
+from app.models.ad_monitoring import ADMonitoring, WorkOrderADMonitoring
+from app.models.logbooks import (
+    EngineLogbook,
+    AirframeLogbook,
+    AvionicsLogbook,
+    PropellerLogbook,
+)
+from app.models.tcc_maintenance import TCCMaintenance
+from app.models.document_on_board import DocumentOnBoard
+from app.models.cpcp_monitoring import CPCPMonitoring
 from app.schemas.aircraft_schema import AircraftCreate, AircraftOut, AircraftUpdate
 from typing import List, Optional, Tuple
 
@@ -235,6 +248,9 @@ async def update_aircraft_with_file(
 async def soft_delete_aircraft(
     session: AsyncSession, id: int
 ) -> bool:
+    """Soft delete aircraft and all connected data (cascade).
+    Sets is_deleted=True on aircraft and all related records in a single transaction.
+    """
     result = await session.execute(
         select(Aircraft).where(Aircraft.id == id).where(Aircraft.is_deleted == False)
     )
@@ -242,6 +258,51 @@ async def soft_delete_aircraft(
     if not aircraft:
         return False
 
+    aircraft_id = aircraft.id
+
+    async def _soft_delete_many(model, fk_col, fk_val):
+        """Helper: soft delete all non-deleted records for given FK."""
+        stmt = select(model).where(fk_col == fk_val).where(model.is_deleted == False)
+        r = await session.execute(stmt)
+        for obj in r.scalars().all():
+            obj.soft_delete()
+            session.add(obj)
+
+    # WorkOrderADMonitoring: soft delete work orders for ADs belonging to this aircraft
+    ad_stmt = select(ADMonitoring.id).where(
+        ADMonitoring.aircraft_fk == aircraft_id
+    ).where(ADMonitoring.is_deleted == False)
+    ad_ids = [row[0] for row in (await session.execute(ad_stmt)).all()]
+    if ad_ids:
+        wo_stmt = select(WorkOrderADMonitoring).where(
+            WorkOrderADMonitoring.ad_monitoring_fk.in_(ad_ids),
+            WorkOrderADMonitoring.is_deleted == False,
+        )
+        for wo in (await session.execute(wo_stmt)).scalars().all():
+            wo.soft_delete()
+            session.add(wo)
+
+    # ADMonitoring
+    await _soft_delete_many(ADMonitoring, ADMonitoring.aircraft_fk, aircraft_id)
+    # LDNDMonitoring
+    await _soft_delete_many(LDNDMonitoring, LDNDMonitoring.aircraft_fk, aircraft_id)
+    # AircraftTechnicalLog
+    await _soft_delete_many(AircraftTechnicalLog, AircraftTechnicalLog.aircraft_fk, aircraft_id)
+    # AircraftLogbookEntry
+    await _soft_delete_many(AircraftLogbookEntry, AircraftLogbookEntry.aircraft_id, aircraft_id)
+    # EngineLogbook, AirframeLogbook, AvionicsLogbook, PropellerLogbook
+    await _soft_delete_many(EngineLogbook, EngineLogbook.aircraft_fk, aircraft_id)
+    await _soft_delete_many(AirframeLogbook, AirframeLogbook.aircraft_fk, aircraft_id)
+    await _soft_delete_many(AvionicsLogbook, AvionicsLogbook.aircraft_fk, aircraft_id)
+    await _soft_delete_many(PropellerLogbook, PropellerLogbook.aircraft_fk, aircraft_id)
+    # TCCMaintenance
+    await _soft_delete_many(TCCMaintenance, TCCMaintenance.aircraft_fk, aircraft_id)
+    # DocumentOnBoard
+    await _soft_delete_many(DocumentOnBoard, DocumentOnBoard.aircraft_id, aircraft_id)
+    # CPCPMonitoring
+    await _soft_delete_many(CPCPMonitoring, CPCPMonitoring.aircraft_id, aircraft_id)
+
+    # Aircraft
     aircraft.soft_delete()
     session.add(aircraft)
     await session.commit()
