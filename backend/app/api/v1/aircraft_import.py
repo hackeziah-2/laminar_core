@@ -14,11 +14,11 @@ router = APIRouter(
 
 @router.post(
     "/aircraft/import",
-    summary="Import aircraft from Excel",
-    description="Upload a .xlsx file with aircraft rows. Columns are matched by name (case-insensitive). Use dry_run=true to validate without saving.",
+    summary="Import aircraft from Excel or CSV",
+    description="Upload a .xlsx, .xls, or .csv file with aircraft rows. Columns are matched by name (case-insensitive). Use dry_run=true to validate without saving.",
 )
 async def import_aircraft_endpoint(
-    file: UploadFile = File(..., description="Excel file (.xlsx) with aircraft data"),
+    file: UploadFile = File(..., description="Excel (.xlsx, .xls) or CSV file with aircraft data"),
     dry_run: bool = Query(False, description="If true, validate only and return counts without writing"),
     session: AsyncSession = Depends(get_session),
 ):

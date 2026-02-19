@@ -89,16 +89,30 @@ class AircraftTechnicalLogBase(BaseModel):
     airframe_prev_time: Optional[float] = None
     airframe_flight_time: Optional[float] = None
     airframe_total_time: Optional[float] = None
+    airframe_run_time: Optional[float] = None
+    airframe_aftt: Optional[float] = None
 
     # Engine time fields
     engine_prev_time: Optional[float] = None
     engine_flight_time: Optional[float] = None
     engine_total_time: Optional[float] = None
+    engine_run_time: Optional[float] = None
+    engine_tsn: Optional[str] = Field(None, max_length=100)
+    engine_tso: Optional[float] = None
+    engine_tbo: Optional[float] = None
 
     # Propeller time fields
     propeller_prev_time: Optional[float] = None
     propeller_flight_time: Optional[float] = None
     propeller_total_time: Optional[float] = None
+    propeller_run_time: Optional[float] = None
+    propeller_tsn: Optional[float] = None
+    propeller_tso: Optional[float] = None
+    propeller_tbo: Optional[float] = None
+
+    # Life time limits
+    life_time_limit_engine: Optional[float] = None
+    life_time_limit_propeller: Optional[float] = None
 
     fuel_qty_left_uplift_qty: Optional[float] = None
     fuel_qty_right_uplift_qty: Optional[float] = None
@@ -174,16 +188,30 @@ class AircraftTechnicalLogUpdate(BaseModel):
     airframe_prev_time: Optional[float] = None
     airframe_flight_time: Optional[float] = None
     airframe_total_time: Optional[float] = None
+    airframe_run_time: Optional[float] = None
+    airframe_aftt: Optional[float] = None
 
     # Engine time fields
     engine_prev_time: Optional[float] = None
     engine_flight_time: Optional[float] = None
     engine_total_time: Optional[float] = None
+    engine_run_time: Optional[float] = None
+    engine_tsn: Optional[str] = Field(None, max_length=100)
+    engine_tso: Optional[float] = None
+    engine_tbo: Optional[float] = None
 
     # Propeller time fields
     propeller_prev_time: Optional[float] = None
     propeller_flight_time: Optional[float] = None
     propeller_total_time: Optional[float] = None
+    propeller_run_time: Optional[float] = None
+    propeller_tsn: Optional[float] = None
+    propeller_tso: Optional[float] = None
+    propeller_tbo: Optional[float] = None
+
+    # Life time limits
+    life_time_limit_engine: Optional[float] = None
+    life_time_limit_propeller: Optional[float] = None
 
     fuel_qty_left_uplift_qty: Optional[float] = None
     fuel_qty_right_uplift_qty: Optional[float] = None

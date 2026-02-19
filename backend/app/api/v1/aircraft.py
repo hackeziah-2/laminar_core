@@ -112,8 +112,13 @@ async def api_update_aircraft_with_file(
     )
 
 
-@router.delete("/{aircraft_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def api_delet_aircraft(aircraft_id: int, session: AsyncSession = Depends(get_session)):
+@router.delete(
+    "/{aircraft_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Soft delete aircraft",
+    description="Soft delete aircraft and all connected data (logbook entries, ATL, LDND, AD, TCC, documents, CPCP, engine/airframe/avionics/propeller logbooks). Sets is_deleted=True in a single transaction.",
+)
+async def api_delete_aircraft(aircraft_id: int, session: AsyncSession = Depends(get_session)):
     deleted = await soft_delete_aircraft(session, aircraft_id)
 
     if not deleted:

@@ -96,7 +96,7 @@ async def create_aircraft_technical_log(
             missing_sequences = []
         if missing_sequences:
             for seq_no in missing_sequences:
-                gap_entry = AircraftTechnicalLog(**{**log_data, 'sequence_no': seq_no})
+                gap_entry = AircraftTechnicalLog(sequence_no=seq_no, aircraft_fk=data.aircraft_fk)
                 session.add(gap_entry)
                 await session.flush()
 
@@ -249,7 +249,7 @@ async def list_aircraft_technical_logs(
             )
         )
 
-    # Whitelist sortable fields
+    # Whitelist sortable fields (includes new run_time, tsn, tbo, life_limits)
     sortable_fields = {
         "created_at": AircraftTechnicalLog.created_at,
         "updated_at": AircraftTechnicalLog.updated_at,
@@ -258,6 +258,18 @@ async def list_aircraft_technical_logs(
         "destination_date": AircraftTechnicalLog.destination_date,
         "origin_station": AircraftTechnicalLog.origin_station,
         "destination_station": AircraftTechnicalLog.destination_station,
+        "airframe_run_time": AircraftTechnicalLog.airframe_run_time,
+        "airframe_aftt": AircraftTechnicalLog.airframe_aftt,
+        "engine_run_time": AircraftTechnicalLog.engine_run_time,
+        "engine_tsn": AircraftTechnicalLog.engine_tsn,
+        "engine_tso": AircraftTechnicalLog.engine_tso,
+        "engine_tbo": AircraftTechnicalLog.engine_tbo,
+        "propeller_run_time": AircraftTechnicalLog.propeller_run_time,
+        "propeller_tsn": AircraftTechnicalLog.propeller_tsn,
+        "propeller_tso": AircraftTechnicalLog.propeller_tso,
+        "propeller_tbo": AircraftTechnicalLog.propeller_tbo,
+        "life_time_limit_engine": AircraftTechnicalLog.life_time_limit_engine,
+        "life_time_limit_propeller": AircraftTechnicalLog.life_time_limit_propeller,
     }
 
     # Multi-sort logic

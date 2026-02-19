@@ -63,16 +63,30 @@ class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin):
     airframe_prev_time = Column(Float, nullable=True)
     airframe_flight_time = Column(Float, nullable=True)
     airframe_total_time = Column(Float, nullable=True)
+    airframe_run_time = Column(Float, nullable=True)
+    airframe_aftt = Column(Float, nullable=True)
 
     # Engine time fields
     engine_prev_time = Column(Float, nullable=True)
     engine_flight_time = Column(Float, nullable=True)
     engine_total_time = Column(Float, nullable=True)
+    engine_run_time = Column(Float, nullable=True)
+    engine_tsn = Column(String(100), nullable=True)
+    engine_tso = Column(Float, nullable=True)
+    engine_tbo = Column(Float, nullable=True)
 
     # Propeller time fields
     propeller_prev_time = Column(Float, nullable=True)
     propeller_flight_time = Column(Float, nullable=True)
     propeller_total_time = Column(Float, nullable=True)
+    propeller_run_time = Column(Float, nullable=True)
+    propeller_tsn = Column(Float, nullable=True)
+    propeller_tso = Column(Float, nullable=True)
+    propeller_tbo = Column(Float, nullable=True)
+
+    # Life time limits
+    life_time_limit_engine = Column(Float, nullable=True)
+    life_time_limit_propeller = Column(Float, nullable=True)
 
     fuel_qty_left_uplift_qty = Column(Float)
     fuel_qty_right_uplift_qty = Column(Float)
