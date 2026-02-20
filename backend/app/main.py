@@ -15,6 +15,8 @@ from app.api.v1 import (
     aircraft_technical_logbook as atl_router,
     aircraft_technical_log as atl_new_router,
     account as account_router,
+    role as role_router,
+    module as module_router,
     logbooks as logbooks_router,
     document_on_board as document_on_board_router,
     ldnd_monitoring as ldnd_monitoring_router,
@@ -205,6 +207,8 @@ app.include_router(aircraft_router.router)
 app.include_router(atl_router.router)
 app.include_router(atl_new_router.router)
 app.include_router(account_router.router)
+app.include_router(role_router.router)
+app.include_router(module_router.router)
 app.include_router(logbooks_router.router)
 app.include_router(document_on_board_router.router)
 app.include_router(tcc_maintenance_router.router)

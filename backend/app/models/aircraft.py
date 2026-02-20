@@ -1,6 +1,6 @@
 import enum
 
-from sqlalchemy import Column, Integer, String, Text, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, Text, Float, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import ENUM as PGEnum
 from sqlalchemy.orm import relationship
 
@@ -19,7 +19,6 @@ class Aircraft(Base, TimestampMixin, SoftDeleteMixin):
     registration = Column(String(89), nullable=False, unique=True, index=True)
     manufacturer = Column(String(89), nullable=False, index=True)
     report_description = Column(Text, nullable=True)
-    type = Column(String, nullable=False, index=True)
     model = Column(String, nullable=False, index=True)
     msn = Column(String, nullable=False, unique=True, index=True)
     base = Column(String, nullable=False, index=True)
@@ -31,20 +30,20 @@ class Aircraft(Base, TimestampMixin, SoftDeleteMixin):
     )
 
     # Airframe Information
-    airframe_model = Column(String, nullable=True)
     airframe_service_manual = Column(String, nullable=True)
-    airframe_serial_number = Column(String, nullable=True)
     airframe_ipc = Column(String, nullable=True)
     
     # Engine Information
     engine_model = Column(String, nullable=True)
     engine_serial_number = Column(String, nullable=True)
     engine_arc = Column(String, nullable=True)
+    engine_life_time_limit = Column(Float, nullable=True)
     
     # Propeller Information
     propeller_model = Column(String, nullable=True)
     propeller_serial_number = Column(String, nullable=True)
     propeller_arc = Column(String, nullable=True)
+    propeller_life_time_limit = Column(Float, nullable=True)
 
     logbook_entries = relationship("AircraftLogbookEntry", back_populates="aircraft")
 
@@ -59,7 +58,7 @@ class Aircraft(Base, TimestampMixin, SoftDeleteMixin):
     tcc_maintenances = relationship("TCCMaintenance", foreign_keys="TCCMaintenance.aircraft_fk", back_populates="aircraft")
 
     def __repr__(self):
-        return f"<Aircraft(reg='{self.registration}', type='{self.type}', model='{self.model}')>"
+        return f"<Aircraft(reg='{self.registration}', model='{self.model}')>"
 
 
 class Airframe(Base, TimestampMixin, SoftDeleteMixin):

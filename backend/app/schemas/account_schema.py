@@ -10,9 +10,11 @@ class AccountInformationBase(BaseModel):
     last_name: str = Field(..., max_length=100)
     middle_name: Optional[str] = Field(None, max_length=100)
     username: str = Field(..., max_length=100)
+    email: Optional[str] = Field(None, max_length=150)
     designation: Optional[str] = Field(None, max_length=100)
     license_no: Optional[str] = Field(None, max_length=100)
     auth_stamp: Optional[str] = Field(None, max_length=255)
+    role_id: Optional[int] = Field(None, description="FK to roles")
     status: bool = Field(True, description="True for active, False for inactive")
 
 
@@ -29,10 +31,12 @@ class AccountInformationUpdate(BaseModel):
     last_name: Optional[str] = Field(None, max_length=100)
     middle_name: Optional[str] = Field(None, max_length=100)
     username: Optional[str] = Field(None, max_length=100)
+    email: Optional[str] = Field(None, max_length=150)
     password: Optional[str] = Field(None, min_length=6, max_length=72, description="Password must be 6-72 characters (bcrypt limit)")
     designation: Optional[str] = Field(None, max_length=100)
     license_no: Optional[str] = Field(None, max_length=100)
     auth_stamp: Optional[str] = Field(None, max_length=255)
+    role_id: Optional[int] = Field(None, description="FK to roles")
     status: Optional[bool] = Field(None, description="True for active, False for inactive")
 
 
@@ -42,6 +46,7 @@ class AccountInformationRead(AccountInformationBase):
     id: int
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    last_login: Optional[datetime] = None
     # Password is excluded for security - never return it in responses
 
     class Config:

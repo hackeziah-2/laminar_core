@@ -14,7 +14,6 @@ class AircraftBase(BaseModel):
     manufacturer: Optional[str]
     report_description: Optional[str]
 
-    type: Optional[str]
     model: Optional[str]
     msn : Optional[str]
     base: Optional[str]
@@ -22,18 +21,18 @@ class AircraftBase(BaseModel):
     status: Optional[str] = "Active"
 
     # Airframe Information
-    airframe_model: Optional[str]
     airframe_service_manual: Optional[str]
-    airframe_serial_number: Optional[str]
     airframe_ipc: Optional[str]
     
     # Engine Information
     engine_model: Optional[str]
     engine_serial_number: Optional[str]
+    engine_life_time_limit: Optional[float] = None
     
     # Propeller Information
     propeller_model: Optional[str]
     propeller_serial_number: Optional[str]
+    propeller_life_time_limit: Optional[float] = None
 
     engine_arc: Optional[str] = None
     propeller_arc: Optional[str] = None
@@ -65,25 +64,24 @@ class AircraftImportSchema(BaseModel):
     registration: str
     manufacturer: str
     report_description: Optional[str] = None
-    type: str
     model: str
     msn: str
     base: str
     ownership: str
     status: AircrarftStatus = AircrarftStatus.active
 
-    airframe_model: Optional[str] = None
     airframe_service_manual: Optional[str] = None
-    airframe_serial_number: Optional[str] = None
     airframe_ipc: Optional[str] = None
 
     engine_model: Optional[str] = None
     engine_serial_number: Optional[str] = None
     engine_arc: Optional[str] = None
+    engine_life_time_limit: Optional[float] = None
 
     propeller_model: Optional[str] = None
     propeller_serial_number: Optional[str] = None
     propeller_arc: Optional[str] = None
+    propeller_life_time_limit: Optional[float] = None
 
     @validator("status", pre=True)
     def normalize_status(cls, v):

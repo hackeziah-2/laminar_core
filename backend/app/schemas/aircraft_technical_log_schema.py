@@ -257,7 +257,6 @@ class AircraftRead(BaseModel):
     id: int
     registration: str
     model: str
-    type: str
 
     class Config:
         orm_mode = True
