@@ -151,11 +151,10 @@ async def export_excel(data: List[Dict]):
 @router.post("/reports/pdf")
 def export_pdf(aircraft_data: List[Dict]):
     # Prepare headers and rows dynamically
-    headers = ["AC REG", "AIRCRAFT TYPE", "MODEL", "MSN", "BASE LOCATION", "STATUS", "CREATED AT"]
+    headers = ["AC REG", "MODEL", "MSN", "BASE LOCATION", "STATUS", "CREATED AT"]
     data_rows = [
         [
             ac["registration"],
-            ac["type"],
             ac["model"],
             ac["msn"],
             ac["base"],

@@ -8,9 +8,10 @@ def generate_excel(data: list[dict], title="Aircraft Report"):
 
     # Desired column order
     columns = [
-       "registration", "msn", "type", "model", "status",
+       "registration", "msn", "model", "status",
         "engine_model", "engine_serial_number", "propeller_model", 
-        "propeller_serial_number", "base", "engine_arc", "propeller_arc", "created_at"
+        "propeller_serial_number", "base", "engine_arc", "propeller_arc",
+        "engine_life_time_limit", "propeller_life_time_limit", "created_at"
     ]
 
     wb = Workbook()

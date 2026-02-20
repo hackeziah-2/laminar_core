@@ -39,9 +39,23 @@ def _truncate_password(password: str) -> str:
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a plain password against a hashed password."""
+    if not plain_password or not hashed_password:
+        return False
+
     # Truncate plain password to 72 bytes before verification
     plain_password_truncated = _truncate_password(plain_password)
-    return pwd_context.verify(plain_password_truncated, hashed_password)
+
+    try:
+        return pwd_context.verify(plain_password_truncated, hashed_password)
+    except Exception:
+        # Defensive fallback for bcrypt backends that raise on long inputs.
+        # We still compare only the byte-truncated password (bcrypt limit: 72 bytes).
+        try:
+            password_bytes = plain_password_truncated.encode("utf-8")
+            hashed_bytes = hashed_password.encode("utf-8")
+            return bcrypt.checkpw(password_bytes, hashed_bytes)
+        except Exception:
+            return False
 
 
 def get_password_hash(password: str) -> str:

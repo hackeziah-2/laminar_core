@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Optional, List, Tuple
 
 from fastapi import HTTPException
@@ -5,6 +6,7 @@ from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.account import AccountInformation
+from app.models.role import Role
 from app.schemas.account_schema import (
     AccountInformationCreate,
     AccountInformationUpdate,
@@ -32,6 +34,34 @@ async def create_account_information(
             detail="Account with this username already exists"
         )
 
+    # Check for duplicate email if provided (excluding soft-deleted)
+    if getattr(data, "email", None):
+        result = await session.execute(
+            select(AccountInformation).where(
+                AccountInformation.email == data.email,
+                AccountInformation.is_deleted == False
+            )
+        )
+        if result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=400,
+                detail="Account with this email already exists"
+            )
+
+    # Validate role_id FK before insert (clean API error instead of DB FK error)
+    if getattr(data, "role_id", None) is not None:
+        role_result = await session.execute(
+            select(Role).where(
+                Role.id == data.role_id,
+                Role.is_deleted == False,
+            )
+        )
+        if role_result.scalar_one_or_none() is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid role_id: {data.role_id}. Role does not exist.",
+            )
+
     # Hash password before storing (get_password_hash handles truncation)
     account_data = data.dict(exclude={'password'})
     
@@ -56,9 +86,6 @@ async def create_account_information(
             status_code=400,
             detail=f"Failed to create account: {str(e)}"
         )
-    session.add(account)
-    await session.commit()
-    await session.refresh(account)
     return AccountInformationRead.from_orm(account)
 
 
@@ -91,10 +118,10 @@ async def update_account_information(
     update_data = account_in.dict(exclude_unset=True, exclude={'password'})
     
     # Check for duplicate username if username is being updated (excluding soft-deleted)
-    if 'username' in update_data:
+    if "username" in update_data:
         result = await session.execute(
             select(AccountInformation).where(
-                AccountInformation.username == update_data['username'],
+                AccountInformation.username == update_data["username"],
                 AccountInformation.id != account_id,
                 AccountInformation.is_deleted == False
             )
@@ -103,6 +130,35 @@ async def update_account_information(
             raise HTTPException(
                 status_code=400,
                 detail="Account with this username already exists"
+            )
+
+    # Check for duplicate email if email is being updated (excluding soft-deleted)
+    if "email" in update_data and update_data["email"]:
+        result = await session.execute(
+            select(AccountInformation).where(
+                AccountInformation.email == update_data["email"],
+                AccountInformation.id != account_id,
+                AccountInformation.is_deleted == False
+            )
+        )
+        if result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=400,
+                detail="Account with this email already exists"
+            )
+
+    # Validate role_id FK before update (allow explicit null to unassign role)
+    if "role_id" in update_data and update_data["role_id"] is not None:
+        role_result = await session.execute(
+            select(Role).where(
+                Role.id == update_data["role_id"],
+                Role.is_deleted == False,
+            )
+        )
+        if role_result.scalar_one_or_none() is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid role_id: {update_data['role_id']}. Role does not exist.",
             )
     
     # Hash password if provided (get_password_hash handles truncation)
@@ -150,6 +206,7 @@ async def list_account_informations(
         stmt = stmt.where(
             or_(
                 AccountInformation.username.ilike(q),
+                AccountInformation.email.ilike(q),
                 AccountInformation.first_name.ilike(q),
                 AccountInformation.last_name.ilike(q),
                 AccountInformation.middle_name.ilike(q),
@@ -162,9 +219,11 @@ async def list_account_informations(
     sortable_fields = {
         "id": AccountInformation.id,
         "username": AccountInformation.username,
+        "email": AccountInformation.email,
         "first_name": AccountInformation.first_name,
         "last_name": AccountInformation.last_name,
         "status": AccountInformation.status,
+        "last_login": AccountInformation.last_login,
         "created_at": AccountInformation.created_at,
         "updated_at": AccountInformation.updated_at,
     }
@@ -198,6 +257,7 @@ async def list_account_informations(
         count_stmt = count_stmt.where(
             or_(
                 AccountInformation.username.ilike(q),
+                AccountInformation.email.ilike(q),
                 AccountInformation.first_name.ilike(q),
                 AccountInformation.last_name.ilike(q),
                 AccountInformation.middle_name.ilike(q),
@@ -239,7 +299,7 @@ async def get_all_account_informations_list(
             # Use OR to match any of the designations
             stmt = stmt.where(or_(*designation_filters))
     
-    # Search functionality - search across name fields and license_no
+    # Search functionality - search across name fields, email, license_no
     if search:
         q = f"%{search}%"
         stmt = stmt.where(
@@ -249,6 +309,7 @@ async def get_all_account_informations_list(
                 AccountInformation.middle_name.ilike(q),
                 AccountInformation.license_no.ilike(q),
                 AccountInformation.username.ilike(q),
+                AccountInformation.email.ilike(q),
             )
         )
     
@@ -270,6 +331,21 @@ async def soft_delete_account_information(
         return False
 
     obj.soft_delete()
+    session.add(obj)
+    await session.commit()
+    return True
+
+
+async def update_last_login(
+    session: AsyncSession,
+    account_id: int,
+    login_time: Optional[datetime] = None
+) -> bool:
+    """Update last_login timestamp for an Account Information entry."""
+    obj = await session.get(AccountInformation, account_id)
+    if not obj or obj.is_deleted:
+        return False
+    obj.last_login = login_time or datetime.now(timezone.utc)
     session.add(obj)
     await session.commit()
     return True
