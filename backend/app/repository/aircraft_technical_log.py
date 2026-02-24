@@ -55,8 +55,11 @@ async def create_aircraft_technical_log(
 
     # Prepare log data dictionary
     log_data = data.dict(exclude={'component_parts'})
-    if isinstance(log_data.get('nature_of_flight'), str):
-        log_data['nature_of_flight'] = TypeEnum(log_data['nature_of_flight'])
+    nf = log_data.get('nature_of_flight')
+    if nf is None or (isinstance(nf, str) and (not str(nf).strip() or str(nf).strip() == "-")):
+        log_data['nature_of_flight'] = None
+    elif isinstance(nf, str):
+        log_data['nature_of_flight'] = TypeEnum(nf)
 
     # Get latest ATL for this aircraft (for hobbs/tach and for gap detection)
     latest_stmt = (
@@ -176,9 +179,13 @@ async def update_aircraft_technical_log(
     update_data.pop('hobbs_meter_start', None)
     update_data.pop('tachometer_start', None)
     
-    # Handle enum conversion
-    if 'nature_of_flight' in update_data and isinstance(update_data['nature_of_flight'], str):
-        update_data['nature_of_flight'] = TypeEnum(update_data['nature_of_flight'])
+    # nature_of_flight is optional; None, empty string, or "-" -> None
+    if 'nature_of_flight' in update_data:
+        nf = update_data['nature_of_flight']
+        if nf is None or (isinstance(nf, str) and (not str(nf).strip() or str(nf).strip() == "-")):
+            update_data['nature_of_flight'] = None
+        elif isinstance(nf, str):
+            update_data['nature_of_flight'] = TypeEnum(nf)
 
     for k, v in update_data.items():
         setattr(obj, k, v)

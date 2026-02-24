@@ -253,8 +253,8 @@ async def create_airframe_logbook(
         session.add(entry)
         await session.flush()
         for cr in data.component_parts or []:
-            rec = AirframeComponentRecord(**cr.dict())
-            entry.airframe_component_parts.append(rec)
+            rec = AirframeComponentRecord(airframe_log_fk=entry.id, **cr.dict())
+            session.add(rec)
         await session.flush()
         await session.commit()
         # Re-fetch with component_parts so response includes them

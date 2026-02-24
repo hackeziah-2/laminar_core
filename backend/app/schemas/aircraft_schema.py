@@ -1,7 +1,11 @@
 from enum import Enum
+from pathlib import Path
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, validator, root_validator
+
+# Extensions treated as images (for modal preview in Aircraft Details)
+_IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"})
 
 
 class AircrarftStatus(str, Enum):
@@ -49,6 +53,34 @@ class AircraftUpdate(AircraftBase):
 
 class AircraftOut(AircraftBase):
     id: int
+    # For Aircraft Details: download button and modal view when image
+    engine_arc_download_url: Optional[str] = None
+    propeller_arc_download_url: Optional[str] = None
+    engine_arc_is_image: Optional[bool] = None
+    propeller_arc_is_image: Optional[bool] = None
+
+    @root_validator(pre=True)
+    def inject_download_urls_and_is_image(cls, v: Any) -> Any:
+        if not hasattr(v, "id"):
+            return v
+        # Build dict from ORM for Pydantic; add download URLs and is_image hints
+        base_keys = [
+            "id", "registration", "manufacturer", "report_description", "model", "msn",
+            "base", "ownership", "status", "airframe_service_manual", "airframe_ipc",
+            "engine_model", "engine_serial_number", "engine_life_time_limit",
+            "propeller_model", "propeller_serial_number", "propeller_life_time_limit",
+            "engine_arc", "propeller_arc",
+        ]
+        d = {k: getattr(v, k, None) for k in base_keys if hasattr(v, k)}
+        aid = getattr(v, "id", None)
+        engine_arc = getattr(v, "engine_arc", None)
+        propeller_arc = getattr(v, "propeller_arc", None)
+        d["engine_arc_download_url"] = f"/api/v1/aircraft/{aid}/files/engine-arc" if engine_arc else None
+        d["propeller_arc_download_url"] = f"/api/v1/aircraft/{aid}/files/propeller-arc" if propeller_arc else None
+        d["engine_arc_is_image"] = Path(engine_arc).suffix.lower() in _IMAGE_EXTENSIONS if engine_arc else False
+        d["propeller_arc_is_image"] = Path(propeller_arc).suffix.lower() in _IMAGE_EXTENSIONS if propeller_arc else False
+        return d
+
     class Config:
         orm_mode = True
 

@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from math import ceil
 from typing import List, Dict
@@ -13,7 +14,7 @@ from fastapi import (
     Depends,
     status
 )
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,12 +23,14 @@ from app.schemas import aircraft_schema, aircraft_technical_log_schema
 from app.repository.aircraft import (
     list_aircraft,
     get_aircraft,
+    get_aircraft_raw,
     create_aircraft_with_file,
     update_aircraft_with_file,
     soft_delete_aircraft
 )
 from app.repository.aircraft_technical_log import search_atl_by_sequence_no
 from app.database import get_session
+from app.upload_config import UPLOAD_DIR
 from app.services.generate_report_excel import generate_excel
 from app.services.generate_report_pdf import generate_pdf_report
 
@@ -74,6 +77,73 @@ async def api_get(aircraft_id: int, session: AsyncSession = Depends(get_session)
     if not obj:
         raise HTTPException(status_code=404, detail="Aircraft not found")
     return obj
+
+
+def _serve_aircraft_file(
+    file_path: Optional[str],
+    filename_for_response: str,
+    disposition: str = "attachment",
+) -> FileResponse:
+    """Resolve aircraft file path under UPLOAD_DIR and return FileResponse or raise 404."""
+    if not file_path or not str(file_path).strip():
+        raise HTTPException(status_code=404, detail="File not found")
+    path = Path(file_path).resolve()
+    upload_root = Path(UPLOAD_DIR).resolve()
+    if not path.is_file() or not str(path).startswith(str(upload_root)):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(
+        path=path,
+        filename=path.name,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'{disposition}; filename="{path.name}"'},
+    )
+
+
+@router.get(
+    "/{aircraft_id}/files/engine-arc",
+    summary="Engine ARC: Download or View",
+    description=(
+        "**Download:** Call with no query (or disposition=attachment) to get the file as attachment. "
+        "**View:** Call with ?disposition=inline to display in browser (use for modal/preview when engine_arc_is_image is true)."
+    ),
+    response_description="File content",
+    tags=["aircrafts"],
+)
+async def api_download_engine_arc(
+    aircraft_id: int,
+    disposition: Optional[str] = Query("attachment", description="'attachment' = Download; 'inline' = View in browser/modal"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Engine ARC: Download (attachment) or View (inline for modal)."""
+    raw = await get_aircraft_raw(session, aircraft_id)
+    if not raw or not getattr(raw, "engine_arc", None):
+        raise HTTPException(status_code=404, detail="Engine ARC file not found")
+    disp = "inline" if (disposition or "").strip().lower() == "inline" else "attachment"
+    return _serve_aircraft_file(raw.engine_arc, "engine-arc", disp)
+
+
+@router.get(
+    "/{aircraft_id}/files/propeller-arc",
+    summary="Propeller ARC: Download or View",
+    description=(
+        "**Download:** Call with no query (or disposition=attachment) to get the file as attachment. "
+        "**View:** Call with ?disposition=inline to display in browser (use for modal/preview when propeller_arc_is_image is true)."
+    ),
+    response_description="File content",
+    tags=["aircrafts"],
+)
+async def api_download_propeller_arc(
+    aircraft_id: int,
+    disposition: Optional[str] = Query("attachment", description="'attachment' = Download; 'inline' = View in browser/modal"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Propeller ARC: Download (attachment) or View (inline for modal)."""
+    raw = await get_aircraft_raw(session, aircraft_id)
+    if not raw or not getattr(raw, "propeller_arc", None):
+        raise HTTPException(status_code=404, detail="Propeller ARC file not found")
+    disp = "inline" if (disposition or "").strip().lower() == "inline" else "attachment"
+    return _serve_aircraft_file(raw.propeller_arc, "propeller-arc", disp)
+
 
 @router.post("/", response_model=aircraft_schema.AircraftOut)
 async def api_create_aircraft_with_file(
