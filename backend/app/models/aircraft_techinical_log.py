@@ -19,10 +19,11 @@ from app.database import Base, TimestampMixin, SoftDeleteMixin
 class TypeEnum(str, enum.Enum):
     TR = "TR"
     PSF = "PSF"
-    PRF ="PRF"
+    PRF = "PRF"
     EGR = "EGR"
     ME = "ME"
     TR_WITH_PIREM = "TR_WITH_PIREM"
+    VOID = "VOID"
 
 
 class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin):
@@ -35,7 +36,6 @@ class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin):
 
     nature_of_flight = Column(
         PGEnum(TypeEnum, name="nature_of_flight", create_type=True),
-        default=TypeEnum.TR,
         nullable=True,
     )
     next_inspection_due = Column(String(100), nullable=True)

@@ -63,7 +63,7 @@ class ComponentPartsRecordRead(ComponentPartsRecordBase):
 class AircraftTechnicalLogBase(BaseModel):
     aircraft_fk: int = Field(..., description="Aircraft ID (required).")
     sequence_no: str = Field(..., max_length=50, description="ATL sequence number (required).")
-    nature_of_flight: Optional[TypeEnum] = TypeEnum.TR
+    nature_of_flight: Optional[TypeEnum] = None
     next_inspection_due: Optional[str] = Field(None, max_length=100)
     tach_time_due: Optional[float] = None
 
@@ -146,6 +146,20 @@ class AircraftTechnicalLogBase(BaseModel):
     dfp: Optional[str] = None
 
     component_parts: Optional[List[ComponentPartsRecordCreate]] = []
+
+    @validator("nature_of_flight", pre=True)
+    def empty_str_to_none_nature_of_flight(cls, v: Any) -> Any:
+        """Treat empty string or "-" as None for optional nature_of_flight."""
+        if v is None or (isinstance(v, str) and (not str(v).strip() or str(v).strip() == "-")):
+            return None
+        return v
+
+    @validator("origin_station", "origin_date", "destination_station", "destination_date", pre=True)
+    def empty_str_to_none_origin_dest(cls, v: Any) -> Any:
+        """Treat empty string as None for origin/destination fields."""
+        if v is None or (isinstance(v, str) and not str(v).strip()):
+            return None
+        return v
 
     @validator("origin_time", "destination_time", "pilot_accept_time", "rts_time", pre=True)
     def parse_time_fields(cls, v: Any) -> Any:
@@ -246,6 +260,20 @@ class AircraftTechnicalLogUpdate(BaseModel):
 
     component_parts: Optional[List[ComponentPartsRecordCreate]] = None
 
+    @validator("nature_of_flight", pre=True)
+    def empty_str_to_none_nature_of_flight_update(cls, v: Any) -> Any:
+        """Treat empty string or "-" as None for optional nature_of_flight."""
+        if v is None or (isinstance(v, str) and (not str(v).strip() or str(v).strip() == "-")):
+            return None
+        return v
+
+    @validator("origin_station", "origin_date", "destination_station", "destination_date", pre=True)
+    def empty_str_to_none_origin_dest_update(cls, v: Any) -> Any:
+        """Treat empty string as None for origin/destination fields."""
+        if v is None or (isinstance(v, str) and not str(v).strip()):
+            return None
+        return v
+
     @validator("origin_time", "destination_time", "pilot_accept_time", "rts_time", pre=True)
     def parse_time_fields(cls, v: Any) -> Any:
         """Accept Zulu time strings (HH:MM or HH:MM:SS) and convert to time."""
@@ -280,6 +308,13 @@ class AircraftTechnicalLogRead(AircraftTechnicalLogBase):
     component_parts: List[ComponentPartsRecordRead] = []
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # Display value: "-" when nature_of_flight is None/empty
+    nature_of_flight_display: Optional[str] = None
+
+    @validator("nature_of_flight_display", always=True)
+    def set_nature_of_flight_display(cls, v: Any, values: dict) -> str:
+        nof = values.get("nature_of_flight")
+        return nof.value if nof is not None else "-"
 
     class Config:
         orm_mode = True

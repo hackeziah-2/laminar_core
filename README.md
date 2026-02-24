@@ -83,6 +83,39 @@ The scaffold includes an initial migration in `backend/alembic/versions/`.
 - Token: POST /api/v1/auth/token (use OAuth2 password flow)
 - Use `Authorization: Bearer <token>` to access protected endpoints.
 
+## Aircraft Details – Engine ARC & Propeller ARC (Download & View)
+
+On the **Aircraft Details** screen, for **Engine ARC** and **Propeller ARC** (when a file exists), show two actions as in the UI reference:
+
+| Action    | Icon        | Behavior |
+|----------|-------------|----------|
+| **Download** | Down-arrow (blue) | Opens the file as a download (attachment). |
+| **View**     | Eye (blue)        | Opens the file in the browser; use for **modal preview** (especially when the file is an image). |
+
+### API usage
+
+1. **Get aircraft details**  
+   `GET /api/v1/aircraft/{aircraft_id}` returns (among others):
+   - `engine_arc_download_url` – e.g. `/api/v1/aircraft/1/files/engine-arc`
+   - `propeller_arc_download_url` – e.g. `/api/v1/aircraft/1/files/propeller-arc`
+   - `engine_arc_is_image` / `propeller_arc_is_image` – `true` when the file is an image (use to show **View** and open in a modal).
+
+2. **Download** (down-arrow button)  
+   Use the download URL as-is (no query):  
+   - Engine: `{baseUrl}{engine_arc_download_url}`  
+   - Propeller: `{baseUrl}{propeller_arc_download_url}`  
+   Response is `Content-Disposition: attachment` so the file downloads.
+
+3. **View** (eye button, e.g. modal)  
+   Same URL with `?disposition=inline`:  
+   - Engine: `{baseUrl}{engine_arc_download_url}?disposition=inline`  
+   - Propeller: `{baseUrl}{propeller_arc_download_url}?disposition=inline`  
+   Response is `Content-Disposition: inline` so the browser can display it. For images, use this URL as the `src` of an `<img>` inside your modal (or open in a new tab/iframe).
+
+Only show **Download** and **View** when the corresponding `*_download_url` is present (i.e. the aircraft has that file). Optionally show **View** only when `*_is_image` is true if you want the modal only for images.
+
+---
+
 ## Document On Board
 
 Documents-on-board can be accessed globally or scoped to a specific aircraft.

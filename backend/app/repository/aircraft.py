@@ -28,13 +28,18 @@ from app.schemas.aircraft_schema import AircraftCreate, AircraftOut, AircraftUpd
 from typing import List, Optional, Tuple
 
 async def get_aircraft(session: AsyncSession, id: int) -> Optional[AircraftOut]:
-    result = await session.execute(
-        select(Aircraft).where(Aircraft.id == id).where(Aircraft.is_deleted == False)
-    )
-    aircraft = result.scalar_one_or_none()
+    aircraft = await get_aircraft_raw(session, id)
     if not aircraft:
         return None
     return AircraftOut.from_orm(aircraft)
+
+
+async def get_aircraft_raw(session: AsyncSession, id: int):
+    """Return the Aircraft ORM model or None (for internal use, e.g. file paths)."""
+    result = await session.execute(
+        select(Aircraft).where(Aircraft.id == id).where(Aircraft.is_deleted == False)
+    )
+    return result.scalar_one_or_none()
 
 async def list_aircraft(
     session: AsyncSession,
