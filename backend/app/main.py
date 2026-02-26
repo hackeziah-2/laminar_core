@@ -10,10 +10,11 @@ from sqlalchemy import text
 from app.api.v1 import (
     flights as flights_router,
     aircraft as aircraft_router,
-    aircraft_import as excel_data_router,
+    data_import as excel_data_router,
     auth as auth_router,
     aircraft_technical_logbook as atl_router,
     aircraft_technical_log as atl_new_router,
+    atl as atl_paged_router,
     account as account_router,
     role as role_router,
     module as module_router,
@@ -206,6 +207,7 @@ app.include_router(tcc_maintenance_router.router_aircraft_scoped)
 app.include_router(aircraft_router.router)
 app.include_router(atl_router.router)
 app.include_router(atl_new_router.router)
+app.include_router(atl_paged_router.router)
 app.include_router(account_router.router)
 app.include_router(role_router.router)
 app.include_router(module_router.router)

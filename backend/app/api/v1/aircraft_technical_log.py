@@ -76,7 +76,7 @@ async def api_search_by_sequence(
     aircraft_id: Optional[int] = Query(None, description="Filter by aircraft ID (e.g. when on aircraft-scoped TCC form)"),
     session: AsyncSession = Depends(get_session)
 ):
-    """Search by ATL Sequence Number for TCC ATL Reference dropdown. Returns id (use as atl_ref), sequence_no, and aircraft (id, registration, model)."""
+    """Search by ATL Sequence Number for Sequence No. / ATL Reference (type to search). Accepts 'ATL-24451' or '24451'. Returns id (use as atl_ref), sequence_no, sequence_no_display (e.g. 'ATL-24451' for dropdown label), and aircraft (id, registration, model)."""
     if not search or not str(search).strip():
         return []
     items = await search_atl_by_sequence_no(

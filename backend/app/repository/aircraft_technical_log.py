@@ -118,16 +118,27 @@ async def create_aircraft_technical_log(
 
     return AircraftTechnicalLogRead.from_orm(entry)
 
+def _normalize_atl_search(search: str) -> str:
+    """Normalize ATL sequence search: strip and optionally remove leading 'ATL-' so 'ATL-24451' or '24451' both match."""
+    s = str(search).strip()
+    if not s:
+        return s
+    if s.upper().startswith("ATL-"):
+        s = s[4:].strip() or s
+    return s
+
+
 async def search_atl_by_sequence_no(
     session: AsyncSession,
     search: str,
     aircraft_fk: Optional[int] = None,
     limit: int = 50,
 ) -> List[AircraftTechnicalLog]:
-    """Search Aircraft Technical Log by ATL Sequence Number. Optionally filter by aircraft. Returns list with aircraft loaded."""
+    """Search Aircraft Technical Log by ATL Sequence Number. Optionally filter by aircraft. Returns list with aircraft loaded. Accepts 'ATL-24451' or '24451'."""
     if not search or not str(search).strip():
         return []
-    q = f"%{str(search).strip()}%"
+    normalized = _normalize_atl_search(search)
+    q = f"%{normalized}%"
     stmt = (
         select(AircraftTechnicalLog)
         .options(selectinload(AircraftTechnicalLog.aircraft))
@@ -216,6 +227,88 @@ async def update_aircraft_technical_log(
     await session.refresh(obj, ['aircraft', 'component_parts'])
 
     return AircraftTechnicalLogRead.from_orm(obj)
+
+
+async def get_previous_atl(
+    session: AsyncSession,
+    aircraft_fk: int,
+    sequence_no: str,
+) -> Optional[AircraftTechnicalLog]:
+    """Get the previous ATL for the same aircraft: the row with the latest sequence_no that is less than the given sequence_no (immediate predecessor by sequence order). Used for auto_comp 'Previous' values. Excludes soft-deleted."""
+    stmt = (
+        select(AircraftTechnicalLog)
+        .where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
+        .where(AircraftTechnicalLog.sequence_no < sequence_no)
+        .where(AircraftTechnicalLog.is_deleted.is_(False))
+        .order_by(AircraftTechnicalLog.sequence_no.desc())
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def list_atl_paged(
+    session: AsyncSession,
+    limit: int = 10,
+    offset: int = 0,
+    search: Optional[str] = None,
+    nature_of_flight: Optional[str] = None,
+    sort_sequence: str = "asc",
+    aircraft_fk: Optional[int] = None,
+) -> Tuple[List[AircraftTechnicalLog], int]:
+    """List ATL entries for /api/v1/aircraft/{aircraft_id}/atl/paged: search by sequence_no, filter by nature_of_flight, sort by sequence_no, always filter by aircraft_fk when provided."""
+    # Exclude soft-deleted ATL (is_deleted = True must not be included); exclude ATLs whose aircraft is soft-deleted
+    stmt = (
+        select(AircraftTechnicalLog)
+        .options(
+            selectinload(AircraftTechnicalLog.aircraft),
+            selectinload(AircraftTechnicalLog.component_parts)
+        )
+        .join(Aircraft, AircraftTechnicalLog.aircraft_fk == Aircraft.id)
+        .where(AircraftTechnicalLog.is_deleted.is_(False))
+        .where(Aircraft.is_deleted.is_(False))
+    )
+    if aircraft_fk is not None:
+        stmt = stmt.where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
+    if search and str(search).strip():
+        q = f"%{search.strip()}%"
+        stmt = stmt.where(AircraftTechnicalLog.sequence_no.ilike(q))
+    if nature_of_flight and str(nature_of_flight).strip():
+        try:
+            nf = TypeEnum(nature_of_flight.strip().upper().replace(" ", "_"))
+            stmt = stmt.where(AircraftTechnicalLog.nature_of_flight == nf)
+        except ValueError:
+            pass
+    if sort_sequence.lower() == "desc":
+        stmt = stmt.order_by(AircraftTechnicalLog.sequence_no.desc())
+    else:
+        stmt = stmt.order_by(AircraftTechnicalLog.sequence_no.asc())
+
+    count_stmt = (
+        select(func.count())
+        .select_from(AircraftTechnicalLog)
+        .join(Aircraft, AircraftTechnicalLog.aircraft_fk == Aircraft.id)
+        .where(AircraftTechnicalLog.is_deleted.is_(False))
+        .where(Aircraft.is_deleted.is_(False))
+    )
+    if aircraft_fk is not None:
+        count_stmt = count_stmt.where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
+    if search and str(search).strip():
+        q = f"%{search.strip()}%"
+        count_stmt = count_stmt.where(AircraftTechnicalLog.sequence_no.ilike(q))
+    if nature_of_flight and str(nature_of_flight).strip():
+        try:
+            nf = TypeEnum(nature_of_flight.strip().upper().replace(" ", "_"))
+            count_stmt = count_stmt.where(AircraftTechnicalLog.nature_of_flight == nf)
+        except ValueError:
+            pass
+
+    total = (await session.execute(count_stmt)).scalar()
+    total = int(total) if total is not None else 0
+    stmt = stmt.limit(limit).offset(offset)
+    result = await session.execute(stmt)
+    items = result.scalars().all()
+    return items, total
 
 
 async def list_aircraft_technical_logs(
