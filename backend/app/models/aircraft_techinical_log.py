@@ -24,6 +24,7 @@ class TypeEnum(str, enum.Enum):
     ME = "ME"
     TR_WITH_PIREM = "TR_WITH_PIREM"
     VOID = "VOID"
+    ATL_REPL = "ATL_REPL"
 
 
 class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin):
