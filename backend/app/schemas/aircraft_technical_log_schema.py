@@ -5,7 +5,7 @@ from typing import Optional, List, Any
 import pandas as pd
 from pydantic import BaseModel, Field, validator, root_validator
 
-from app.models.aircraft_techinical_log import TypeEnum
+from app.models.aircraft_techinical_log import TypeEnum, WorkStatus
 
 
 def normalize_datetime(value: Any) -> Any:
@@ -216,20 +216,24 @@ class AircraftTechnicalLogBase(BaseModel):
     white_atl: Optional[str] = None
     dfp: Optional[str] = None
 
+    created_by: Optional[int] = None
+    updated_by: Optional[int] = None
+    work_status: Optional[WorkStatus] = None
+
     component_parts: Optional[List[ComponentPartsRecordCreate]] = []
+
+    @validator("nature_of_flight", pre=True)
+    def empty_str_to_none_nature_of_flight(cls, v: Any) -> Any:
+        """Treat empty string, whitespace-only, or "-" as None so DB stores NULL."""
+        if v is None or (isinstance(v, str) and (not str(v).strip() or str(v).strip() == "-")):
+            return None
+        return v
 
     @validator("nature_of_flight", pre=True)
     def normalize_enum(cls, v: Any) -> Any:
         """Normalize string: strip, upper, replace spaces with underscores (e.g. ATL REPL -> ATL_REPL)."""
         if isinstance(v, str):
             return v.strip().upper().replace(" ", "_")
-        return v
-
-    @validator("nature_of_flight", pre=True)
-    def empty_str_to_none_nature_of_flight(cls, v: Any) -> Any:
-        """Treat empty string or "-" as None for optional nature_of_flight."""
-        if v is None or (isinstance(v, str) and (not str(v).strip() or str(v).strip() == "-")):
-            return None
         return v
 
     @validator("origin_station", "origin_date", "destination_station", "destination_date", pre=True)
@@ -414,20 +418,24 @@ class AircraftTechnicalLogUpdate(BaseModel):
     white_atl: Optional[str] = None
     dfp: Optional[str] = None
 
+    created_by: Optional[int] = None
+    updated_by: Optional[int] = None
+    work_status: Optional[WorkStatus] = None
+
     component_parts: Optional[List[ComponentPartsRecordCreate]] = None
+
+    @validator("nature_of_flight", pre=True)
+    def empty_str_to_none_nature_of_flight_update(cls, v: Any) -> Any:
+        """Treat empty string, whitespace-only, or "-" as None so DB stores NULL."""
+        if v is None or (isinstance(v, str) and (not str(v).strip() or str(v).strip() == "-")):
+            return None
+        return v
 
     @validator("nature_of_flight", pre=True)
     def normalize_enum_update(cls, v: Any) -> Any:
         """Normalize string: strip, upper, replace spaces with underscores."""
         if isinstance(v, str):
             return v.strip().upper().replace(" ", "_")
-        return v
-
-    @validator("nature_of_flight", pre=True)
-    def empty_str_to_none_nature_of_flight_update(cls, v: Any) -> Any:
-        """Treat empty string or "-" as None for optional nature_of_flight."""
-        if v is None or (isinstance(v, str) and (not str(v).strip() or str(v).strip() == "-")):
-            return None
         return v
 
     @validator("origin_station", "origin_date", "destination_station", "destination_date", pre=True)
@@ -482,6 +490,9 @@ class AircraftTechnicalLogRead(AircraftTechnicalLogBase):
     component_parts: List[ComponentPartsRecordRead] = []
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    created_by: Optional[int] = None
+    updated_by: Optional[int] = None
+    work_status: Optional[WorkStatus] = None
     # Display value: "-" when nature_of_flight is None/empty
     nature_of_flight_display: Optional[str] = None
 

@@ -27,6 +27,16 @@ class TypeEnum(str, enum.Enum):
     ATL_REPL = "ATL_REPL"
 
 
+class WorkStatus(str, enum.Enum):
+    FOR_REVIEW = "FOR_REVIEW"
+    REJECTED_MAINTENANCE = "REJECTED_MAINTENANCE"
+    APPROVED = "APPROVED"
+    AWAITING_ATTACHMENT = "AWAITING_ATTACHMENT"
+    REJECTED_QUALITY = "REJECTED_QUALITY"
+    PENDING = "PENDING"
+    COMPLETED = "COMPLETED"
+
+
 class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "aircraft_technical_log"
 
@@ -121,6 +131,13 @@ class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin):
 
     white_atl = Column(Text)
     dfp =  Column(Text)
+
+    created_by = Column(Integer, ForeignKey("account_information.id"), nullable=True)
+    updated_by = Column(Integer, ForeignKey("account_information.id"), nullable=True)
+    work_status = Column(
+        PGEnum(WorkStatus, name="work_status", create_type=False),
+        nullable=True,
+    )
 
     aircraft = relationship("Aircraft", back_populates="atl_logs")
     component_parts = relationship(

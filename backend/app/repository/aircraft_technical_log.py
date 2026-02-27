@@ -9,7 +9,8 @@ from sqlalchemy.orm import selectinload, joinedload
 from app.models.aircraft_techinical_log import (
     AircraftTechnicalLog,
     ComponentPartsRecord,
-    TypeEnum
+    TypeEnum,
+    WorkStatus,
 )
 from app.models.aircraft import Aircraft
 from app.schemas.aircraft_technical_log_schema import (
@@ -55,11 +56,26 @@ async def create_aircraft_technical_log(
 
     # Prepare log data dictionary
     log_data = data.dict(exclude={'component_parts'})
+    # nature_of_flight: empty string or "" -> NULL in DB; otherwise preserve from payload
     nf = log_data.get('nature_of_flight')
     if nf is None or (isinstance(nf, str) and (not str(nf).strip() or str(nf).strip() == "-")):
         log_data['nature_of_flight'] = None
     elif isinstance(nf, str):
         log_data['nature_of_flight'] = TypeEnum(nf)
+    if data.nature_of_flight is not None:
+        log_data['nature_of_flight'] = data.nature_of_flight
+    else:
+        log_data['nature_of_flight'] = None  # ensure NULL when empty/omitted
+
+    # work_status: apply from payload or leave unset so DB default (FOR_REVIEW) applies
+    ws = log_data.get('work_status')
+    if ws is not None:
+        if isinstance(ws, str):
+            log_data['work_status'] = WorkStatus(ws)
+        else:
+            log_data['work_status'] = ws
+    else:
+        log_data.pop('work_status', None)  # use DB default
 
     # Get latest ATL for this aircraft (for hobbs/tach and for gap detection)
     latest_stmt = (
@@ -88,6 +104,8 @@ async def create_aircraft_technical_log(
 
     # Create the main ATL entry (use model, not schema)
     entry = AircraftTechnicalLog(**{**log_data, 'sequence_no': data.sequence_no})
+    # Persist NULL when empty/omitted; otherwise use validated value
+    entry.nature_of_flight = data.nature_of_flight if data.nature_of_flight is not None else None
     session.add(entry)
     await session.flush()
 
@@ -190,13 +208,20 @@ async def update_aircraft_technical_log(
     update_data.pop('hobbs_meter_start', None)
     update_data.pop('tachometer_start', None)
     
-    # nature_of_flight is optional; None, empty string, or "-" -> None
+    # nature_of_flight: empty string or "" -> NULL in DB
     if 'nature_of_flight' in update_data:
         nf = update_data['nature_of_flight']
         if nf is None or (isinstance(nf, str) and (not str(nf).strip() or str(nf).strip() == "-")):
             update_data['nature_of_flight'] = None
         elif isinstance(nf, str):
             update_data['nature_of_flight'] = TypeEnum(nf)
+
+    # work_status: coerce string to enum when present
+    if 'work_status' in update_data:
+        ws = update_data['work_status']
+        if ws is not None:
+            update_data['work_status'] = WorkStatus(ws) if isinstance(ws, str) else ws
+        # else keep None to clear or leave unchanged per API contract
 
     for k, v in update_data.items():
         setattr(obj, k, v)
