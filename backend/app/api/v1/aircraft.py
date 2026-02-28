@@ -145,14 +145,18 @@ async def api_download_propeller_arc(
     return _serve_aircraft_file(raw.propeller_arc, "propeller-arc", disp)
 
 
-@router.post("/", response_model=aircraft_schema.AircraftOut)
+@router.post(
+    "/",
+    response_model=aircraft_schema.AircraftOut,
+    summary="Create aircraft",
+    description="Create a new aircraft. Also creates a FleetDailyUpdate (one-to-one with aircraft) with status RUNNING.",
+)
 async def api_create_aircraft_with_file(
     json_data: str = Form(...),
     engine_arc_file: UploadFile = File(None),
     propeller_arc_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
-):  
-    
+):
     parsed = json.loads(json_data)
     aircraft_data = aircraft_schema.AircraftCreate(**parsed)
 

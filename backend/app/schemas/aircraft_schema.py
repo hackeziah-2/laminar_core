@@ -14,14 +14,14 @@ class AircrarftStatus(str, Enum):
     maintenance = "Maintenance"
 
 class AircraftBase(BaseModel):
-    registration: Optional[str]
-    manufacturer: Optional[str]
-    report_description: Optional[str]
+    registration: Optional[str] = None
+    manufacturer: Optional[str] = None
+    report_description: Optional[str] = None
 
-    model: Optional[str]
-    msn : Optional[str]
-    base: Optional[str]
-    ownership : Optional[str]
+    model: Optional[str] = None
+    msn: Optional[str] = None
+    base: Optional[str] = None
+    ownership: Optional[str] = None
     status: Optional[str] = "Active"
 
     # Airframe Information
@@ -43,6 +43,16 @@ class AircraftBase(BaseModel):
 
 
 class AircraftCreate(AircraftBase):
+    """Schema for creating an aircraft. Required fields match DB NOT NULL columns."""
+
+    registration: str
+    manufacturer: str
+    model: str
+    msn: str
+    base: str
+    ownership: str
+    status: str = "Active"
+
     class Config:
         orm_mode = True
     
