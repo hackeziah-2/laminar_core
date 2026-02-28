@@ -11,6 +11,7 @@ from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 ensure_uploads_dir()
 
 from app.models.aircraft import Aircraft
+from app.models.fleet_daily_update import FleetDailyUpdate, FleetDailyUpdateStatusEnum
 from app.models.aircraft_logbook_entries import AircraftLogbookEntry
 from app.models.aircraft_techinical_log import AircraftTechnicalLog
 from app.models.atl_monitoring import LDNDMonitoring
@@ -165,14 +166,18 @@ async def create_aircraft_with_file(
         aircraft_data["propeller_arc"] = propeller_path
 
     result = await session.execute(
-        select(Aircraft).where(Aircraft.registration == aircraft_data["registration"])
+        select(Aircraft)
+        .where(Aircraft.registration == aircraft_data["registration"])
+        .where(Aircraft.is_deleted == False)
     )
     registration_exist = result.scalar_one_or_none()
     if registration_exist:
         raise HTTPException(status_code=400, detail="Aircraft with this registration already exists")
 
     _result = await session.execute(
-        select(Aircraft).where(Aircraft.msn == aircraft_data["msn"])
+        select(Aircraft)
+        .where(Aircraft.msn == aircraft_data["msn"])
+        .where(Aircraft.is_deleted == False)
     )
 
     msn_exist = _result.scalar_one_or_none()
@@ -185,6 +190,15 @@ async def create_aircraft_with_file(
     )
 
     session.add(aircraft)
+    await session.flush()  # get aircraft.id before creating fleet_daily_update
+
+    # One-to-one: each aircraft has exactly one FleetDailyUpdate
+    fleet_daily_update = FleetDailyUpdate(
+        aircraft_fk=aircraft.id,
+        status=FleetDailyUpdateStatusEnum.RUNNING.value,
+    )
+    session.add(fleet_daily_update)
+
     await session.commit()
     await session.refresh(aircraft)
     return AircraftOut.from_orm(aircraft)

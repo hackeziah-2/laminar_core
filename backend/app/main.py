@@ -24,6 +24,7 @@ from app.api.v1 import (
     ad_monitoring as ad_monitoring_router,
     tcc_maintenance as tcc_maintenance_router,
     cpcp_monitoring as cpcp_monitoring_router,
+    fleet_daily_update as fleet_daily_update_router,
 )
 from app.database import engine, Base
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
@@ -31,6 +32,7 @@ from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 OPENAPI_TAGS = [
     {"name": "ad-monitoring", "description": "**Aircraft-scoped AD monitoring** – `api/v1/aircraft/{aircraft_fk}/ad_monitoring/` (CRUD). **Work-order AD monitoring** – `api/v1/aircraft/{aircraft_fk}/ad_monitoring/{ad_monitoring_fk}/work-order-ad-monitoring/` (CRUD). See README **AD Monitoring** section."},
     {"name": "work-order-ad-monitoring", "description": "Work-order AD monitoring (global and aircraft-scoped). Global: `api/v1/work-order-ad-monitoring/`. Aircraft-scoped: `api/v1/aircraft/{aircraft_fk}/ad_monitoring/{ad_monitoring_fk}/work-order-ad-monitoring/` (CRUD). See README **AD Monitoring** section."},
+    {"name": "fleet-daily-update", "description": "Fleet Daily Update (one record per aircraft). Global: `api/v1/fleet-daily-update/` (paged list, CRUD by update_id). Aircraft-scoped: `api/v1/aircraft/{aircraft_id}/fleet-daily-update` (get/update/create by aircraft). Responses include `aircraft: { id, registration }`."},
 ]
 app = FastAPI(title="Laminar API", openapi_tags=OPENAPI_TAGS)
 
@@ -204,6 +206,7 @@ app.include_router(document_on_board_router.router_aircraft_scoped)
 app.include_router(ldnd_monitoring_router.router_aircraft_scoped)
 app.include_router(ad_monitoring_router.router_aircraft_scoped)
 app.include_router(tcc_maintenance_router.router_aircraft_scoped)
+app.include_router(fleet_daily_update_router.router_aircraft_scoped)
 app.include_router(aircraft_router.router)
 app.include_router(atl_router.router)
 app.include_router(atl_new_router.router)
@@ -218,6 +221,7 @@ app.include_router(ldnd_monitoring_router.router)
 app.include_router(ad_monitoring_router.router)
 app.include_router(ad_monitoring_router.router_work_order)
 app.include_router(cpcp_monitoring_router.router)
+app.include_router(fleet_daily_update_router.router)
 app.include_router(excel_data_router.router)
 
 @app.on_event("startup")
