@@ -1,6 +1,6 @@
 from typing import Optional, List, Tuple
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, func, case, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -90,30 +90,26 @@ async def list_fleet_daily_updates(
     status: Optional[str] = None,
     sort: Optional[str] = "",
 ) -> Tuple[List[FleetDailyUpdate], int]:
-    """List Fleet Daily Update entries with pagination, search by aircraft registration, and filters."""
+    """List Fleet Daily Update entries with pagination, search by aircraft registration, and filters. Excludes soft-deleted FleetDailyUpdate and Aircraft."""
     stmt = (
         select(FleetDailyUpdate)
         .options(selectinload(FleetDailyUpdate.aircraft))
+        .join(Aircraft, FleetDailyUpdate.aircraft_fk == Aircraft.id)
         .where(FleetDailyUpdate.is_deleted == False)
+        .where(Aircraft.is_deleted == False)
     )
     count_stmt = (
         select(func.count())
         .select_from(FleetDailyUpdate)
+        .join(Aircraft, FleetDailyUpdate.aircraft_fk == Aircraft.id)
         .where(FleetDailyUpdate.is_deleted == False)
+        .where(Aircraft.is_deleted == False)
     )
 
     if search and search.strip():
         q = f"%{search.strip()}%"
-        stmt = stmt.join(Aircraft, FleetDailyUpdate.aircraft_fk == Aircraft.id).where(
-            Aircraft.is_deleted == False,
-            Aircraft.registration.ilike(q),
-        )
-        count_stmt = count_stmt.join(
-            Aircraft, FleetDailyUpdate.aircraft_fk == Aircraft.id
-        ).where(
-            Aircraft.is_deleted == False,
-            Aircraft.registration.ilike(q),
-        )
+        stmt = stmt.where(Aircraft.registration.ilike(q))
+        count_stmt = count_stmt.where(Aircraft.registration.ilike(q))
     if aircraft_fk is not None:
         stmt = stmt.where(FleetDailyUpdate.aircraft_fk == aircraft_fk)
         count_stmt = count_stmt.where(FleetDailyUpdate.aircraft_fk == aircraft_fk)
@@ -198,6 +194,72 @@ async def soft_delete_fleet_daily_update(
     session.add(obj)
     await session.commit()
     return True
+
+
+async def get_dashboard_counts(session: AsyncSession) -> dict:
+    """Return counts from Fleet Daily Update by status (for dashboard). Excludes soft-deleted FleetDailyUpdate and soft-deleted Aircraft."""
+    stmt = (
+        select(
+            func.count(func.distinct(FleetDailyUpdate.aircraft_fk)).label("total_aircraft"),
+
+            func.sum(
+                case(
+                    (FleetDailyUpdate.status == FleetDailyUpdateStatusEnum.RUNNING.value, 1),
+                    else_=0,
+                )
+            ).label("total_aircraft_running"),
+
+            func.sum(
+                case(
+                    (
+                        FleetDailyUpdate.status
+                        == FleetDailyUpdateStatusEnum.ONGOING_MAINTENANCE.value,
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label("total_aircraft_ongoing_maintenance"),
+
+            func.sum(
+                case(
+                    (FleetDailyUpdate.status == FleetDailyUpdateStatusEnum.AOG.value, 1),
+                    else_=0,
+                )
+            ).label("total_aircraft_aog"),
+        )
+        .select_from(FleetDailyUpdate)
+        .join(Aircraft, FleetDailyUpdate.aircraft_fk == Aircraft.id)
+        .where(
+            or_(
+                FleetDailyUpdate.is_deleted.is_(False),
+                FleetDailyUpdate.is_deleted.is_(None),
+            )
+        )
+        .where(
+            or_(
+                Aircraft.is_deleted.is_(False),
+                Aircraft.is_deleted.is_(None),
+            )
+        )
+    )
+
+    result = await session.execute(stmt)
+    row = result.first()
+
+    if not row:
+        return {
+            "total_aircraft": 0,
+            "total_aircraft_running": 0,
+            "total_aircraft_ongoing_maintenance": 0,
+            "total_aircraft_aog": 0,
+        }
+
+    return {
+        "total_aircraft": row.total_aircraft or 0,
+        "total_aircraft_running": row.total_aircraft_running or 0,
+        "total_aircraft_ongoing_maintenance": row.total_aircraft_ongoing_maintenance or 0,
+        "total_aircraft_aog": row.total_aircraft_aog or 0,
+    }
 
 
 async def soft_delete_fleet_daily_update_by_aircraft(

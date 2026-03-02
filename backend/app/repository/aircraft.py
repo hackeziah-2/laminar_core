@@ -26,7 +26,15 @@ from app.models.tcc_maintenance import TCCMaintenance
 from app.models.document_on_board import DocumentOnBoard
 from app.models.cpcp_monitoring import CPCPMonitoring
 from app.schemas.aircraft_schema import AircraftCreate, AircraftOut, AircraftUpdate
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
+
+def _normalize_status(status: Optional[Union[str, object]]) -> Optional[str]:
+    """Return a string status for filtering: 'all', 'active', 'inactive', 'maintenance', or None (treated as all)."""
+    if status is None:
+        return None
+    if hasattr(status, "value"):
+        return str(status.value)
+    return str(status).strip() or None
 
 async def get_aircraft(session: AsyncSession, id: int) -> Optional[AircraftOut]:
     aircraft = await get_aircraft_raw(session, id)
@@ -63,10 +71,11 @@ async def list_aircraft(
             )
         )
 
-    # Status filter
-    if status and status.lower() != "all":
+    # Status filter (accept string or enum; normalize to string)
+    status_val = _normalize_status(status)
+    if status_val and status_val.lower() != "all":
         stmt = stmt.where(
-            func.lower(cast(Aircraft.status, String)) == status.lower()
+            func.lower(cast(Aircraft.status, String)) == status_val.lower()
         )
 
     # Whitelist sortable fields (IMPORTANT)
@@ -79,19 +88,23 @@ async def list_aircraft(
         "updated_at": Aircraft.updated_at,
     }
     
-    # Multi-sort logic
+    # Multi-sort logic (accumulate order_by clauses so multiple sorts work)
     if sort:
+        order_clauses = []
         for field in sort.split(","):
-            desc_order = field.startswith("-")
-            field_name = field.lstrip("-")
-
+            part = field.strip()
+            if not part:
+                continue
+            desc_order = part.startswith("-")
+            field_name = part.lstrip("-").strip()
             column = sortable_fields.get(field_name)
             if column is None:
-                continue  # ignore invalid fields safely
-
-            stmt = stmt.order_by(
-                column.desc() if desc_order else column.asc()
-            )
+                continue
+            order_clauses.append(column.desc() if desc_order else column.asc())
+        if order_clauses:
+            stmt = stmt.order_by(*order_clauses)
+        else:
+            stmt = stmt.order_by(Aircraft.created_at.desc())
     else:
         stmt = stmt.order_by(Aircraft.created_at.desc())
 
@@ -112,9 +125,9 @@ async def list_aircraft(
             )
         )
 
-    if status and status.lower() != "all":
+    if status_val and status_val.lower() != "all":
         count_stmt = count_stmt.where(
-            func.lower(cast(Aircraft.status, String)) == status.lower()
+            func.lower(cast(Aircraft.status, String)) == status_val.lower()
         )
 
     total_count = (await session.execute(count_stmt)).scalar()
@@ -320,6 +333,8 @@ async def soft_delete_aircraft(
     await _soft_delete_many(DocumentOnBoard, DocumentOnBoard.aircraft_id, aircraft_id)
     # CPCPMonitoring
     await _soft_delete_many(CPCPMonitoring, CPCPMonitoring.aircraft_id, aircraft_id)
+    # FleetDailyUpdate (one-to-one with aircraft)
+    await _soft_delete_many(FleetDailyUpdate, FleetDailyUpdate.aircraft_fk, aircraft_id)
 
     # Aircraft
     aircraft.soft_delete()

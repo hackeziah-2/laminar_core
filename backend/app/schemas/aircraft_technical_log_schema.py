@@ -522,3 +522,23 @@ class ATLPagedItem(AircraftTechnicalLogRead):
 
     class Config:
         orm_mode = True
+
+
+# ---------- ATL Paged response for /aircraft-technical-log/paged (Read + auto_* computed fields) ----------
+class ATLPagedItemWithAuto(AircraftTechnicalLogRead):
+    """ATL read with auto_* computed fields for v1/aircraft-technical-log/paged. Previous = last ATL by sequence_no (same aircraft)."""
+
+    auto_airframe_run_time: Optional[float] = 0.0
+    auto_airframe_aftt: Optional[float] = 0.0
+    auto_engine_run_time: Optional[float] = 0.0
+    auto_run_time: Optional[float] = 0.0
+    auto_engine_tsn: Optional[float] = 0.0
+    auto_engine_tso: Optional[float] = 0.0
+    auto_engine_tbo: Optional[float] = 0.0
+    auto_propeller_run_time: Optional[float] = 0.0
+    auto_propeller_tsn: Optional[float] = 0.0
+    auto_propeller_tso: Optional[float] = 0.0
+    auto_propeller_tbo: Optional[float] = 0.0
+
+    class Config:
+        orm_mode = True

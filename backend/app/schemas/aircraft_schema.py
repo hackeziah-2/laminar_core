@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -63,6 +64,7 @@ class AircraftUpdate(AircraftBase):
 
 class AircraftOut(AircraftBase):
     id: int
+    created_at: Optional[datetime] = None
     # For Aircraft Details: download button and modal view when image
     engine_arc_download_url: Optional[str] = None
     propeller_arc_download_url: Optional[str] = None
@@ -75,7 +77,7 @@ class AircraftOut(AircraftBase):
             return v
         # Build dict from ORM for Pydantic; add download URLs and is_image hints
         base_keys = [
-            "id", "registration", "manufacturer", "report_description", "model", "msn",
+            "id", "created_at", "registration", "manufacturer", "report_description", "model", "msn",
             "base", "ownership", "status", "airframe_service_manual", "airframe_ipc",
             "engine_model", "engine_serial_number", "engine_life_time_limit",
             "propeller_model", "propeller_serial_number", "propeller_life_time_limit",

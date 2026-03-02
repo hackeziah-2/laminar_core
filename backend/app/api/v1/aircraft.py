@@ -38,18 +38,29 @@ router = APIRouter(prefix="/api/v1/aircraft", tags=["aircrafts"])
 
 @router.get("/paged")
 async def api_list_paged(
-    limit: int = Query(10, ge=1, le=100), 
-    page: int = Query(1, ge=1), 
-    search: Optional[str] = None, 
-    status: aircraft_schema.AircrarftStatus | None = Query(
-        None, description="Filter by status", enum=["active", "inactive", "maintenance"]),
-    sort: Optional[str] = "",
-    session: AsyncSession = Depends(get_session)
+    limit: int = Query(10, ge=1, le=100),
+    page: int = Query(1, ge=1),
+    search: Optional[str] = Query(None, description="Search in registration, base, model"),
+    status: Optional[str] = Query(
+        None,
+        description="Filter by status: 'all' or omit for all; 'active', 'inactive', 'maintenance' for specific status",
+    ),
+    sort: Optional[str] = Query(
+        "",
+        description="Sort: field name or -field for desc, comma-separated (e.g. registration,-created_at)",
+    ),
+    session: AsyncSession = Depends(get_session),
 ):
     offset = (page - 1) * limit
-    items, total = await list_aircraft(session,limit=limit, offset=offset, search=search, status=status, sort=sort)
-    pages = ceil(total / limit) if total else 0
-    return {"items": items, "total": total, "page": page, "pages": pages}
+    search_param = search.strip() if (search and isinstance(search, str)) else None
+    status_param = status.strip() if (status and isinstance(status, str)) else None
+    sort_param = (sort.strip() if (sort and isinstance(sort, str)) else None) or ""
+    items, total = await list_aircraft(
+        session, limit=limit, offset=offset, search=search_param, status=status_param, sort=sort_param
+    )
+    pages = ceil(total / limit) if limit else 0
+    items_out = [aircraft_schema.AircraftOut.from_orm(a) for a in items]
+    return {"items": items_out, "total": total, "page": page, "pages": pages}
 
 @router.get(
     "/{aircraft_id}/atl/",
@@ -190,7 +201,7 @@ async def api_update_aircraft_with_file(
     "/{aircraft_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Soft delete aircraft",
-    description="Soft delete aircraft and all connected data (logbook entries, ATL, LDND, AD, TCC, documents, CPCP, engine/airframe/avionics/propeller logbooks). Sets is_deleted=True in a single transaction.",
+    description="Soft delete aircraft and all connected data (logbook entries, ATL, LDND, AD, TCC, documents, CPCP, fleet daily update, engine/airframe/avionics/propeller logbooks). Sets is_deleted=True in a single transaction.",
 )
 async def api_delete_aircraft(aircraft_id: int, session: AsyncSession = Depends(get_session)):
     deleted = await soft_delete_aircraft(session, aircraft_id)

@@ -16,6 +16,8 @@ from app.repository.fleet_daily_update import (
     soft_delete_fleet_daily_update_by_aircraft,
 )
 from app.repository.aircraft import get_aircraft
+from app.repository.ldnd_monitoring import get_ldnd_latest_by_aircraft
+from app.repository.aircraft_technical_log import get_latest_aircraft_technical_log
 from app.database import get_session
 
 router = APIRouter(
@@ -41,6 +43,25 @@ def _fleet_daily_update_item_with_aircraft(orm):
     return d
 
 
+async def _enrich_item_with_ldnd(session, orm_item):
+    """Build list item with next_insp_due, tach_time_due from LDND latest, and tach_time_eod from latest ATL for this aircraft."""
+    base = _fleet_daily_update_item_with_aircraft(orm_item)
+    aircraft_id = orm_item.aircraft_fk
+    ldnd = await get_ldnd_latest_by_aircraft(session, aircraft_id)
+    # next_insp_due: from next_inspection_due + next_inspection_unit (e.g. "100 HRS")
+    if ldnd.next_inspection_due is not None:
+        unit = ldnd.next_inspection_unit or ldnd.unit or "HRS"
+        base["next_insp_due"] = f"{ldnd.next_inspection_due} {unit}"
+    else:
+        base["next_insp_due"] = None
+    # tach_time_due: from next_due_tach_hours (latest record)
+    base["tach_time_due"] = ldnd.next_due_tach_hours
+    # tach_time_eod: from api/v1/aircraft-technical-log/latest?aircraft_fk={} → tachometer_end
+    latest_atl = await get_latest_aircraft_technical_log(session, aircraft_fk=aircraft_id)
+    base["tach_time_eod"] = latest_atl.tachometer_end if latest_atl else None
+    return base
+
+
 @router.get("/paged")
 async def api_list_fleet_daily_updates_paged(
     limit: int = Query(10, ge=1, le=100, description="Page size"),
@@ -60,7 +81,9 @@ async def api_list_fleet_daily_updates_paged(
     ),
     session: AsyncSession = Depends(get_session),
 ):
-    """Get paginated list of Fleet Daily Update entries. Search by aircraft registration; filter by status."""
+    """Get paginated list of Fleet Daily Update entries. Search by aircraft registration; filter by status.
+    Each item includes next_insp_due and tach_time_due from api/v1/aircraft/{id}/ldnd-monitoring/latest,
+    and tach_time_eod from api/v1/aircraft-technical-log/latest?aircraft_fk={id} (tachometer_end)."""
     offset = (page - 1) * limit
     items, total = await list_fleet_daily_updates(
         session=session,
@@ -72,8 +95,11 @@ async def api_list_fleet_daily_updates_paged(
         sort=sort or "",
     )
     pages = ceil(total / limit) if total else 0
+    enriched = []
+    for i in items:
+        enriched.append(await _enrich_item_with_ldnd(session, i))
     return {
-        "items": [_fleet_daily_update_item_with_aircraft(i) for i in items],
+        "items": enriched,
         "total": total,
         "page": page,
         "pages": pages,
@@ -259,8 +285,11 @@ async def api_list_fleet_daily_updates_by_aircraft_paged(
         sort=sort or "",
     )
     pages = ceil(total / limit) if total else 0
+    enriched = []
+    for i in items:
+        enriched.append(await _enrich_item_with_ldnd(session, i))
     return {
-        "items": [_fleet_daily_update_item_with_aircraft(i) for i in items],
+        "items": enriched,
         "total": total,
         "page": page,
         "pages": pages,

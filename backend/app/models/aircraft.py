@@ -61,7 +61,6 @@ class Aircraft(Base, TimestampMixin, SoftDeleteMixin):
     def __repr__(self):
         return f"<Aircraft(reg='{self.registration}', model='{self.model}')>"
 
-
 class Airframe(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "airframe"
     id = Column(Integer, primary_key=True, index=True)
