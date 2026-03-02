@@ -80,7 +80,7 @@ class LDNDMonitoringRead(LDNDMonitoringBase):
 
 
 class LDNDLatestResponse(BaseModel):
-    """Maintenance summary: current tach, next inspection, last updated (from latest LDND records for aircraft)."""
+    """Maintenance summary: current tach, next inspection, last updated, and latest record details (from latest LDND record for aircraft)."""
 
     current_tach: Optional[float] = Field(
         None,
@@ -90,9 +90,9 @@ class LDNDLatestResponse(BaseModel):
         None,
         description="Next due tach hours (minimum next_due_tach_hours across records).",
     )
-    next_inspection_type: Optional[str] = Field(
+    next_inspection_due: Optional[float] = Field(
         None,
-        description="Inspection type of the record with the soonest next due.",
+        description="Next inspection due (numeric tach value) for the record with the soonest next due.",
     )
     next_inspection_unit: Optional[str] = Field(
         None,
@@ -102,6 +102,15 @@ class LDNDLatestResponse(BaseModel):
         None,
         description="Most recent updated_at across all LDND records for this aircraft.",
     )
+    # Latest record fields
+    inspection_type: Optional[str] = Field(None, description="Inspection type from latest record.")
+    unit: Optional[str] = Field(None, description="Unit (HRS/CYCLES) from latest record.")
+    last_done_tach_due: Optional[float] = Field(None, description="Last done tach due from latest record.")
+    last_done_tach_done: Optional[float] = Field(None, description="Last done tach done from latest record.")
+    next_due_tach_hours: Optional[float] = Field(None, description="Next due tach hours from latest record.")
+    performed_date_start: Optional[date] = Field(None, description="Performed date start from latest record.")
+    performed_date_end: Optional[date] = Field(None, description="Performed date end from latest record.")
+    aircraft: Optional[AircraftSummary] = Field(None, description="Aircraft (id, registration) for the latest record.")
 
     class Config:
         orm_mode = True

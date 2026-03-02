@@ -7,7 +7,7 @@ from app.models.aircraft import Aircraft
 from app.models.aircraft_techinical_log import AircraftTechnicalLog
 from app.schemas.aircraft_schema import AircraftImportSchema
 from app.schemas.aircraft_technical_log_schema import AircraftTechnicalLogImportSchema
-from app.services.import_data_excel import import_excel_generic
+from app.services import import_excel_generic
 
 router = APIRouter(
     prefix="/api/v1/excel-data",

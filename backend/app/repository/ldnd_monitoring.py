@@ -6,6 +6,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.atl_monitoring import LDNDMonitoring, UnitEnum
 from app.schemas.ldnd_monitoring_schema import (
+    AircraftSummary,
     LDNDMonitoringCreate,
     LDNDMonitoringUpdate,
     LDNDMonitoringRead,
@@ -49,47 +50,95 @@ async def get_ldnd_monitoring_by_aircraft(
 async def get_ldnd_latest_by_aircraft(
     session: AsyncSession, aircraft_id: int
 ) -> LDNDLatestResponse:
-    """Get maintenance summary for aircraft: current tach (from latest-updated record), next inspection, last_updated."""
-    # All non-deleted LDND records for this aircraft
-    stmt = (
-        select(LDNDMonitoring)
-        .where(LDNDMonitoring.aircraft_fk == aircraft_id)
-        .where(LDNDMonitoring.is_deleted == False)
+    """Get maintenance summary for aircraft: current tach (from latest-updated record), next inspection, last_updated.
+    Uses two targeted queries so we only fetch the latest record and the soonest next-due record, not all rows.
+    """
+    base_filter = (
+        LDNDMonitoring.aircraft_fk == aircraft_id,
+        LDNDMonitoring.is_deleted == False,
     )
-    result = await session.execute(stmt)
-    rows = result.scalars().all()
-    if not rows:
-        return LDNDLatestResponse()
 
-    # Latest updated record -> current_tach, last_updated
-    rows_with_ts = [r for r in rows if r.updated_at is not None or r.created_at is not None]
-    if rows_with_ts:
-        latest = max(rows_with_ts, key=lambda r: r.updated_at or r.created_at)
-        current_tach = latest.last_done_tach_done
-        last_updated = latest.updated_at or latest.created_at
-    else:
-        latest = rows[0]
-        current_tach = latest.last_done_tach_done
-        last_updated = None
+    # 1) Single latest-updated record -> current_tach, last_updated, and full latest record fields
+    latest_stmt = (
+        select(LDNDMonitoring)
+        .options(selectinload(LDNDMonitoring.aircraft))
+        .where(*base_filter)
+        .order_by(
+            LDNDMonitoring.updated_at.desc().nulls_last(),
+            LDNDMonitoring.created_at.desc().nulls_last(),
+        )
+        .limit(1)
+    )
+    latest_result = await session.execute(latest_stmt)
+    latest_row = latest_result.scalar_one_or_none()
 
-    # Record with soonest next due (min next_due_tach_hours, excluding nulls)
-    with_next = [r for r in rows if r.next_due_tach_hours is not None]
-    if with_next:
-        next_record = min(with_next, key=lambda r: r.next_due_tach_hours)
-        next_inspection_tach_hours = next_record.next_due_tach_hours
-        next_inspection_type = next_record.inspection_type
-        next_inspection_unit = getattr(next_record.unit, "value", None) or str(next_record.unit) if next_record.unit else None
-    else:
-        next_inspection_tach_hours = None
-        next_inspection_type = None
-        next_inspection_unit = None
+    current_tach = None
+    last_updated = None
+    inspection_type = None
+    unit = None
+    last_done_tach_due = None
+    last_done_tach_done = None
+    next_due_tach_hours = None
+    performed_date_start = None
+    performed_date_end = None
+    aircraft = None
+    if latest_row:
+        current_tach = latest_row.last_done_tach_done
+        last_updated = latest_row.updated_at or latest_row.created_at
+        inspection_type = latest_row.inspection_type
+        unit = (
+            getattr(latest_row.unit, "value", None) or str(latest_row.unit)
+            if latest_row.unit is not None
+            else "HRS"
+        )
+        last_done_tach_due = latest_row.last_done_tach_due
+        last_done_tach_done = latest_row.last_done_tach_done
+        next_due_tach_hours = latest_row.next_due_tach_hours
+        performed_date_start = latest_row.performed_date_start
+        performed_date_end = latest_row.performed_date_end
+        if latest_row.aircraft:
+            aircraft = AircraftSummary(
+                id=latest_row.aircraft.id,
+                registration=latest_row.aircraft.registration,
+            )
+
+    # 2) Single record with soonest next_due_tach_hours
+    next_stmt = (
+        select(LDNDMonitoring)
+        .where(*base_filter)
+        .where(LDNDMonitoring.next_due_tach_hours.isnot(None))
+        .order_by(LDNDMonitoring.next_due_tach_hours.asc())
+        .limit(1)
+    )
+    next_result = await session.execute(next_stmt)
+    next_row = next_result.scalar_one_or_none()
+
+    next_inspection_tach_hours = None
+    next_inspection_due = None
+    next_inspection_unit = None
+    if next_row:
+        next_inspection_tach_hours = next_row.next_due_tach_hours
+        next_inspection_due = next_row.next_due_tach_hours
+        next_inspection_unit = (
+            getattr(next_row.unit, "value", None) or str(next_row.unit)
+            if next_row.unit
+            else None
+        )
 
     return LDNDLatestResponse(
         current_tach=current_tach,
         next_inspection_tach_hours=next_inspection_tach_hours,
-        next_inspection_type=next_inspection_type,
+        next_inspection_due=next_inspection_due,
         next_inspection_unit=next_inspection_unit,
         last_updated=last_updated,
+        inspection_type=inspection_type,
+        unit=unit,
+        last_done_tach_due=last_done_tach_due,
+        last_done_tach_done=last_done_tach_done,
+        next_due_tach_hours=next_due_tach_hours,
+        performed_date_start=performed_date_start,
+        performed_date_end=performed_date_end,
+        aircraft=aircraft,
     )
 
 

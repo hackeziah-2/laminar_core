@@ -11,6 +11,7 @@ from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 ensure_uploads_dir()
 
 from app.models.aircraft import Aircraft
+from app.models.fleet_daily_update import FleetDailyUpdate, FleetDailyUpdateStatusEnum
 from app.models.aircraft_logbook_entries import AircraftLogbookEntry
 from app.models.aircraft_techinical_log import AircraftTechnicalLog
 from app.models.atl_monitoring import LDNDMonitoring
@@ -25,7 +26,15 @@ from app.models.tcc_maintenance import TCCMaintenance
 from app.models.document_on_board import DocumentOnBoard
 from app.models.cpcp_monitoring import CPCPMonitoring
 from app.schemas.aircraft_schema import AircraftCreate, AircraftOut, AircraftUpdate
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
+
+def _normalize_status(status: Optional[Union[str, object]]) -> Optional[str]:
+    """Return a string status for filtering: 'all', 'active', 'inactive', 'maintenance', or None (treated as all)."""
+    if status is None:
+        return None
+    if hasattr(status, "value"):
+        return str(status.value)
+    return str(status).strip() or None
 
 async def get_aircraft(session: AsyncSession, id: int) -> Optional[AircraftOut]:
     aircraft = await get_aircraft_raw(session, id)
@@ -62,10 +71,11 @@ async def list_aircraft(
             )
         )
 
-    # Status filter
-    if status and status.lower() != "all":
+    # Status filter (accept string or enum; normalize to string)
+    status_val = _normalize_status(status)
+    if status_val and status_val.lower() != "all":
         stmt = stmt.where(
-            func.lower(cast(Aircraft.status, String)) == status.lower()
+            func.lower(cast(Aircraft.status, String)) == status_val.lower()
         )
 
     # Whitelist sortable fields (IMPORTANT)
@@ -78,19 +88,23 @@ async def list_aircraft(
         "updated_at": Aircraft.updated_at,
     }
     
-    # Multi-sort logic
+    # Multi-sort logic (accumulate order_by clauses so multiple sorts work)
     if sort:
+        order_clauses = []
         for field in sort.split(","):
-            desc_order = field.startswith("-")
-            field_name = field.lstrip("-")
-
+            part = field.strip()
+            if not part:
+                continue
+            desc_order = part.startswith("-")
+            field_name = part.lstrip("-").strip()
             column = sortable_fields.get(field_name)
             if column is None:
-                continue  # ignore invalid fields safely
-
-            stmt = stmt.order_by(
-                column.desc() if desc_order else column.asc()
-            )
+                continue
+            order_clauses.append(column.desc() if desc_order else column.asc())
+        if order_clauses:
+            stmt = stmt.order_by(*order_clauses)
+        else:
+            stmt = stmt.order_by(Aircraft.created_at.desc())
     else:
         stmt = stmt.order_by(Aircraft.created_at.desc())
 
@@ -111,9 +125,9 @@ async def list_aircraft(
             )
         )
 
-    if status and status.lower() != "all":
+    if status_val and status_val.lower() != "all":
         count_stmt = count_stmt.where(
-            func.lower(cast(Aircraft.status, String)) == status.lower()
+            func.lower(cast(Aircraft.status, String)) == status_val.lower()
         )
 
     total_count = (await session.execute(count_stmt)).scalar()
@@ -165,14 +179,18 @@ async def create_aircraft_with_file(
         aircraft_data["propeller_arc"] = propeller_path
 
     result = await session.execute(
-        select(Aircraft).where(Aircraft.registration == aircraft_data["registration"])
+        select(Aircraft)
+        .where(Aircraft.registration == aircraft_data["registration"])
+        .where(Aircraft.is_deleted == False)
     )
     registration_exist = result.scalar_one_or_none()
     if registration_exist:
         raise HTTPException(status_code=400, detail="Aircraft with this registration already exists")
 
     _result = await session.execute(
-        select(Aircraft).where(Aircraft.msn == aircraft_data["msn"])
+        select(Aircraft)
+        .where(Aircraft.msn == aircraft_data["msn"])
+        .where(Aircraft.is_deleted == False)
     )
 
     msn_exist = _result.scalar_one_or_none()
@@ -185,6 +203,15 @@ async def create_aircraft_with_file(
     )
 
     session.add(aircraft)
+    await session.flush()  # get aircraft.id before creating fleet_daily_update
+
+    # One-to-one: each aircraft has exactly one FleetDailyUpdate
+    fleet_daily_update = FleetDailyUpdate(
+        aircraft_fk=aircraft.id,
+        status=FleetDailyUpdateStatusEnum.RUNNING.value,
+    )
+    session.add(fleet_daily_update)
+
     await session.commit()
     await session.refresh(aircraft)
     return AircraftOut.from_orm(aircraft)
@@ -306,6 +333,8 @@ async def soft_delete_aircraft(
     await _soft_delete_many(DocumentOnBoard, DocumentOnBoard.aircraft_id, aircraft_id)
     # CPCPMonitoring
     await _soft_delete_many(CPCPMonitoring, CPCPMonitoring.aircraft_id, aircraft_id)
+    # FleetDailyUpdate (one-to-one with aircraft)
+    await _soft_delete_many(FleetDailyUpdate, FleetDailyUpdate.aircraft_fk, aircraft_id)
 
     # Aircraft
     aircraft.soft_delete()

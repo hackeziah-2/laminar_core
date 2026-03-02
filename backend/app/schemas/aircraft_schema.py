@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -14,14 +15,14 @@ class AircrarftStatus(str, Enum):
     maintenance = "Maintenance"
 
 class AircraftBase(BaseModel):
-    registration: Optional[str]
-    manufacturer: Optional[str]
-    report_description: Optional[str]
+    registration: Optional[str] = None
+    manufacturer: Optional[str] = None
+    report_description: Optional[str] = None
 
-    model: Optional[str]
-    msn : Optional[str]
-    base: Optional[str]
-    ownership : Optional[str]
+    model: Optional[str] = None
+    msn: Optional[str] = None
+    base: Optional[str] = None
+    ownership: Optional[str] = None
     status: Optional[str] = "Active"
 
     # Airframe Information
@@ -43,6 +44,16 @@ class AircraftBase(BaseModel):
 
 
 class AircraftCreate(AircraftBase):
+    """Schema for creating an aircraft. Required fields match DB NOT NULL columns."""
+
+    registration: str
+    manufacturer: str
+    model: str
+    msn: str
+    base: str
+    ownership: str
+    status: str = "Active"
+
     class Config:
         orm_mode = True
     
@@ -53,6 +64,7 @@ class AircraftUpdate(AircraftBase):
 
 class AircraftOut(AircraftBase):
     id: int
+    created_at: Optional[datetime] = None
     # For Aircraft Details: download button and modal view when image
     engine_arc_download_url: Optional[str] = None
     propeller_arc_download_url: Optional[str] = None
@@ -65,7 +77,7 @@ class AircraftOut(AircraftBase):
             return v
         # Build dict from ORM for Pydantic; add download URLs and is_image hints
         base_keys = [
-            "id", "registration", "manufacturer", "report_description", "model", "msn",
+            "id", "created_at", "registration", "manufacturer", "report_description", "model", "msn",
             "base", "ownership", "status", "airframe_service_manual", "airframe_ipc",
             "engine_model", "engine_serial_number", "engine_life_time_limit",
             "propeller_model", "propeller_serial_number", "propeller_life_time_limit",
