@@ -2,7 +2,7 @@ from typing import Optional, List, Tuple
 from datetime import date, time
 
 from fastapi import HTTPException
-from sqlalchemy import select, or_, cast, String, func
+from sqlalchemy import select, or_, cast, String, Integer, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 
@@ -20,38 +20,53 @@ from app.schemas.aircraft_technical_log_schema import (
     ComponentPartsRecordCreate,
 )
 
+def _sequence_no_digits_only(sequence_no: str) -> str:
+    """Normalize to number-only: strip optional leading 'ATL-', then whitespace. '001' or 'ATL-001' -> '001'. Stored value is digits only."""
+    if not sequence_no or not str(sequence_no).strip():
+        return sequence_no
+    s = str(sequence_no).strip()
+    if s.upper().startswith("ATL-"):
+        s = s[4:].lstrip()
+    return s
+
+
 def generate_range(start_id: str, end_id: str) -> list[str]:
     """
-    Generate a list of sequence IDs between start_id and end_id (exclusive).
-    Example: ATL-0001 -> ATL-0008 returns ATL-0002 to ATL-0007
+    Generate a list of sequence numbers between start_id and end_id (exclusive). Number-only.
+    Example: 0001 -> 0008 returns 0002 to 0007. Accepts digits-only or leading ATL- (stripped).
     """
-    prefix, start_num_str = start_id.split('-')
-    _, end_num_str = end_id.split('-')
-
-    start_num = int(start_num_str)
-    end_num = int(end_num_str)
-    width = len(start_num_str)
-
-    return [f"{prefix}-{str(i).zfill(width)}" for i in range(start_num + 1, end_num)]
+    start_id = _sequence_no_digits_only(start_id)
+    end_id = _sequence_no_digits_only(end_id)
+    if not start_id or not end_id:
+        return []
+    try:
+        start_num = int(start_id)
+        end_num = int(end_id)
+    except ValueError:
+        return []
+    width = max(len(start_id), len(end_id))
+    return [str(i).zfill(width) for i in range(start_num + 1, end_num)]
 
 
 async def create_aircraft_technical_log(
     session: AsyncSession,
     data: AircraftTechnicalLogCreate
 ) -> AircraftTechnicalLogRead:
-    """Create a new Aircraft Technical Log entry with optional gap-fill (skipped when first ATL for aircraft)."""
+    """Create a new Aircraft Technical Log entry with optional gap-fill (skipped when first ATL for aircraft). Sequence numbers stored as number only (e.g. 001)."""
+
+    sequence_no = _sequence_no_digits_only(data.sequence_no)
 
     # Check for duplicate sequence_no
     existing = await session.scalar(
         select(AircraftTechnicalLog)
-        .where(AircraftTechnicalLog.sequence_no == data.sequence_no)
+        .where(AircraftTechnicalLog.sequence_no == sequence_no)
         .where(AircraftTechnicalLog.aircraft_fk == data.aircraft_fk)
         .where(AircraftTechnicalLog.is_deleted.is_(False))
     )
     if existing:
         raise HTTPException(
             status_code=400,
-            detail=f"Sequence No. {data.sequence_no} already exists. Please use a different Sequence No."
+            detail=f"Sequence No. {sequence_no} already exists. Please use a different Sequence No."
         )
 
     # Prepare log data dictionary
@@ -102,8 +117,8 @@ async def create_aircraft_technical_log(
             if log_data.get('tachometer_start') is None:
                 log_data['tachometer_start'] = 0.0
 
-    # Create the main ATL entry (use model, not schema)
-    entry = AircraftTechnicalLog(**{**log_data, 'sequence_no': data.sequence_no})
+    # Create the main ATL entry (use model, not schema); store sequence_no as number only
+    entry = AircraftTechnicalLog(**{**log_data, 'sequence_no': sequence_no})
     # Persist NULL when empty/omitted; otherwise use validated value
     entry.nature_of_flight = data.nature_of_flight if data.nature_of_flight is not None else None
     session.add(entry)
@@ -112,7 +127,7 @@ async def create_aircraft_technical_log(
     # Generate missing sequence IDs only when there is existing data (skip when first ATL for aircraft)
     if latest_sequence_no is not None:
         try:
-            missing_sequences = generate_range(latest_sequence_no, data.sequence_no)
+            missing_sequences = generate_range(latest_sequence_no, sequence_no)
         except (ValueError, IndexError):
             missing_sequences = []
         if missing_sequences:
@@ -203,7 +218,11 @@ async def update_aircraft_technical_log(
 
     # Update main fields
     update_data = log_in.dict(exclude_unset=True, exclude={'component_parts'})
-    
+
+    # Store sequence_no as number only when updated
+    if 'sequence_no' in update_data and update_data['sequence_no']:
+        update_data['sequence_no'] = _sequence_no_digits_only(update_data['sequence_no'])
+
     # Remove hobbs_meter_start and tachometer_start from updates (read-only fields)
     update_data.pop('hobbs_meter_start', None)
     update_data.pop('tachometer_start', None)
@@ -259,7 +278,8 @@ async def get_previous_atl(
     aircraft_fk: int,
     sequence_no: str,
 ) -> Optional[AircraftTechnicalLog]:
-    """Get the previous ATL for the same aircraft: the row with the latest sequence_no that is less than the given sequence_no (immediate predecessor by sequence order). Used for auto_comp 'Previous' values. Excludes soft-deleted."""
+    """Get the previous ATL for the same aircraft: the row with the latest sequence_no that is less than the given sequence_no (immediate predecessor by sequence order). Used for auto_comp 'Previous' values. Excludes soft-deleted. sequence_no is normalized to number-only for comparison."""
+    sequence_no = _sequence_no_digits_only(sequence_no)
     stmt = (
         select(AircraftTechnicalLog)
         .where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
@@ -296,7 +316,7 @@ async def list_atl_paged(
     if aircraft_fk is not None:
         stmt = stmt.where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
     if search and str(search).strip():
-        q = f"%{search.strip()}%"
+        q = f"%{_sequence_no_digits_only(search.strip())}%"
         stmt = stmt.where(AircraftTechnicalLog.sequence_no.ilike(q))
     if nature_of_flight and str(nature_of_flight).strip():
         try:
@@ -319,7 +339,7 @@ async def list_atl_paged(
     if aircraft_fk is not None:
         count_stmt = count_stmt.where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
     if search and str(search).strip():
-        q = f"%{search.strip()}%"
+        q = f"%{_sequence_no_digits_only(search.strip())}%"
         count_stmt = count_stmt.where(AircraftTechnicalLog.sequence_no.ilike(q))
     if nature_of_flight and str(nature_of_flight).strip():
         try:
@@ -358,15 +378,16 @@ async def list_aircraft_technical_logs(
     if aircraft_fk:
         stmt = stmt.where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
 
-    # Search functionality
+    # Search functionality; sequence_no stored as number only, so strip ATL- from search for that field
     if search:
         q = f"%{search}%"
+        q_seq = f"%{_sequence_no_digits_only(search)}%"
         # Join Aircraft table for registration search
         stmt = stmt.join(Aircraft, AircraftTechnicalLog.aircraft_fk == Aircraft.id)
         stmt = stmt.where(Aircraft.is_deleted == False)
         stmt = stmt.where(
             or_(
-                AircraftTechnicalLog.sequence_no.ilike(q),
+                AircraftTechnicalLog.sequence_no.ilike(q_seq),
                 AircraftTechnicalLog.origin_station.ilike(q),
                 AircraftTechnicalLog.destination_station.ilike(q),
                 cast(AircraftTechnicalLog.nature_of_flight, String).ilike(q),
@@ -431,6 +452,7 @@ async def list_aircraft_technical_logs(
 
     if search:
         q = f"%{search}%"
+        q_seq = f"%{_sequence_no_digits_only(search)}%"
         # Join Aircraft table for registration search in count query
         count_stmt = count_stmt.join(
             Aircraft, AircraftTechnicalLog.aircraft_fk == Aircraft.id
@@ -438,7 +460,7 @@ async def list_aircraft_technical_logs(
         count_stmt = count_stmt.where(Aircraft.is_deleted == False)
         count_stmt = count_stmt.where(
             or_(
-                AircraftTechnicalLog.sequence_no.ilike(q),
+                AircraftTechnicalLog.sequence_no.ilike(q_seq),
                 AircraftTechnicalLog.origin_station.ilike(q),
                 AircraftTechnicalLog.destination_station.ilike(q),
                 cast(AircraftTechnicalLog.nature_of_flight, String).ilike(q),
@@ -475,8 +497,8 @@ async def get_latest_aircraft_technical_log(
     if aircraft_fk:
         stmt = stmt.where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
     
-    # Order by sequence_no descending to get the latest
-    stmt = stmt.order_by(AircraftTechnicalLog.sequence_no.desc())
+    # Order by sequence_no descending (numeric) to get the latest
+    stmt = stmt.order_by(cast(AircraftTechnicalLog.sequence_no, Integer).desc())
     
     # Get the first result
     stmt = stmt.limit(1)

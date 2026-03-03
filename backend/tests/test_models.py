@@ -41,10 +41,10 @@ async def test_create_aircraft_technical_log_model(
     db_session.add(aircraft)
     await db_session.flush()
 
-    # Create ATL log
+    # Create ATL log (sequence_no stored as number only)
     atl = AircraftTechnicalLog(
         aircraft_fk=aircraft.id,
-        sequence_no="ATL-001",
+        sequence_no="001",
         nature_of_flight=TypeEnum.TR,
         origin_station="ORG",
         origin_date=date.today(),
@@ -65,7 +65,7 @@ async def test_create_aircraft_technical_log_model(
     await db_session.refresh(atl)
 
     assert atl.id is not None
-    assert atl.sequence_no == "ATL-001"
+    assert atl.sequence_no == "001"
     assert atl.nature_of_flight == TypeEnum.TR
     assert atl.aircraft_fk == aircraft.id
 

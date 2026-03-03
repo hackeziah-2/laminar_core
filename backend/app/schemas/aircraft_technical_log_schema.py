@@ -32,6 +32,16 @@ def _excel_empty_to_none(value: Any) -> Any:
     return value
 
 
+def normalize_sequence_no_digits_only(value: str) -> str:
+    """Normalize to number-only: strip optional leading 'ATL-', then whitespace. '001' or 'ATL-001' -> '001'. Stored value is digits only."""
+    if not value or not str(value).strip():
+        return value
+    s = str(value).strip()
+    if s.upper().startswith("ATL-"):
+        s = s[4:].lstrip()
+    return s
+
+
 def parse_zulu_time_to_time(value: Any) -> Optional[time]:
     """Parse origin_time Zulu/HHMM/HH:MM/HHMMSS into Python time object."""
     value = _excel_empty_to_none(value)
@@ -133,7 +143,15 @@ class ComponentPartsRecordRead(ComponentPartsRecordBase):
 # Only sequence_no and aircraft_fk are required; all other fields are optional.
 class AircraftTechnicalLogBase(BaseModel):
     aircraft_fk: int = Field(..., description="Aircraft ID (required).")
-    sequence_no: str = Field(..., max_length=50, description="ATL sequence number (required).")
+    sequence_no: str = Field(..., max_length=50, description="ATL sequence number (required). Stored as number only (e.g. 001).")
+
+    @validator("sequence_no", pre=True)
+    def normalize_sequence_no(cls, v: Any) -> str:
+        """Normalize sequence_no to number only for create/import (strip optional ATL- prefix)."""
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return v
+        return normalize_sequence_no_digits_only(str(v).strip())
+
     nature_of_flight: Optional[TypeEnum] = None
     next_inspection_due: Optional[str] = Field(None, max_length=100)
     tach_time_due: Optional[float] = None
@@ -335,7 +353,15 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
 # ---------- Aircraft Technical Log Update Schema ----------
 class AircraftTechnicalLogUpdate(BaseModel):
     aircraft_fk: Optional[int] = None
-    sequence_no: Optional[str] = Field(None, max_length=50)
+    sequence_no: Optional[str] = Field(None, max_length=50, description="ATL sequence number; stored as number only when set.")
+
+    @validator("sequence_no", pre=True)
+    def normalize_sequence_no_update(cls, v: Any) -> Any:
+        """Normalize sequence_no to number only when provided (strip optional ATL- prefix)."""
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return v
+        return normalize_sequence_no_digits_only(str(v).strip())
+
     nature_of_flight: Optional[TypeEnum] = None
     next_inspection_due: Optional[str] = Field(None, max_length=100)
     tach_time_due: Optional[float] = None
@@ -463,10 +489,10 @@ class AircraftRead(BaseModel):
 
 # ---------- ATL Search response (id for atl_ref, sequence_no + aircraft summary) ----------
 class ATLSearchItem(BaseModel):
-    """Minimal ATL search result for TCC ATL Reference dropdown / Sequence No. type-to-search. id is aircraft_technical_log.id (use as atl_ref). sequence_no_display is for UI (same as sequence_no, no ATL- prefix)."""
+    """Minimal ATL search result for TCC ATL Reference dropdown / Sequence No. type-to-search. id is aircraft_technical_log.id (use as atl_ref). sequence_no is number only."""
     id: int
     sequence_no: str
-    sequence_no_display: Optional[str] = None  # Same as sequence_no for dropdown label (no ATL- prefix)
+    sequence_no_display: Optional[str] = None  # Same as sequence_no for dropdown label (number only)
     aircraft: AircraftRead
 
     @validator("sequence_no_display", always=True)

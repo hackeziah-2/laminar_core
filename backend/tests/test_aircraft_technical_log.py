@@ -25,7 +25,8 @@ def test_create_aircraft_technical_log(
     )
     assert response.status_code == 201
     data = response.json()
-    assert data["sequence_no"] == test_aircraft_technical_log_data["sequence_no"]
+    # Sequence number stored as number only (e.g. "001"); input "ATL-001" or "001" both stored as "001"
+    assert data["sequence_no"] == "001"
     assert data["id"] is not None
 
 
@@ -47,9 +48,9 @@ def test_list_aircraft_technical_logs_with_search(
         json=test_aircraft_technical_log_data
     )
 
-    # Search for it
+    # Search for it (stored as 001; search accepts 001 or ATL-001)
     response = client.get(
-        "/api/v1/aircraft-technical-log/paged?search=ATL-001&limit=10&page=1"
+        "/api/v1/aircraft-technical-log/paged?search=001&limit=10&page=1"
     )
     assert response.status_code == 200
     data = response.json()

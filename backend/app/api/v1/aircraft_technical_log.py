@@ -236,7 +236,7 @@ async def api_get_latest(
     aircraft_fk: Optional[int] = Query(None, description="Filter by aircraft ID"),
     session: AsyncSession = Depends(get_session)
 ):
-    """Get the latest Aircraft Technical Log entry by sequence_no."""
+    """Get the latest Aircraft Technical Log entry by sequence_no (highest sequence_no)."""
     obj = await get_latest_aircraft_technical_log(session, aircraft_fk=aircraft_fk)
     if not obj:
         raise HTTPException(
