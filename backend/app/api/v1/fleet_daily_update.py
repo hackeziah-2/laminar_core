@@ -49,6 +49,11 @@ def _remaining_or_zero(value: Optional[float]) -> float:
     return value if value is not None else 0.0
 
 
+def _round1(value: Optional[float]) -> Optional[float]:
+    """Return value rounded to one decimal place, or None if value is None."""
+    return round(value, 1) if value is not None else None
+
+
 async def _enrich_item_with_ldnd(session, orm_item):
     """Build list item with next_insp_due, tach_time_due from LDND latest, tach_time_eod from latest ATL,
     and remaining_time_before_next_isp / remaining_time_before_engine / remaining_time_before_propeller."""
@@ -61,19 +66,19 @@ async def _enrich_item_with_ldnd(session, orm_item):
         base["next_insp_due"] = f"{ldnd.next_inspection_due} {unit}"
     else:
         base["next_insp_due"] = None
-    # tach_time_due: from next_due_tach_hours (latest record)
-    base["tach_time_due"] = ldnd.next_due_tach_hours if ldnd else None
-    # tach_time_eod: from latest ATL by sequence_no → tachometer_end
+    # tach_time_due: from next_due_tach_hours (latest record), rounded to one decimal
+    raw_tach_due = ldnd.next_due_tach_hours if ldnd else None
+    base["tach_time_due"] = _round1(raw_tach_due)
+    # tach_time_eod: from latest ATL by sequence_no → tachometer_end, rounded to one decimal
     latest_atl = await get_latest_aircraft_technical_log(session, aircraft_fk=aircraft_id)
     tach_time_eod = latest_atl.tachometer_end if latest_atl else None
-    base["tach_time_eod"] = tach_time_eod
+    base["tach_time_eod"] = _round1(tach_time_eod)
 
-    # remaining_time_before_next_isp: tach_time_due - tach_time_eod
-    tach_due = base["tach_time_due"]
-    remaining_isp = (tach_due - tach_time_eod) if (tach_due is not None and tach_time_eod is not None) else None
-    base["remaining_time_before_next_isp"] = _remaining_or_zero(remaining_isp)
+    # remaining_time_before_next_isp: tach_time_due - tach_time_eod (from raw values), rounded to one decimal
+    remaining_isp = (raw_tach_due - tach_time_eod) if (raw_tach_due is not None and tach_time_eod is not None) else None
+    base["remaining_time_before_next_isp"] = round(_remaining_or_zero(remaining_isp), 1)
 
-    # remaining_time_before_engine: (TCC Engine last_done_tach + component_limit_hours) - latest ATL tachometer_end
+    # remaining_time_before_engine: (TCC Engine last_done_tach + component_limit_hours) - latest ATL tachometer_end, rounded to one decimal
     tcc_engine = await get_latest_tcc_by_aircraft_and_description(session, aircraft_id, "Engine")
     if (
         tcc_engine is not None
@@ -82,11 +87,11 @@ async def _enrich_item_with_ldnd(session, orm_item):
         and tach_time_eod is not None
     ):
         remaining_engine = (tcc_engine.last_done_tach + tcc_engine.component_limit_hours) - tach_time_eod
-        base["remaining_time_before_engine"] = _remaining_or_zero(remaining_engine)
+        base["remaining_time_before_engine"] = round(_remaining_or_zero(remaining_engine), 1)
     else:
         base["remaining_time_before_engine"] = 0.0
 
-    # remaining_time_before_propeller: (TCC Propeller last_done_tach + component_limit_hours) - latest ATL tachometer_end
+    # remaining_time_before_propeller: (TCC Propeller last_done_tach + component_limit_hours) - latest ATL tachometer_end, rounded to one decimal
     tcc_propeller = await get_latest_tcc_by_aircraft_and_description(session, aircraft_id, "Propeller")
     if (
         tcc_propeller is not None
@@ -95,7 +100,7 @@ async def _enrich_item_with_ldnd(session, orm_item):
         and tach_time_eod is not None
     ):
         remaining_propeller = (tcc_propeller.last_done_tach + tcc_propeller.component_limit_hours) - tach_time_eod
-        base["remaining_time_before_propeller"] = _remaining_or_zero(remaining_propeller)
+        base["remaining_time_before_propeller"] = round(_remaining_or_zero(remaining_propeller), 1)
     else:
         base["remaining_time_before_propeller"] = 0.0
 
