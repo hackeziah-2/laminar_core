@@ -1,4 +1,7 @@
+import json
+import uuid
 from math import ceil
+from pathlib import Path
 from typing import List, Dict, Optional, Any
 
 from fastapi import (
@@ -6,11 +9,14 @@ from fastapi import (
     Depends,
     Query,
     HTTPException,
-    status
+    status,
+    Request,
 )
+from pydantic import ValidationError
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 from app.schemas import aircraft_technical_log_schema
 from app.repository.aircraft_technical_log import (
     list_aircraft_technical_logs,
@@ -23,6 +29,34 @@ from app.repository.aircraft_technical_log import (
     get_previous_atl,
 )
 from app.database import get_session
+
+
+def _sanitize_filename(name: str) -> str:
+    """Keep only safe filename characters; avoid path traversal."""
+    if not name or not isinstance(name, str):
+        return "upload"
+    base = (name.split("/")[-1].split("\\")[-1] or "upload").strip()
+    if not base or ".." in base:
+        return "upload"
+    return "".join(c for c in base if c.isalnum() or c in "._- ") or "upload"
+
+
+async def _save_atl_upload(form_file: Any, subdir: str) -> Optional[str]:
+    """Save an uploaded file to uploads/<subdir>/ with a unique name. Returns stored path like 'white_atl/unique_name.pdf' or None if not a file."""
+    if form_file is None:
+        return None
+    filename = getattr(form_file, "filename", None) if form_file else None
+    if not filename or not getattr(form_file, "read", None):
+        return None
+    ensure_uploads_dir()
+    target_dir = UPLOAD_DIR / subdir
+    target_dir.mkdir(parents=True, exist_ok=True)
+    safe_base = _sanitize_filename(filename)
+    unique_name = f"{uuid.uuid4().hex}_{safe_base}"
+    path = target_dir / unique_name
+    content = await form_file.read()
+    path.write_bytes(content)
+    return f"{subdir}/{unique_name}"
 
 
 def _float_or_zero(value: Any) -> float:
@@ -185,7 +219,7 @@ async def api_search_by_sequence(
     aircraft_id: Optional[int] = Query(None, description="Filter by aircraft ID (e.g. when on aircraft-scoped TCC form)"),
     session: AsyncSession = Depends(get_session)
 ):
-    """Search by ATL Sequence Number for Sequence No. / ATL Reference (type to search). Accepts 'ATL-24451' or '24451'. Returns id (use as atl_ref), sequence_no, sequence_no_display (e.g. 'ATL-24451' for dropdown label), and aircraft (id, registration, model)."""
+    """Search by ATL Sequence Number for Sequence No. / ATL Reference (type to search). Accepts 'ATL-24451' or '24451'. Returns id (use as atl_ref), sequence_no, sequence_no_display (same as sequence_no for dropdown label), and aircraft (id, registration, model)."""
     if not search or not str(search).strip():
         return []
     items = await search_atl_by_sequence_no(
@@ -243,16 +277,66 @@ async def api_create(
     return await create_aircraft_technical_log(session, payload)
 
 
+async def _parse_update_payload(request: Request) -> aircraft_technical_log_schema.AircraftTechnicalLogUpdate:
+    """Parse request body as either JSON or multipart form with 'data'/'json_data' JSON string (for file upload)."""
+    content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    if content_type == "application/json":
+        body = await request.body()
+        if not body:
+            raise HTTPException(status_code=422, detail="Request body is required")
+        try:
+            data = json.loads(body)
+        except json.JSONDecodeError as e:
+            raise HTTPException(status_code=422, detail=f"Invalid JSON: {e}")
+    elif content_type == "multipart/form-data":
+        form = await request.form()
+        data_str = form.get("data") or form.get("json_data")
+        if data_str is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Multipart form must include 'data' or 'json_data' field with JSON payload",
+            )
+        try:
+            data = json.loads(data_str)
+        except json.JSONDecodeError as e:
+            raise HTTPException(status_code=422, detail=f"Invalid JSON in data/json_data: {e}")
+        # Handle White ATL and DFP file uploads (form fields 'white_atl' and 'dfp')
+        white_atl_file = form.get("white_atl")
+        dfp_file = form.get("dfp")
+        if white_atl_file:
+            saved = await _save_atl_upload(white_atl_file, "white_atl")
+            if saved:
+                data["white_atl"] = saved
+        if dfp_file:
+            saved = await _save_atl_upload(dfp_file, "dfp")
+            if saved:
+                data["dfp"] = saved
+    else:
+        raise HTTPException(
+            status_code=415,
+            detail="Content-Type must be application/json or multipart/form-data",
+        )
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=422, detail="Payload must be a JSON object")
+    try:
+        return aircraft_technical_log_schema.AircraftTechnicalLogUpdate(**data)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=e.errors())
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
 @router.put(
     "/{log_id}",
     response_model=aircraft_technical_log_schema.AircraftTechnicalLogRead
 )
 async def api_update(
     log_id: int,
-    log_in: aircraft_technical_log_schema.AircraftTechnicalLogUpdate,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ):
-    """Update an Aircraft Technical Log entry."""
+    """Update an Aircraft Technical Log entry. Accepts application/json body or multipart/form-data with 'data' or 'json_data' (JSON string). For multipart, optional form fields 'white_atl' and 'dfp' are file uploads; saved under uploads/white_atl/ and uploads/dfp/. Download via GET /api/v1/white_atl/download?name=<filename> and /api/v1/dfp/download?name=<filename>."""
+    log_in = await _parse_update_payload(request)
     updated = await update_aircraft_technical_log(
         session=session,
         log_id=log_id,
