@@ -33,6 +33,7 @@ class RoleListItem(BaseModel):
     """Simplified schema for role list (dropdowns)."""
     id: int
     name: str
+    user_count: int = 0
 
     class Config:
         orm_mode = True

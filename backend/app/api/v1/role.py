@@ -30,9 +30,12 @@ router = APIRouter(
 
 @router.get("/roles-list", response_model=List[RoleListItem])
 async def api_roles_list(session: AsyncSession = Depends(get_session)):
-    """Get all Roles for dropdowns (no pagination)."""
+    """Get all Roles for dropdowns (no pagination), with user count per role."""
     items = await get_all_roles_list(session)
-    return [RoleListItem.from_orm(r) for r in items]
+    return [
+        RoleListItem(id=r.id, name=r.name, user_count=user_count)
+        for r, user_count in items
+    ]
 
 
 @router.get("/paged")
