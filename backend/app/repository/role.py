@@ -5,6 +5,7 @@ from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.role import Role
+from app.models.account import AccountInformation
 from app.schemas.role_schema import (
     RoleCreate,
     RoleUpdate,
@@ -151,14 +152,24 @@ async def list_roles(
 
 async def get_all_roles_list(
     session: AsyncSession,
-) -> List[Role]:
-    """Get all Roles (no pagination, for dropdowns)."""
-    result = await session.execute(
-        select(Role)
+) -> List[Tuple[Role, int]]:
+    """Get all Roles with user count (no pagination, for dropdowns)."""
+    user_count_subq = (
+        select(func.count())
+        .select_from(AccountInformation)
+        .where(
+            AccountInformation.role_id == Role.id,
+            AccountInformation.is_deleted == False,
+        )
+        .scalar_subquery()
+    )
+    stmt = (
+        select(Role, user_count_subq.label("user_count"))
         .where(Role.is_deleted == False)
         .order_by(Role.name.asc())
     )
-    return list(result.scalars().all())
+    result = await session.execute(stmt)
+    return [(row[0], row[1] or 0) for row in result.all()]
 
 
 async def soft_delete_role(
