@@ -463,10 +463,10 @@ class AircraftRead(BaseModel):
 
 # ---------- ATL Search response (id for atl_ref, sequence_no + aircraft summary) ----------
 class ATLSearchItem(BaseModel):
-    """Minimal ATL search result for TCC ATL Reference dropdown / Sequence No. type-to-search. id is aircraft_technical_log.id (use as atl_ref). sequence_no_display is for UI (e.g. ATL-24451)."""
+    """Minimal ATL search result for TCC ATL Reference dropdown / Sequence No. type-to-search. id is aircraft_technical_log.id (use as atl_ref). sequence_no_display is for UI (same as sequence_no, no ATL- prefix)."""
     id: int
     sequence_no: str
-    sequence_no_display: Optional[str] = None  # "ATL-{sequence_no}" for dropdown label
+    sequence_no_display: Optional[str] = None  # Same as sequence_no for dropdown label (no ATL- prefix)
     aircraft: AircraftRead
 
     @validator("sequence_no_display", always=True)
@@ -474,10 +474,7 @@ class ATLSearchItem(BaseModel):
         seq = values.get("sequence_no")
         if not seq:
             return ""
-        s = str(seq).strip()
-        if s.upper().startswith("ATL"):
-            return s
-        return f"ATL-{s}"
+        return str(seq).strip()
 
     class Config:
         orm_mode = True

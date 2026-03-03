@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.tcc_maintenance import TCCMaintenance, MethodOfComplianceEnum, TCCCategoryEnum
+from app.models.aircraft_techinical_log import AircraftTechnicalLog
 from app.schemas.tcc_maintenance_schema import (
     TCCMaintenanceCreate,
     TCCMaintenanceUpdate,
@@ -96,6 +97,35 @@ async def get_tcc_maintenance_by_aircraft(
     if not obj:
         return None
     return TCCMaintenanceRead.from_orm(obj)
+
+
+async def get_latest_tcc_by_aircraft_and_description(
+    session: AsyncSession,
+    aircraft_id: int,
+    description: str,
+) -> Optional[TCCMaintenance]:
+    """Get the latest TCC for the aircraft with the given description (e.g. 'Engine', 'Propeller').
+    'Latest' is by linked ATL sequence_no (TCC.atl_ref -> ATL); TCCs without atl_ref are ordered last."""
+    if not description or not str(description).strip():
+        return None
+    desc_match = str(description).strip()
+    stmt = (
+        select(TCCMaintenance)
+        .outerjoin(
+            AircraftTechnicalLog,
+            TCCMaintenance.atl_ref == AircraftTechnicalLog.id,
+        )
+        .where(TCCMaintenance.aircraft_fk == aircraft_id)
+        .where(TCCMaintenance.is_deleted == False)
+        .where(cast(TCCMaintenance.description, String).ilike(desc_match))
+        .order_by(
+            AircraftTechnicalLog.sequence_no.desc().nulls_last(),
+            TCCMaintenance.id.desc(),
+        )
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
 
 
 async def list_tcc_maintenances(

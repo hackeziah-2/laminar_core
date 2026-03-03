@@ -18,6 +18,7 @@ from app.repository.fleet_daily_update import (
 from app.repository.aircraft import get_aircraft
 from app.repository.ldnd_monitoring import get_ldnd_latest_by_aircraft
 from app.repository.aircraft_technical_log import get_latest_aircraft_technical_log
+from app.repository.tcc_maintenance import get_latest_tcc_by_aircraft_and_description
 from app.database import get_session
 
 router = APIRouter(
@@ -43,22 +44,61 @@ def _fleet_daily_update_item_with_aircraft(orm):
     return d
 
 
+def _remaining_or_zero(value: Optional[float]) -> float:
+    """Return value if not None, else 0."""
+    return value if value is not None else 0.0
+
+
 async def _enrich_item_with_ldnd(session, orm_item):
-    """Build list item with next_insp_due, tach_time_due from LDND latest, and tach_time_eod from latest ATL for this aircraft."""
+    """Build list item with next_insp_due, tach_time_due from LDND latest, tach_time_eod from latest ATL,
+    and remaining_time_before_next_isp / remaining_time_before_engine / remaining_time_before_propeller."""
     base = _fleet_daily_update_item_with_aircraft(orm_item)
     aircraft_id = orm_item.aircraft_fk
     ldnd = await get_ldnd_latest_by_aircraft(session, aircraft_id)
     # next_insp_due: from next_inspection_due + next_inspection_unit (e.g. "100 HRS")
-    if ldnd.next_inspection_due is not None:
+    if ldnd and ldnd.next_inspection_due is not None:
         unit = ldnd.next_inspection_unit or ldnd.unit or "HRS"
         base["next_insp_due"] = f"{ldnd.next_inspection_due} {unit}"
     else:
         base["next_insp_due"] = None
     # tach_time_due: from next_due_tach_hours (latest record)
-    base["tach_time_due"] = ldnd.next_due_tach_hours
-    # tach_time_eod: from api/v1/aircraft-technical-log/latest?aircraft_fk={} → tachometer_end
+    base["tach_time_due"] = ldnd.next_due_tach_hours if ldnd else None
+    # tach_time_eod: from latest ATL by sequence_no → tachometer_end
     latest_atl = await get_latest_aircraft_technical_log(session, aircraft_fk=aircraft_id)
-    base["tach_time_eod"] = latest_atl.tachometer_end if latest_atl else None
+    tach_time_eod = latest_atl.tachometer_end if latest_atl else None
+    base["tach_time_eod"] = tach_time_eod
+
+    # remaining_time_before_next_isp: tach_time_due - tach_time_eod
+    tach_due = base["tach_time_due"]
+    remaining_isp = (tach_due - tach_time_eod) if (tach_due is not None and tach_time_eod is not None) else None
+    base["remaining_time_before_next_isp"] = _remaining_or_zero(remaining_isp)
+
+    # remaining_time_before_engine: (TCC Engine last_done_tach + component_limit_hours) - latest ATL tachometer_end
+    tcc_engine = await get_latest_tcc_by_aircraft_and_description(session, aircraft_id, "Engine")
+    if (
+        tcc_engine is not None
+        and tcc_engine.last_done_tach is not None
+        and tcc_engine.component_limit_hours is not None
+        and tach_time_eod is not None
+    ):
+        remaining_engine = (tcc_engine.last_done_tach + tcc_engine.component_limit_hours) - tach_time_eod
+        base["remaining_time_before_engine"] = _remaining_or_zero(remaining_engine)
+    else:
+        base["remaining_time_before_engine"] = 0.0
+
+    # remaining_time_before_propeller: (TCC Propeller last_done_tach + component_limit_hours) - latest ATL tachometer_end
+    tcc_propeller = await get_latest_tcc_by_aircraft_and_description(session, aircraft_id, "Propeller")
+    if (
+        tcc_propeller is not None
+        and tcc_propeller.last_done_tach is not None
+        and tcc_propeller.component_limit_hours is not None
+        and tach_time_eod is not None
+    ):
+        remaining_propeller = (tcc_propeller.last_done_tach + tcc_propeller.component_limit_hours) - tach_time_eod
+        base["remaining_time_before_propeller"] = _remaining_or_zero(remaining_propeller)
+    else:
+        base["remaining_time_before_propeller"] = 0.0
+
     return base
 
 
