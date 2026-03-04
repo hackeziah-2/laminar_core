@@ -58,6 +58,11 @@ docker-compose exec backend alembic current
 docker-compose up -d --build && docker-compose exec backend alembic upgrade head
 ```
 
+### Benefits of this approach
+- **No port conflicts** — Each environment has its own `NGINX_PORT`, `FASTAPI_PORT`, `POSTGRES_PORT`, and `REDIS_PORT` (e.g. in `.env.dev`, `.env.prod`, `.env.uat`), so you can run dev, UAT, and prod side by side.
+- **Single Compose file per env** — One `docker-compose.<env>.yml` per environment, with env-specific `.env.<env>` for ports and config.
+- **Easy to spin up/down** — Start or stop any environment with one command: `docker compose -f docker-compose.dev.yml up -d` (or `prod`/`uat`).
+
 ### Production notes
 - Set a strong `SECRET_KEY` in `.env`.
 - Use a managed PostgreSQL and Redis in production if possible.
