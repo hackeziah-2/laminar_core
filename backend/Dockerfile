@@ -8,7 +8,7 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies (gosu for dropping root in entrypoint)
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
@@ -22,31 +22,29 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Upgrade pip
 RUN pip install --upgrade pip setuptools wheel
 
-# Copy requirements first for better layer caching
+# Copy requirements first for caching
 COPY requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy app code
 COPY . .
 
-# Create non-root user for security
-RUN useradd -m -u 1000 appuser && \
-    chown -R appuser:appuser /app
+# Create non-root user
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 
-# Entrypoint runs as root to fix uploads permissions, then drops to appuser
+# Entrypoint script handles permissions & user
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
-# Do not switch USER here; entrypoint creates uploads and chowns, then runs app as appuser
-
-# Expose port
+# Expose FastAPI port
 EXPOSE 8000
 
-# Health check
+# Healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/docs')" || exit 1
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
+# Default CMD for dev (can override in docker-compose)
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
