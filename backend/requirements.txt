@@ -1,5 +1,6 @@
 fastapi
 uvicorn[standard]
+gunicorn
 SQLAlchemy>=1.4
 asyncpg
 alembic

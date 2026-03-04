@@ -41,9 +41,9 @@ RUN chmod +x /docker-entrypoint.sh
 # Expose FastAPI port
 EXPOSE 8000
 
-# Healthcheck
+# Healthcheck (exec form for reliable behavior)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/docs')" || exit 1
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/docs')"]
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
 # Default CMD for dev (can override in docker-compose)

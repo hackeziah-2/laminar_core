@@ -1,13 +1,11 @@
-version: "3.9"
-
 services:
   db:
     image: postgres:15-alpine
-    container_name: laminar_db_prod
+    container_name: laminar_db_uat
     env_file:
-      - .env.prod
+      - .env.uat
     volumes:
-      - pgdata_prod:/var/lib/postgresql/data
+      - pgdata_uat:/var/lib/postgresql/data
       - ./backend/docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d
     # Do not expose DB port for security
     restart: unless-stopped
@@ -21,7 +19,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: laminar_redis_prod
+    container_name: laminar_redis_uat
     # Do not expose Redis port
     restart: unless-stopped
     healthcheck:
@@ -36,7 +34,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: laminar_backend_prod
+    container_name: laminar_backend_uat
     command: gunicorn -k uvicorn.workers.UvicornWorker app.main:app -w 4 -b 0.0.0.0:8000
     depends_on:
       db:
@@ -44,7 +42,7 @@ services:
       redis:
         condition: service_healthy
     env_file:
-      - .env.prod
+      - .env.uat
     volumes:
       - ./backend:/app
       - ./backend/uploads:/app/uploads
@@ -64,7 +62,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: laminar_celery_prod
+    container_name: laminar_celery_uat
     command: celery -A app.worker.celery_app worker --loglevel=info
     depends_on:
       db:
@@ -72,7 +70,7 @@ services:
       redis:
         condition: service_healthy
     env_file:
-      - .env.prod
+      - .env.uat
     volumes:
       - ./backend:/app
       - ./backend/uploads:/app/uploads
@@ -80,8 +78,21 @@ services:
     networks:
       - laminar_network
 
+  nginx:
+    image: nginx:alpine
+    container_name: laminar_nginx_uat
+    ports:
+      - "${NGINX_PORT:-80}:80"
+    volumes:
+      - ./nginx/conf.d/uat.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - laminar_network
+
 volumes:
-  pgdata_prod:
+  pgdata_uat:
 
 networks:
   laminar_network:
