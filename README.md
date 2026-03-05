@@ -1,15 +1,35 @@
-Flight Management API 
-This scaffold contains a modular FastAPI backend ready for PostgreSQL, Redis, and Celery.
+Flight Management API  
+This scaffold contains a modular FastAPI backend ready for PostgreSQL, Redis, and Celery.  
 Run locally with Docker Compose.
-
-Quick start:
-1. Copy `.env.example` to `.env` and adjust if needed.
-2. docker compose up --build
-3. API docs: http://localhost:8000/docs (interactive: [/docs](http://localhost:8000/docs#/))
 
 ---
 
-## How to Deploy
+## How to run the server (every environment)
+
+Use the **compose file and env file** for the environment you want. From the project root:
+
+| Environment   | Run server | API (default port) |
+|---------------|------------|---------------------|
+| **Development** | `docker-compose -f docker-compose.dev.yml --env-file .env.dev up --build -d` then `docker-compose -f docker-compose.dev.yml exec backend alembic upgrade head` | http://localhost:8000/docs |
+| **UAT**        | `docker-compose -f docker-compose.uat.yml --env-file .env.uat up --build -d` then `docker-compose -f docker-compose.uat.yml exec backend alembic upgrade head` | http://localhost:8001/docs (or `FASTAPI_PORT` in `.env.uat`) |
+| **Production** | `docker-compose -f docker-compose.prod.yml --env-file .env.prod up --build -d` then `docker-compose -f docker-compose.prod.yml exec backend alembic upgrade head` | Port from `.env.prod` or your public URL |
+
+**First time:** copy `.env.example` to `.env.dev` (or `.env.uat` / `.env.prod`) and set ports and `SECRET_KEY` as needed. Each env uses its own containers, network, and ports so you can run dev, UAT, and prod side-by-side.
+
+Full steps, one-line commands, and troubleshooting: **[DEPLOYMENT.md](DEPLOYMENT.md)**.
+
+---
+
+## Quick start (development only)
+
+1. Copy `.env.example` to `.env.dev` and adjust if needed.
+2. `docker-compose -f docker-compose.dev.yml --env-file .env.dev up --build -d`
+3. `docker-compose -f docker-compose.dev.yml exec backend alembic upgrade head`
+4. API docs: http://localhost:8000/docs
+
+---
+
+## Deploy (detailed)
 
 ### Prerequisites
 - [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) installed
@@ -21,48 +41,30 @@ git clone <repository-url>
 cd laminar_core
 ```
 
-### Step 2: Environment variables (optional)
-Create a `.env` file in the project root if you need to override defaults:
+### Step 2: Environment variables
+Create an env file for your target environment (e.g. `.env.dev` for development):
 ```bash
-# Example .env
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/laminar_database
-SECRET_KEY=your-secret-key-change-in-production
-DEBUG=False
+cp .env.example .env.dev
+# Edit .env.dev: DATABASE_URL, SECRET_KEY, DEBUG, FASTAPI_PORT, NGINX_PORT, etc.
 ```
 
-### Step 3: Build and start services
+### Step 3: Build and start (dev example)
 ```bash
-# Build and run all services (db, redis, backend, celery)
-docker-compose up --build -d
-
-# Check that services are running
-docker-compose ps
+docker-compose -f docker-compose.dev.yml --env-file .env.dev up --build -d
+docker-compose -f docker-compose.dev.yml ps
 ```
 
 ### Step 4: Run database migrations
 ```bash
-# Apply all migrations (creates/updates tables)
-docker-compose exec backend alembic upgrade head
-
-# Optional: verify migration status
-docker-compose exec backend alembic current
+docker-compose -f docker-compose.dev.yml exec backend alembic upgrade head
+docker-compose -f docker-compose.dev.yml exec backend alembic current
 ```
 
-### Step 5: Verify deployment
-- **API docs (interactive):** http://localhost:8000/docs#/  
-- **Health:** Open the docs URL or `curl http://localhost:8000/docs`  
-- **Logs:** `docker-compose logs -f backend`
+### Step 5: Verify
+- **API docs:** http://localhost:8000/docs (or the port in your `.env.dev`)
+- **Logs:** `docker-compose -f docker-compose.dev.yml logs -f backend`
 
-### Quick deploy (one-shot)
-```bash
-docker-compose up -d --build && docker-compose exec backend alembic upgrade head
-```
-
-### Production notes
-- Set a strong `SECRET_KEY` in `.env`.
-- Use a managed PostgreSQL and Redis in production if possible.
-- Run behind a reverse proxy (e.g. Nginx) with HTTPS.
-- See **[DEPLOYMENT.md](DEPLOYMENT.md)** for production deployment, collation fix, and troubleshooting.
+For **UAT** or **Production**, use `docker-compose.uat.yml` / `.env.uat` or `docker-compose.prod.yml` / `.env.prod` in the commands above. See **[DEPLOYMENT.md](DEPLOYMENT.md)** for full deployment guide, collation fix, and troubleshooting.
 
 ---
 

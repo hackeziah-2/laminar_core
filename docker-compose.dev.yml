@@ -39,6 +39,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: laminar_backend_dev
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
       db:
         condition: service_healthy

@@ -19,6 +19,50 @@ Ensure each environment uses:
 | **Unique host ports** | Set different ports per environment in `.env.dev`, `.env.uat`, `.env.prod` (e.g. `FASTAPI_PORT`, `NGINX_PORT`, `POSTGRES_PORT`, `REDIS_PORT`). |
 | **Explicit compose file** | Always use `-f docker-compose.<env>.yml` (e.g. `-f docker-compose.dev.yml`, `-f docker-compose.prod.yml`). |
 | **Explicit env file** | Each compose file references an env file (e.g. `.env.dev`). For CLI override, use `--env-file .env.<env>`. |
+| **Single Dockerfile (dev/uat/prod)** | One `backend/Dockerfile`; default CMD is production-safe (uvicorn, no `--reload`). Dev compose overrides with `uvicorn ... --reload`; UAT/Prod override with `gunicorn`. |
+
+---
+
+## How to run the server (every environment)
+
+Use **one** of the following according to the environment you want to run. Each uses its own compose file and env file so dev, UAT, and prod can run side-by-side without conflicts.
+
+### Development
+
+```bash
+# From project root
+cp .env.example .env.dev   # edit .env.dev if needed (ports, SECRET_KEY, etc.)
+docker-compose -f docker-compose.dev.yml --env-file .env.dev up --build -d
+docker-compose -f docker-compose.dev.yml exec backend alembic upgrade head
+```
+
+- **API:** http://localhost:8000/docs (or the port set in `.env.dev` as `FASTAPI_PORT`)
+- **Logs:** `docker-compose -f docker-compose.dev.yml logs -f backend`
+- **Stop:** `docker-compose -f docker-compose.dev.yml down`
+
+### UAT
+
+```bash
+cp .env.example .env.uat   # set UAT ports and config (e.g. FASTAPI_PORT=8001)
+docker-compose -f docker-compose.uat.yml --env-file .env.uat up --build -d
+docker-compose -f docker-compose.uat.yml exec backend alembic upgrade head
+```
+
+- **API:** http://localhost:`FASTAPI_PORT`/docs (port from `.env.uat`)
+- **Logs:** `docker-compose -f docker-compose.uat.yml logs -f backend`
+- **Stop:** `docker-compose -f docker-compose.uat.yml down`
+
+### Production
+
+```bash
+# Use strong SECRET_KEY and production values in .env.prod
+docker-compose -f docker-compose.prod.yml --env-file .env.prod up --build -d
+docker-compose -f docker-compose.prod.yml exec backend alembic upgrade head
+```
+
+- **API:** http://localhost:`FASTAPI_PORT`/docs (port from `.env.prod`, or your public URL)
+- **Logs:** `docker-compose -f docker-compose.prod.yml logs -f backend`
+- **Stop:** `docker-compose -f docker-compose.prod.yml down`
 
 ---
 
