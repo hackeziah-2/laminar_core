@@ -8,6 +8,20 @@ Complete deployment commands for the Laminar Core application.
 - Git (for cloning the repository)
 - Environment variables configured (optional)
 
+## Deployment Checklist
+
+Ensure each environment uses:
+
+| Requirement | How it's satisfied |
+|-------------|--------------------|
+| **Unique container names** | Each compose file uses env-specific names (e.g. `laminar_backend_dev`, `laminar_backend_prod`, `laminar_backend_uat`). |
+| **Unique network** | Each compose file defines its own network: `laminar_network_dev`, `laminar_network_prod`, `laminar_network_uat`. |
+| **Unique host ports** | Set different ports per environment in `.env.dev`, `.env.uat`, `.env.prod` (e.g. `FASTAPI_PORT`, `NGINX_PORT`, `POSTGRES_PORT`, `REDIS_PORT`). |
+| **Explicit compose file** | Always use `-f docker-compose.<env>.yml` (e.g. `-f docker-compose.dev.yml`, `-f docker-compose.prod.yml`). |
+| **Explicit env file** | Each compose file references an env file (e.g. `.env.dev`). For CLI override, use `--env-file .env.<env>`. |
+
+---
+
 ## Table of Contents
 
 1. [Deployment Steps (Command Summary)](#deployment-steps-command-summary)
@@ -43,28 +57,29 @@ cd laminar_core
 
 ### Step 3: Stop any existing containers and volumes
 ```bash
-docker-compose down -v
+# Use the compose file and env file for your environment (dev / uat / prod)
+docker-compose -f docker-compose.dev.yml --env-file .env.dev down -v
 ```
 
 ### Step 4: Build and start all services
 ```bash
-docker-compose up --build -d
+docker-compose -f docker-compose.dev.yml --env-file .env.dev up --build -d
 ```
 
 ### Step 5: Wait for services to be healthy (optional check)
 ```bash
-docker-compose ps
+docker-compose -f docker-compose.dev.yml ps
 ```
 
 ### Step 6: Run database migrations
 ```bash
-docker-compose exec backend alembic upgrade head
+docker-compose -f docker-compose.dev.yml exec backend alembic upgrade head
 ```
 
 ### Step 7: Verify deployment
 ```bash
 # Check migration status (optional)
-docker-compose exec backend alembic current
+docker-compose -f docker-compose.dev.yml exec backend alembic current
 
 # Open API docs in browser
 # http://localhost:8000/docs
@@ -75,7 +90,7 @@ curl http://localhost:8000/docs
 
 ### One-line deployment (all steps)
 ```bash
-docker-compose down -v && docker-compose up --build -d && docker-compose exec backend alembic upgrade head
+docker-compose -f docker-compose.dev.yml --env-file .env.dev down -v && docker-compose -f docker-compose.dev.yml --env-file .env.dev up --build -d && docker-compose -f docker-compose.dev.yml exec backend alembic upgrade head
 ```
 
 ---
@@ -88,13 +103,21 @@ cd /Users/kevinpaullamadrid/Desktop/Project/laminar_core
 ```
 
 ### 2. Set Environment Variables (Optional)
-Create a `.env` file in the root directory if needed:
+Create an env file per environment so ports and config stay unique:
+- **Development:** copy `.env.example` to `.env.dev`, set `FASTAPI_PORT`, `NGINX_PORT`, `POSTGRES_PORT`, `REDIS_PORT` (e.g. 8000, 80, 5432, 6379).
+- **UAT:** `.env.uat` with different ports (e.g. 8001, 81, 5433, 6380).
+- **Production:** `.env.prod` with your production ports and secrets.
+
+Example `.env.dev`:
 ```bash
-# Example .env file
 DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/laminar_database
 REDIS_URL=redis://redis:6379/0
 SECRET_KEY=your-secret-key-change-in-production
 DEBUG=False
+FASTAPI_PORT=8000
+NGINX_PORT=80
+POSTGRES_PORT=5432
+REDIS_PORT=6379
 ```
 
 ---
@@ -104,30 +127,31 @@ DEBUG=False
 ### Fresh Deployment (Recommended for first time)
 
 ```bash
+# Use explicit compose and env file for dev
+COMPOSE_FILE=docker-compose.dev.yml
+ENV_FILE=.env.dev
+
 # 1. Stop and remove all containers, volumes, and networks
-docker-compose down -v
+docker-compose -f $COMPOSE_FILE --env-file $ENV_FILE down -v
 
 # 2. Build and start all services
-docker-compose up --build -d
+docker-compose -f $COMPOSE_FILE --env-file $ENV_FILE up --build -d
 
 # 3. Wait for services to be healthy
-docker-compose ps
+docker-compose -f $COMPOSE_FILE ps
 
 # 4. Run database migrations
-docker-compose exec backend alembic upgrade head
+docker-compose -f $COMPOSE_FILE exec backend alembic upgrade head
 
 # 5. Check logs to verify everything is running
-docker-compose logs -f backend
+docker-compose -f $COMPOSE_FILE logs -f backend
 ```
 
 ### Quick Start (if volumes already exist)
 
 ```bash
-# Start all services
-docker-compose up -d
-
-# Run migrations
-docker-compose exec backend alembic upgrade head
+docker-compose -f docker-compose.dev.yml --env-file .env.dev up -d
+docker-compose -f docker-compose.dev.yml exec backend alembic upgrade head
 ```
 
 ---
@@ -137,100 +161,84 @@ docker-compose exec backend alembic upgrade head
 ### Create Fresh Database with Collation Fix
 
 ```bash
-# Stop and remove database volume
-docker-compose down -v db
-
-# Start database (collation fix runs automatically on init)
-docker-compose up -d db
-
-# Wait for database to be ready
-docker-compose exec db pg_isready -U postgres
-
-# Create application database (if not auto-created)
-docker-compose exec db psql -U postgres -c "CREATE DATABASE laminar_database;"
+# Use the compose/env for your environment (e.g. dev)
+docker-compose -f docker-compose.dev.yml --env-file .env.dev down -v db
+docker-compose -f docker-compose.dev.yml --env-file .env.dev up -d db
+docker-compose -f docker-compose.dev.yml exec db pg_isready -U postgres
+docker-compose -f docker-compose.dev.yml exec db psql -U postgres -c "CREATE DATABASE laminar_database;"
 ```
 
 ### Fix Collation Version (if warning appears)
 
 ```bash
-# Option 1: Run the fix script
+# Option 1: Run the fix script (uses docker-compose if available)
 ./backend/scripts/fix_collation.sh
 
-# Option 2: Manual fix
-docker-compose exec db psql -U postgres -d template1 -c "UPDATE pg_database SET datcollversion = NULL WHERE datname = 'postgres'; ALTER DATABASE postgres REFRESH COLLATION VERSION;"
-docker-compose exec db psql -U postgres -d template1 -c "UPDATE pg_database SET datcollversion = NULL WHERE datname = 'laminar_database'; ALTER DATABASE laminar_database REFRESH COLLATION VERSION;"
+# Option 2: Manual fix (use your compose file)
+docker-compose -f docker-compose.dev.yml exec db psql -U postgres -d template1 -c "UPDATE pg_database SET datcollversion = NULL WHERE datname = 'postgres'; ALTER DATABASE postgres REFRESH COLLATION VERSION;"
+docker-compose -f docker-compose.dev.yml exec db psql -U postgres -d template1 -c "UPDATE pg_database SET datcollversion = NULL WHERE datname = 'laminar_database'; ALTER DATABASE laminar_database REFRESH COLLATION VERSION;"
 ```
 
 ---
 
 ## Running Migrations
 
+Use the same `-f docker-compose.<env>.yml` as your running stack (e.g. `docker-compose.dev.yml` for dev).
+
 ### Check Migration Status
 ```bash
-docker-compose exec backend alembic current
+docker-compose -f docker-compose.dev.yml exec backend alembic current
 ```
 
 ### Run All Migrations
 ```bash
-docker-compose exec backend alembic upgrade head
+docker-compose -f docker-compose.dev.yml exec backend alembic upgrade head
 ```
 
 ### Create New Migration
 ```bash
-docker-compose exec backend alembic revision --autogenerate -m "migration_description"
+docker-compose -f docker-compose.dev.yml exec backend alembic revision --autogenerate -m "migration_description"
 ```
 
 ### Rollback Migration
 ```bash
-# Rollback one migration
-docker-compose exec backend alembic downgrade -1
-
-# Rollback to specific revision
-docker-compose exec backend alembic downgrade <revision_id>
+docker-compose -f docker-compose.dev.yml exec backend alembic downgrade -1
+# Or: docker-compose -f docker-compose.dev.yml exec backend alembic downgrade <revision_id>
 ```
 
 ### Check Migration History
 ```bash
-docker-compose exec backend alembic history
+docker-compose -f docker-compose.dev.yml exec backend alembic history
 ```
 
 ---
 
 ## Starting Services
 
+Always pass the compose file (and optionally env file) for your environment.
+
 ### Start All Services
 ```bash
-docker-compose up -d
+docker-compose -f docker-compose.dev.yml --env-file .env.dev up -d
 ```
 
 ### Start Specific Service
 ```bash
-# Start only database
-docker-compose up -d db
-
-# Start only backend
-docker-compose up -d backend
-
-# Start only celery
-docker-compose up -d celery
+docker-compose -f docker-compose.dev.yml --env-file .env.dev up -d db
+docker-compose -f docker-compose.dev.yml --env-file .env.dev up -d backend
+docker-compose -f docker-compose.dev.yml --env-file .env.dev up -d celery
 ```
 
 ### Stop Services
 ```bash
-# Stop all services
-docker-compose stop
-
-# Stop specific service
-docker-compose stop backend
+docker-compose -f docker-compose.dev.yml stop
+# Or: docker-compose -f docker-compose.dev.yml stop backend
 ```
 
 ### Restart Services
 ```bash
-# Restart all services
-docker-compose restart
-
-# Restart specific service
-docker-compose restart backend
+docker-compose -f docker-compose.dev.yml restart
+# Or: docker-compose -f docker-compose.dev.yml restart backend
 ```
 
 ---
@@ -240,17 +248,15 @@ docker-compose restart backend
 ### Automatic Fix (on fresh database)
 The collation fix runs automatically when creating a new database volume. If you need to recreate:
 ```bash
-docker-compose down -v db
-docker-compose up -d db
+docker-compose -f docker-compose.dev.yml --env-file .env.dev down -v db
+docker-compose -f docker-compose.dev.yml --env-file .env.dev up -d db
 ```
 
 ### Manual Fix (for existing databases)
 ```bash
-# Using the fix script
 ./backend/scripts/fix_collation.sh
-
-# Or manually
-docker-compose exec db psql -U postgres -d template1 << EOF
+# Or manually (use your compose file):
+docker-compose -f docker-compose.dev.yml exec db psql -U postgres -d template1 << EOF
 UPDATE pg_database SET datcollversion = NULL WHERE datname = 'postgres';
 ALTER DATABASE postgres REFRESH COLLATION VERSION;
 UPDATE pg_database SET datcollversion = NULL WHERE datname = 'laminar_database';
@@ -262,213 +268,165 @@ EOF
 
 ## Production Deployment
 
+Use **explicit compose and env file** so production uses unique containers, network, and ports:
+
+```bash
+COMPOSE_FILE=docker-compose.prod.yml
+ENV_FILE=.env.prod
+```
+
 ### 1. Build Production Images
 ```bash
-# Build without cache
-docker-compose build --no-cache
-
-# Build specific service
-docker-compose build --no-cache backend
+docker-compose -f $COMPOSE_FILE --env-file $ENV_FILE build --no-cache
+# Or single service: docker-compose -f $COMPOSE_FILE build --no-cache backend
 ```
 
 ### 2. Start Production Services
 ```bash
-# Start in detached mode
-docker-compose up -d
-
-# Verify all services are running
-docker-compose ps
+docker-compose -f $COMPOSE_FILE --env-file $ENV_FILE up -d
+docker-compose -f $COMPOSE_FILE ps
 ```
 
 ### 3. Run Migrations in Production
 ```bash
-docker-compose exec backend alembic upgrade head
+docker-compose -f $COMPOSE_FILE exec backend alembic upgrade head
 ```
 
 ### 4. Verify Health Checks
 ```bash
-# Check service health
-docker-compose ps
-
-# Check backend health
-curl http://localhost:8000/docs
-
-# Check database health
-docker-compose exec db pg_isready -U postgres
+docker-compose -f $COMPOSE_FILE ps
+curl http://localhost:${FASTAPI_PORT:-8000}/docs   # use port from .env.prod
+docker-compose -f $COMPOSE_FILE exec db pg_isready -U postgres
 ```
 
 ### 5. View Logs
 ```bash
-# All services
-docker-compose logs -f
-
-# Specific service
-docker-compose logs -f backend
-
-# Last 100 lines
-docker-compose logs --tail=100 backend
+docker-compose -f $COMPOSE_FILE logs -f
+docker-compose -f $COMPOSE_FILE logs -f backend
+docker-compose -f $COMPOSE_FILE logs --tail=100 backend
 ```
 
 ---
 
 ## Maintenance Commands
 
+Use `-f docker-compose.<env>.yml` for your environment (e.g. `docker-compose.prod.yml` for production).
+
 ### Database Backup
 ```bash
-# Backup database
-docker-compose exec db pg_dump -U postgres laminar_database > backup_$(date +%Y%m%d_%H%M%S).sql
-
-# Backup with custom format
-docker-compose exec db pg_dump -U postgres -F c laminar_database > backup_$(date +%Y%m%d_%H%M%S).dump
+docker-compose -f docker-compose.prod.yml exec db pg_dump -U postgres laminar_database > backup_$(date +%Y%m%d_%H%M%S).sql
+docker-compose -f docker-compose.prod.yml exec db pg_dump -U postgres -F c laminar_database > backup_$(date +%Y%m%d_%H%M%S).dump
 ```
 
 ### Database Restore
 ```bash
-# Restore from SQL file
-cat backup.sql | docker-compose exec -T db psql -U postgres laminar_database
-
-# Restore from custom format
-docker-compose exec db pg_restore -U postgres -d laminar_database backup.dump
+cat backup.sql | docker-compose -f docker-compose.prod.yml exec -T db psql -U postgres laminar_database
+docker-compose -f docker-compose.prod.yml exec db pg_restore -U postgres -d laminar_database backup.dump
 ```
 
 ### Database Connection
 ```bash
-# Connect to database
-docker-compose exec db psql -U postgres -d laminar_database
-
-# Execute SQL command
-docker-compose exec db psql -U postgres -d laminar_database -c "SELECT version();"
+docker-compose -f docker-compose.dev.yml exec db psql -U postgres -d laminar_database
+docker-compose -f docker-compose.dev.yml exec db psql -U postgres -d laminar_database -c "SELECT version();"
 ```
 
 ### Clean Up
 ```bash
-# Stop and remove containers
-docker-compose down
-
-# Stop and remove containers, volumes, and networks
-docker-compose down -v
-
-# Remove unused images
+docker-compose -f docker-compose.dev.yml down
+docker-compose -f docker-compose.dev.yml down -v
 docker image prune -a
-
-# Remove unused volumes
 docker volume prune
 ```
 
 ### Update Application
 ```bash
-# Pull latest code
 git pull
-
-# Rebuild and restart
-docker-compose up --build -d
-
-# Run migrations if needed
-docker-compose exec backend alembic upgrade head
+docker-compose -f docker-compose.prod.yml --env-file .env.prod up --build -d
+docker-compose -f docker-compose.prod.yml exec backend alembic upgrade head
 ```
 
 ---
 
 ## Troubleshooting
 
+Use the same compose file as the stack you're debugging (e.g. `-f docker-compose.dev.yml`).
+
 ### Check Service Status
 ```bash
-# View all services status
-docker-compose ps
-
-# View logs
-docker-compose logs backend
-docker-compose logs db
-docker-compose logs celery
+docker-compose -f docker-compose.dev.yml ps
+docker-compose -f docker-compose.dev.yml logs backend
+docker-compose -f docker-compose.dev.yml logs db
+docker-compose -f docker-compose.dev.yml logs celery
 ```
 
 ### Database Connection Issues
 ```bash
-# Test database connection
-docker-compose exec db psql -U postgres -c "SELECT 1;"
-
-# Check database exists
-docker-compose exec db psql -U postgres -l
-
-# Check connection from backend
-docker-compose exec backend python -c "from app.database import engine; print('DB OK')"
+docker-compose -f docker-compose.dev.yml exec db psql -U postgres -c "SELECT 1;"
+docker-compose -f docker-compose.dev.yml exec db psql -U postgres -l
+docker-compose -f docker-compose.dev.yml exec backend python -c "from app.database import engine; print('DB OK')"
 ```
 
 ### Reset Everything (Nuclear Option)
 ```bash
-# Stop everything
-docker-compose down -v
-
-# Remove all containers, images, and volumes
+docker-compose -f docker-compose.dev.yml down -v
 docker system prune -a --volumes
-
-# Start fresh
-docker-compose up --build -d
-docker-compose exec backend alembic upgrade head
+docker-compose -f docker-compose.dev.yml --env-file .env.dev up --build -d
+docker-compose -f docker-compose.dev.yml exec backend alembic upgrade head
 ```
 
 ### View Resource Usage
 ```bash
-# Container stats
 docker stats
-
-# Disk usage
 docker system df
-
-# Volume usage
 docker volume ls
 ```
 
 ### Enter Container Shell
 ```bash
-# Backend container
-docker-compose exec backend /bin/bash
-
-# Database container
-docker-compose exec db /bin/sh
-
-# Run Python commands in backend
-docker-compose exec backend python -c "print('Hello')"
+docker-compose -f docker-compose.dev.yml exec backend /bin/bash
+docker-compose -f docker-compose.dev.yml exec db /bin/sh
+docker-compose -f docker-compose.dev.yml exec backend python -c "print('Hello')"
 ```
 
 ### Check Network Connectivity
 ```bash
-# List networks
 docker network ls
-
-# Inspect network
-docker network inspect laminar_core_laminar_network
+# Dev project name is laminar_core_dev; network is laminar_core_dev_laminar_network_dev
+docker network inspect laminar_core_dev_laminar_network_dev
 ```
 
 ---
 
 ## Quick Reference
 
+Use explicit compose and env file for your environment (dev example below; for prod use `docker-compose.prod.yml` and `.env.prod`).
+
 ```bash
-# Full deployment from scratch
-docker-compose down -v
-docker-compose up --build -d
-docker-compose exec backend alembic upgrade head
+# Full deployment from scratch (dev)
+docker-compose -f docker-compose.dev.yml --env-file .env.dev down -v
+docker-compose -f docker-compose.dev.yml --env-file .env.dev up --build -d
+docker-compose -f docker-compose.dev.yml exec backend alembic upgrade head
 
 # Daily operations
-docker-compose up -d                    # Start services
-docker-compose logs -f backend         # View logs
-docker-compose restart backend         # Restart service
-docker-compose down                    # Stop services
+docker-compose -f docker-compose.dev.yml --env-file .env.dev up -d
+docker-compose -f docker-compose.dev.yml logs -f backend
+docker-compose -f docker-compose.dev.yml restart backend
+docker-compose -f docker-compose.dev.yml down
 
 # Migrations
-docker-compose exec backend alembic upgrade head    # Run migrations
-docker-compose exec backend alembic current        # Check status
-docker-compose exec backend alembic history        # View history
+docker-compose -f docker-compose.dev.yml exec backend alembic upgrade head
+docker-compose -f docker-compose.dev.yml exec backend alembic current
+docker-compose -f docker-compose.dev.yml exec backend alembic history
 
 # Database
-docker-compose exec db psql -U postgres -d laminar_database    # Connect to DB
-./backend/scripts/fix_collation.sh                              # Fix collation
+docker-compose -f docker-compose.dev.yml exec db psql -U postgres -d laminar_database
+# Fix collation (uses COMPOSE_FILE=docker-compose.dev.yml by default; set for prod/uat if needed)
+./backend/scripts/fix_collation.sh
 
 # Maintenance
-docker-compose down -v           # Clean everything
-docker-compose logs -f           # View all logs
-docker stats                     # Resource usage
+docker-compose -f docker-compose.dev.yml down -v
+docker-compose -f docker-compose.dev.yml logs -f
+docker stats
 ```
 
 ---
