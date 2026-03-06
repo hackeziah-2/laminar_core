@@ -9,19 +9,22 @@ DB_USER="${POSTGRES_USER:-postgres}"
 
 echo "Fixing PostgreSQL collation version warnings..."
 
+# Optional: explicit compose file (e.g. docker-compose.dev.yml) for unique project/network
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.dev.yml}"
+
 # Check if running in Docker or directly
-if command -v docker-compose &> /dev/null && docker-compose ps db &> /dev/null; then
+if command -v docker-compose &> /dev/null && docker-compose -f "$COMPOSE_FILE" ps db &> /dev/null; then
     # Running in Docker environment
-    echo "Detected Docker environment, using docker-compose..."
+    echo "Detected Docker environment, using docker-compose -f $COMPOSE_FILE..."
     
     # Fix postgres database
-    docker-compose exec -T db psql -U "$DB_USER" -d template1 -c "
+    docker-compose -f "$COMPOSE_FILE" exec -T db psql -U "$DB_USER" -d template1 -c "
         UPDATE pg_database SET datcollversion = NULL WHERE datname = 'postgres';
         ALTER DATABASE postgres REFRESH COLLATION VERSION;
     " || echo "⚠ Could not fix 'postgres' database"
     
     # Fix application database
-    docker-compose exec -T db psql -U "$DB_USER" -d template1 -c "
+    docker-compose -f "$COMPOSE_FILE" exec -T db psql -U "$DB_USER" -d template1 -c "
         UPDATE pg_database SET datcollversion = NULL WHERE datname = '$DB_NAME';
         ALTER DATABASE $DB_NAME REFRESH COLLATION VERSION;
     " || echo "⚠ Could not fix '$DB_NAME' database"
