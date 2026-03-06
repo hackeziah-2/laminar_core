@@ -38,11 +38,35 @@ OPENAPI_TAGS = [
 app = FastAPI(title="Laminar API", openapi_tags=OPENAPI_TAGS)
 
 # CORS: allow localhost (dev) and deployment; override via ALLOWED_ORIGINS env (comma-separated)
-frontend_url = os.getenv("VITE_APP_URL")
+_default_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://120.89.33.51",
+    "http://120.89.33.51:3000",
+    "http://120.89.33.51:8000",
+]
+
+# Optional: still support old single-URL env like VITE_APP_URL
+_single_frontend_url = os.getenv("VITE_APP_URL", "").strip()
+
+_env_origins_raw = os.getenv("ALLOWED_ORIGINS", "").strip()
+_env_origins = [o.strip() for o in _env_origins_raw.split(",") if o.strip()] if _env_origins_raw else []
+
+# If ALLOWED_ORIGINS is set, use that; otherwise fall back to single VITE_APP_URL if present; else defaults
+if _env_origins:
+    origins = _env_origins
+elif _single_frontend_url:
+    origins = [_single_frontend_url]
+else:
+    origins = _default_origins
+
+# Allow deployment IP on any port (e.g. frontend on :80 or :3000) and localhost
+_origin_regex = r"^https?://(localhost|127\.0\.0\.1|120\.89\.33\.51)(:\d+)?$"
 
 app.add_middleware(
     CORSMiddleware,
-    origins = [frontend_url],
+    allow_origins=origins,
+    allow_origin_regex=_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
