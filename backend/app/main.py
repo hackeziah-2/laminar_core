@@ -40,8 +40,9 @@ app = FastAPI(title="Laminar API", openapi_tags=OPENAPI_TAGS)
 # CORS: allow localhost (dev) and deployment; override via ALLOWED_ORIGINS env (comma-separated)
 _default_origins = [
     "http://localhost:3000",
+    "http://localhost:5173",      # Vite default dev server
     "http://127.0.0.1:3000",
-    "http://120.89.33.51",
+    "http://127.0.0.1:5173",
     "http://120.89.33.51:3000",   # dev frontend
     "http://120.89.33.51:3011",   # uat frontend
     "http://120.89.33.51:3002",   # prod frontend
