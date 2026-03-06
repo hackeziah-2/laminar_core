@@ -21,6 +21,15 @@ Ensure each environment uses:
 | **Explicit env file** | Each compose file references an env file (e.g. `.env.dev`). For CLI override, use `--env-file .env.<env>`. |
 | **Single Dockerfile (dev/uat/prod)** | One `backend/Dockerfile`; default CMD is production-safe (uvicorn, no `--reload`). Dev compose overrides with `uvicorn ... --reload`; UAT/Prod override with `gunicorn`. |
 
+### CORS and frontend (laminaraviationapp)
+
+- **Backend CORS:** FastAPI in `backend/app/main.py` allows origins for dev (`:3000`), UAT (`:3011`), and prod (`:3002`) on `120.89.33.51`. Override via `ALLOWED_ORIGINS` (comma-separated) or `VITE_APP_URL` if needed.
+- **Frontend API URLs:** In the **laminaraviationapp** repo, set env so the frontend calls the correct API:
+  - **UAT:** `VITE_APP_URL=http://120.89.33.51:3011`, `VITE_API_URL=http://120.89.33.51:8100/api/v1/` (or use NGINX: `http://120.89.33.51:8080/api/v1/`).
+  - **Prod:** `VITE_APP_URL=http://120.89.33.51:3002`, `VITE_API_URL=http://120.89.33.51:8200/api/v1/` (or use NGINX: `http://120.89.33.51:8082/api/v1/`).
+- **Reference files:** See `docs/frontend-env-uat.example` and `docs/frontend-env-prod.example`; copy contents to laminaraviationapp as `.env.uat` and `.env.prod`.
+- **NGINX:** UAT and prod NGINX configs proxy `/api/v1/` to the backend; host ports are `NGINX_PORT` from `.env.uat` (e.g. 8080) and `.env.prod` (e.g. 8082).
+
 ---
 
 ## How to run the server (every environment)
@@ -78,6 +87,7 @@ docker-compose -f docker-compose.prod.yml exec backend alembic upgrade head
 8. [Production Deployment](#production-deployment)
 9. [Maintenance Commands](#maintenance-commands)
 10. [Troubleshooting](#troubleshooting)
+11. [CORS and frontend (laminaraviationapp)](#cors-and-frontend-laminaraviationapp)
 
 ---
 

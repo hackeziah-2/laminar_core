@@ -42,7 +42,9 @@ _default_origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://120.89.33.51",
-    "http://120.89.33.51:3000",
+    "http://120.89.33.51:3000",   # dev frontend
+    "http://120.89.33.51:3011",   # uat frontend
+    "http://120.89.33.51:3002",   # prod frontend
     "http://120.89.33.51:8000",
 ]
 

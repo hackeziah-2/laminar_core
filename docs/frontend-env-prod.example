@@ -1,0 +1,5 @@
+# Copy to laminaraviationapp as .env.prod
+# Prod frontend – API on port 8200 (or use NGINX at 8082: http://120.89.33.51:8082/api/v1/)
+NODE_ENV=production
+VITE_APP_URL=http://120.89.33.51:3002
+VITE_API_URL=http://120.89.33.51:8200/api/v1/
