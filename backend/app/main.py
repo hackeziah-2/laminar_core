@@ -38,23 +38,11 @@ OPENAPI_TAGS = [
 app = FastAPI(title="Laminar API", openapi_tags=OPENAPI_TAGS)
 
 # CORS: allow localhost (dev) and deployment; override via ALLOWED_ORIGINS env (comma-separated)
-_default_origins = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://120.89.33.51",
-    "http://120.89.33.51:3000",
-    "http://120.89.33.51:8000",
-]
-_env_origins = os.getenv("ALLOWED_ORIGINS", "").strip()
-origins = [o.strip() for o in _env_origins.split(",") if o.strip()] if _env_origins else _default_origins
-
-# Allow deployment IP on any port (e.g. frontend on :80 or :3000) and localhost
-_origin_regex = r"^https?://(localhost|127\.0\.0\.1|120\.89\.33\.51)(:\d+)?$"
+frontend_url = os.getenv("VITE_APP_URL")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_origin_regex=_origin_regex,
+    origins = [frontend_url],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
