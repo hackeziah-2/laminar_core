@@ -26,10 +26,10 @@ Ensure each environment uses:
 - **Backend CORS:** FastAPI in `backend/app/main.py` allows origins for localhost (e.g. `:3000`, `:5173`), and deployment IP `120.89.33.51` on dev (`:3000`), UAT (`:3011`), and prod (`:3002`). Override via `ALLOWED_ORIGINS` (comma-separated) or `VITE_APP_URL` if needed.
 - **Frontend API URLs:** In the **laminaraviationapp** repo, set env so the frontend calls the correct API:
   - **Dev (local):** `VITE_APP_URL=http://localhost:3000`, `VITE_API_URL=http://localhost:8000/api/v1/` (or via NGINX: `http://localhost:8081/api/v1/`). See `docs/frontend-env-dev.example` → `.env.development` or `.env.local`.
-  - **UAT:** `VITE_APP_URL=http://120.89.33.51:3011`, `VITE_API_URL=http://120.89.33.51:8100/api/v1/` (or use NGINX: `http://120.89.33.51:8080/api/v1/`). See `docs/frontend-env-uat.example` → `.env.uat`.
+  - **UAT:** `VITE_APP_URL=http://120.89.33.51:3011`, `VITE_API_URL=http://120.89.33.51:8100/api/v1/` (or use NGINX: `http://120.89.33.51:8081/api/v1/`). See `docs/frontend-env-uat.example` → `.env.uat`.
   - **Prod:** `VITE_APP_URL=http://120.89.33.51:3002`, `VITE_API_URL=http://120.89.33.51:8200/api/v1/` (or use NGINX: `http://120.89.33.51:8082/api/v1/`). See `docs/frontend-env-prod.example` → `.env.prod`.
 - **Reference files:** `docs/frontend-env-dev.example`, `docs/frontend-env-uat.example`, `docs/frontend-env-prod.example`; copy to laminaraviationapp as `.env.development`/`.env.local`, `.env.uat`, `.env.prod`.
-- **NGINX:** Dev uses `NGINX_PORT` (e.g. 8081); UAT and prod proxy `/api/v1/` with `NGINX_PORT` from `.env.uat` (8080) and `.env.prod` (8082).
+- **NGINX:** Dev uses `NGINX_PORT` (e.g. 8081); UAT and prod proxy `/api/v1/` with `NGINX_PORT` from `.env.uat` (8081) and `.env.prod` (8082).
 
 ---
 
