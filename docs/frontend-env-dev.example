@@ -1,0 +1,5 @@
+# Copy to laminaraviationapp as .env.development or .env.local
+# Local dev – backend on port 8000 (or via NGINX at 8081: http://localhost:8081/api/v1/)
+NODE_ENV=development
+VITE_APP_URL=http://localhost:3000
+VITE_API_URL=http://localhost:8000/api/v1/

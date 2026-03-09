@@ -11,10 +11,18 @@ from fastapi import (
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.schemas.role_schema import RoleCreate, RoleUpdate, RoleRead, RoleListItem
+from app.schemas.role_schema import (
+    RoleCreate,
+    RoleUpdate,
+    RoleRead,
+    RoleReadWithPermissions,
+    RoleListItem,
+    RolePermissionItem,
+)
 from app.repository.role import (
     list_roles,
     get_role,
+    get_role_with_permissions,
     create_role,
     update_role,
     soft_delete_role,
@@ -68,41 +76,86 @@ async def api_list_paged(
     }
 
 
-@router.get("/{role_id}", response_model=RoleRead)
+def _role_permissions_list(role) -> List[RolePermissionItem]:
+    """Build permissions list from role.permissions (only non-deleted)."""
+    items = []
+    for rp in getattr(role, "permissions", []) or []:
+        if getattr(rp, "is_deleted", False):
+            continue
+        module = getattr(rp, "module", None)
+        if not module or getattr(module, "is_deleted", False):
+            continue
+        items.append(
+            RolePermissionItem(
+                module=module.name,
+                read=getattr(rp, "can_read", False),
+                write=getattr(rp, "can_write", False),
+                approve=getattr(rp, "can_approve", False),
+            )
+        )
+    return items
+
+
+@router.get("/{role_id}/permissions", response_model=List[RolePermissionItem])
+async def api_get_role_permissions(
+    role_id: int,
+    session: AsyncSession = Depends(get_session),
+):
+    """Get permissions array for a role (module, read, write, approve)."""
+    role = await get_role_with_permissions(session, role_id)
+    if not role:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Role not found",
+        )
+    return _role_permissions_list(role)
+
+
+@router.get("/{role_id}", response_model=RoleReadWithPermissions)
 async def api_get(
     role_id: int,
     session: AsyncSession = Depends(get_session)
 ):
-    """Get a single Role by ID."""
-    obj = await get_role(session, role_id)
-    if not obj:
+    """Get a single Role by ID, including permissions per module."""
+    role = await get_role_with_permissions(session, role_id)
+    if not role:
         raise HTTPException(
-            status_code=404,
-            detail="Role not found"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Role not found",
         )
-    return obj
+    base = RoleRead.from_orm(role)
+    return RoleReadWithPermissions(
+        **base.dict(),
+        permissions=_role_permissions_list(role),
+    )
 
 
 @router.post(
     "/",
-    response_model=RoleRead,
+    response_model=RoleReadWithPermissions,
     status_code=status.HTTP_201_CREATED
 )
 async def api_create(
     payload: RoleCreate,
     session: AsyncSession = Depends(get_session)
 ):
-    """Create a new Role."""
-    return await create_role(session, payload)
+    """Create a new Role. Optionally include permissions (module, read, write, approve) per module."""
+    role = await create_role(session, payload)
+    role_with_perms = await get_role_with_permissions(session, role.id)
+    base = RoleRead.from_orm(role_with_perms)
+    return RoleReadWithPermissions(
+        **base.dict(),
+        permissions=_role_permissions_list(role_with_perms),
+    )
 
 
-@router.put("/{role_id}", response_model=RoleRead)
+@router.put("/{role_id}", response_model=RoleReadWithPermissions)
 async def api_update(
     role_id: int,
     role_in: RoleUpdate,
     session: AsyncSession = Depends(get_session),
 ):
-    """Update a Role."""
+    """Update a Role. Optionally include permissions to replace existing ones."""
     updated = await update_role(
         session=session,
         role_id=role_id,
@@ -110,16 +163,21 @@ async def api_update(
     )
     if not updated:
         raise HTTPException(
-            status_code=404,
-            detail="Role not found"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Role not found",
         )
-    return updated
+    role_with_perms = await get_role_with_permissions(session, role_id)
+    base = RoleRead.from_orm(role_with_perms)
+    return RoleReadWithPermissions(
+        **base.dict(),
+        permissions=_role_permissions_list(role_with_perms),
+    )
 
 
 @router.delete("/{role_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def api_delete(
     role_id: int,
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
 ):
     """Soft delete a Role."""
     deleted = await soft_delete_role(session, role_id)

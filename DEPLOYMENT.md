@@ -23,12 +23,13 @@ Ensure each environment uses:
 
 ### CORS and frontend (laminaraviationapp)
 
-- **Backend CORS:** FastAPI in `backend/app/main.py` allows origins for dev (`:3000`), UAT (`:3011`), and prod (`:3002`) on `120.89.33.51`. Override via `ALLOWED_ORIGINS` (comma-separated) or `VITE_APP_URL` if needed.
+- **Backend CORS:** FastAPI in `backend/app/main.py` allows origins for localhost (e.g. `:3000`, `:5173`), and deployment IP `120.89.33.51` on dev (`:3000`), UAT (`:3011`), and prod (`:3002`). Override via `ALLOWED_ORIGINS` (comma-separated) or `VITE_APP_URL` if needed.
 - **Frontend API URLs:** In the **laminaraviationapp** repo, set env so the frontend calls the correct API:
-  - **UAT:** `VITE_APP_URL=http://120.89.33.51:3011`, `VITE_API_URL=http://120.89.33.51:8100/api/v1/` (or use NGINX: `http://120.89.33.51:8080/api/v1/`).
-  - **Prod:** `VITE_APP_URL=http://120.89.33.51:3002`, `VITE_API_URL=http://120.89.33.51:8200/api/v1/` (or use NGINX: `http://120.89.33.51:8082/api/v1/`).
-- **Reference files:** See `docs/frontend-env-uat.example` and `docs/frontend-env-prod.example`; copy contents to laminaraviationapp as `.env.uat` and `.env.prod`.
-- **NGINX:** UAT and prod NGINX configs proxy `/api/v1/` to the backend; host ports are `NGINX_PORT` from `.env.uat` (e.g. 8080) and `.env.prod` (e.g. 8082).
+  - **Dev (local):** `VITE_APP_URL=http://localhost:3000`, `VITE_API_URL=http://localhost:8000/api/v1/` (or via NGINX: `http://localhost:8081/api/v1/`). See `docs/frontend-env-dev.example` → `.env.development` or `.env.local`.
+  - **UAT:** `VITE_APP_URL=http://120.89.33.51:3011`, `VITE_API_URL=http://120.89.33.51:8100/api/v1/` (or use NGINX: `http://120.89.33.51:8081/api/v1/`). See `docs/frontend-env-uat.example` → `.env.uat`.
+  - **Prod:** `VITE_APP_URL=http://120.89.33.51:3002`, `VITE_API_URL=http://120.89.33.51:8200/api/v1/` (or use NGINX: `http://120.89.33.51:8082/api/v1/`). See `docs/frontend-env-prod.example` → `.env.prod`.
+- **Reference files:** `docs/frontend-env-dev.example`, `docs/frontend-env-uat.example`, `docs/frontend-env-prod.example`; copy to laminaraviationapp as `.env.development`/`.env.local`, `.env.uat`, `.env.prod`.
+- **NGINX:** Dev uses `NGINX_PORT` (e.g. 8081); UAT and prod proxy `/api/v1/` with `NGINX_PORT` from `.env.uat` (8081) and `.env.prod` (8082).
 
 ---
 
@@ -52,7 +53,7 @@ docker-compose -f docker-compose.dev.yml exec backend alembic upgrade head
 ### UAT
 
 ```bash
-cp .env.example .env.uat   # set UAT ports and config (e.g. FASTAPI_PORT=8001)
+cp .env.example .env.uat   # set UAT ports and config (e.g. FASTAPI_PORT=8100)
 docker-compose -f docker-compose.uat.yml --env-file .env.uat up --build -d
 docker-compose -f docker-compose.uat.yml exec backend alembic upgrade head
 ```
