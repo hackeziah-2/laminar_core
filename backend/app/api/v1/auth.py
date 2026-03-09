@@ -97,5 +97,5 @@ async def register(
 async def me(
     account: AccountInformation = Depends(get_current_account),
 ):
-    """Get current logged-in account info. Requires valid JWT."""
+    """Get current logged-in account info. Requires valid JWT. Includes role_id when set so the app can load that role's permissions without an extra lookup by name."""
     return account
