@@ -3,21 +3,25 @@ from typing import Optional, List, Tuple
 from fastapi import HTTPException
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.role import Role
+from app.models.role_permission import RolePermission
 from app.models.account import AccountInformation
+from app.models.module import Module
 from app.schemas.role_schema import (
     RoleCreate,
     RoleUpdate,
     RoleRead,
 )
+from app.repository.module import get_module_by_name
 
 
 async def create_role(
     session: AsyncSession,
     data: RoleCreate
-) -> RoleRead:
-    """Create a new Role."""
+) -> Role:
+    """Create a new Role and optional permissions. Returns Role ORM with permissions loaded."""
     result = await session.execute(
         select(Role).where(
             Role.name == data.name,
@@ -31,11 +35,31 @@ async def create_role(
             detail="Role with this name already exists"
         )
 
-    role = Role(**data.dict())
+    role_data = {k: v for k, v in data.dict().items() if k != "permissions"}
+    role = Role(**role_data)
     session.add(role)
+    await session.flush()
+
+    permissions = getattr(data, "permissions", None) or []
+    for perm in permissions:
+        module = await get_module_by_name(session, perm.module)
+        if not module:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Module not found: {perm.module!r}",
+            )
+        rp = RolePermission(
+            role_id=role.id,
+            module_id=module.id,
+            can_read=perm.read,
+            can_write=perm.write,
+            can_approve=perm.approve,
+        )
+        session.add(rp)
+
     await session.commit()
     await session.refresh(role)
-    return RoleRead.from_orm(role)
+    return role
 
 
 async def get_role(
@@ -54,17 +78,32 @@ async def get_role(
     return RoleRead.from_orm(obj)
 
 
+async def get_role_with_permissions(
+    session: AsyncSession,
+    role_id: int
+) -> Optional[Role]:
+    """Get a Role by ID with permissions and module names loaded."""
+    result = await session.execute(
+        select(Role)
+        .where(Role.id == role_id)
+        .where(Role.is_deleted == False)
+        .options(selectinload(Role.permissions).selectinload(RolePermission.module))
+    )
+    return result.scalar_one_or_none()
+
+
 async def update_role(
     session: AsyncSession,
     role_id: int,
     role_in: RoleUpdate
 ) -> Optional[RoleRead]:
-    """Update a Role."""
+    """Update a Role and optionally replace its permissions."""
     obj = await session.get(Role, role_id)
     if not obj or obj.is_deleted:
         return None
 
     update_data = role_in.dict(exclude_unset=True)
+    permissions_payload = update_data.pop("permissions", None)
 
     if "name" in update_data:
         result = await session.execute(
@@ -82,6 +121,47 @@ async def update_role(
 
     for k, v in update_data.items():
         setattr(obj, k, v)
+
+    if permissions_payload is not None:
+        # Load all existing permissions for this role (including soft-deleted)
+        # so we can reuse rows and avoid violating uq_role_module.
+        existing_result = await session.execute(
+            select(RolePermission).where(RolePermission.role_id == role_id)
+        )
+        existing_by_module = {
+            rp.module_id: rp for rp in existing_result.scalars().all()
+        }
+        payload_module_ids = set()
+        for perm in permissions_payload:
+            module = await get_module_by_name(session, perm["module"])
+            if not module:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Module not found: {perm['module']!r}",
+                )
+            payload_module_ids.add(module.id)
+            rp = existing_by_module.get(module.id)
+            if rp:
+                rp.is_deleted = False
+                rp.can_read = perm.get("read", False)
+                rp.can_write = perm.get("write", False)
+                rp.can_approve = perm.get("approve", False)
+                session.add(rp)
+            else:
+                session.add(
+                    RolePermission(
+                        role_id=role_id,
+                        module_id=module.id,
+                        can_read=perm.get("read", False),
+                        can_write=perm.get("write", False),
+                        can_approve=perm.get("approve", False),
+                    )
+                )
+        # Soft-delete permissions for modules no longer in the payload
+        for module_id, rp in existing_by_module.items():
+            if module_id not in payload_module_ids and not rp.is_deleted:
+                rp.soft_delete()
+                session.add(rp)
 
     session.add(obj)
     await session.commit()
