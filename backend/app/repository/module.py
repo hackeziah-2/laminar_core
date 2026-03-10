@@ -53,6 +53,19 @@ async def get_module(
     return ModuleRead.from_orm(obj)
 
 
+async def get_module_by_name(
+    session: AsyncSession,
+    name: str
+) -> Optional[Module]:
+    """Get a Module ORM by name (for resolving permission module names)."""
+    result = await session.execute(
+        select(Module)
+        .where(Module.name == name)
+        .where(Module.is_deleted == False)
+    )
+    return result.scalar_one_or_none()
+
+
 async def update_module(
     session: AsyncSession,
     module_id: int,
