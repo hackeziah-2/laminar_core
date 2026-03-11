@@ -22,4 +22,5 @@ from .document_on_board import DocumentOnBoard
 from .ad_monitoring import ADMonitoring, WorkOrderADMonitoring
 from .tcc_maintenance import TCCMaintenance, MethodOfComplianceEnum
 from .cpcp_monitoring import CPCPMonitoring
+from .aircraft_statutory_certificate import AircraftStatutoryCertificate, CategoryTypeEnum
 

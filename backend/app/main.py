@@ -26,6 +26,7 @@ from app.api.v1 import (
     cpcp_monitoring as cpcp_monitoring_router,
     fleet_daily_update as fleet_daily_update_router,
     dashboard as dashboard_router,
+    aircraft_statutory_certificate as aircraft_statutory_certificate_router,
 )
 from app.database import engine, Base
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
@@ -218,6 +219,7 @@ async def upload_file(
 app.include_router(flights_router.router)
 app.include_router(auth_router.router)
 # Aircraft-scoped sub-routes first (longer paths) so /api/v1/aircraft/{id}/.../ is matched correctly
+app.include_router(aircraft_statutory_certificate_router.router_aircraft_scoped)
 app.include_router(document_on_board_router.router_aircraft_scoped)
 app.include_router(ldnd_monitoring_router.router_aircraft_scoped)
 app.include_router(ad_monitoring_router.router_aircraft_scoped)
@@ -238,6 +240,7 @@ app.include_router(ad_monitoring_router.router)
 app.include_router(ad_monitoring_router.router_work_order)
 app.include_router(cpcp_monitoring_router.router)
 app.include_router(fleet_daily_update_router.router)
+app.include_router(aircraft_statutory_certificate_router.router)
 app.include_router(dashboard_router.router)
 app.include_router(excel_data_router.router)
 
