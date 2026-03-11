@@ -27,6 +27,8 @@ from app.api.v1 import (
     fleet_daily_update as fleet_daily_update_router,
     dashboard as dashboard_router,
     aircraft_statutory_certificate as aircraft_statutory_certificate_router,
+    certificate_category_type as certificate_category_type_router,
+    organizational_approval as organizational_approval_router,
 )
 from app.database import engine, Base
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
@@ -241,6 +243,8 @@ app.include_router(ad_monitoring_router.router_work_order)
 app.include_router(cpcp_monitoring_router.router)
 app.include_router(fleet_daily_update_router.router)
 app.include_router(aircraft_statutory_certificate_router.router)
+app.include_router(certificate_category_type_router.router)
+app.include_router(organizational_approval_router.router)
 app.include_router(dashboard_router.router)
 app.include_router(excel_data_router.router)
 
