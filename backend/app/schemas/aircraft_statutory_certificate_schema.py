@@ -22,6 +22,8 @@ class CategoryTypeEnum(str, enum.Enum):
 class AircraftSummary(BaseModel):
     id: int
     registration: str
+    msn: str
+    model: str
 
     class Config:
         orm_mode = True
@@ -33,6 +35,16 @@ class AircraftStatutoryCertificateBase(BaseModel):
     date_of_expiration: Optional[date] = None
     web_link: Optional[str] = Field(None, max_length=2048)
     file_path: Optional[str] = Field(None, max_length=500)
+
+    @validator("category_type", pre=True)
+    def category_type_to_enum(cls, v):
+        if v is None:
+            return v
+        if hasattr(v, "value"):
+            return CategoryTypeEnum(v.value) if isinstance(v.value, str) else v
+        if isinstance(v, str) and v in [e.value for e in CategoryTypeEnum]:
+            return CategoryTypeEnum(v)
+        return v
 
     class Config:
         orm_mode = True
@@ -49,16 +61,6 @@ class AircraftStatutoryCertificateUpdate(BaseModel):
     web_link: Optional[str] = Field(None, max_length=2048)
     file_path: Optional[str] = Field(None, max_length=500)
 
-    class Config:
-        orm_mode = True
-
-
-class AircraftStatutoryCertificateRead(AircraftStatutoryCertificateBase):
-    id: int
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    aircraft: Optional[AircraftSummary] = None
-
     @validator("category_type", pre=True)
     def category_type_to_enum(cls, v):
         if v is None:
@@ -68,6 +70,16 @@ class AircraftStatutoryCertificateRead(AircraftStatutoryCertificateBase):
         if isinstance(v, str) and v in [e.value for e in CategoryTypeEnum]:
             return CategoryTypeEnum(v)
         return v
+
+    class Config:
+        orm_mode = True
+
+
+class AircraftStatutoryCertificateRead(AircraftStatutoryCertificateBase):
+    id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    aircraft: Optional[AircraftSummary] = None
 
     class Config:
         orm_mode = True

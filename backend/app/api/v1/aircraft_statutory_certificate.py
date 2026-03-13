@@ -84,7 +84,7 @@ async def api_get(
 )
 async def api_create(
     json_data: str = Form(...),
-    upload_file: UploadFile = File(None),
+    upload_file: Optional[UploadFile] = File(None, description="Upload file (optional)"),
     session: AsyncSession = Depends(get_session),
 ):
     """Create a new aircraft statutory certificate. Send JSON as 'json_data' and optional file as 'upload_file'."""
@@ -112,7 +112,7 @@ async def api_create(
 async def api_update(
     cert_id: int,
     json_data: str = Form(...),
-    upload_file: UploadFile = File(None),
+    upload_file: Optional[UploadFile] = File(None, description="Upload file (optional)"),
     session: AsyncSession = Depends(get_session),
 ):
     """Update an aircraft statutory certificate. Send JSON as 'json_data' and optional file as 'upload_file'."""
@@ -206,7 +206,7 @@ async def api_get_by_aircraft(
 async def api_create_by_aircraft(
     aircraft_id: int,
     json_data: str = Form(...),
-    upload_file: UploadFile = File(None),
+    upload_file: Optional[UploadFile] = File(None, description="Upload file (optional)"),
     session: AsyncSession = Depends(get_session),
 ):
     """Create a certificate for a specific aircraft (aircraft_fk is set from path)."""
@@ -236,7 +236,7 @@ async def api_update_by_aircraft(
     aircraft_id: int,
     cert_id: int,
     json_data: str = Form(...),
-    upload_file: UploadFile = File(None),
+    upload_file: Optional[UploadFile] = File(None, description="Upload file (optional)"),
     session: AsyncSession = Depends(get_session),
 ):
     """Update a certificate scoped to aircraft."""
