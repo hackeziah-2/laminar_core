@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Date
 from sqlalchemy.orm import relationship
 from app.database import Base, TimestampMixin, SoftDeleteMixin
 
@@ -20,6 +20,7 @@ class AccountInformation(Base, TimestampMixin, SoftDeleteMixin):
     designation = Column(String(100), nullable=True)
     license_no = Column(String(100), nullable=True, index=True)
     auth_stamp = Column(String(255), nullable=True)
+    auth_initial_doi = Column(Date, nullable=True)
 
     role_id = Column(Integer, ForeignKey("roles.id"), nullable=True, index=True)
     

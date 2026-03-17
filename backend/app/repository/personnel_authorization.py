@@ -19,8 +19,9 @@ async def list_personnel_authorizations(
     offset: int = 0,
     search: Optional[str] = None,
     sort: str = "",
+    designation: Optional[str] = None,
 ) -> Tuple[List[PersonnelAuthorization], int]:
-    """List with pagination; sort by date_of_expiration (auth_expiry_date) ASC/DESC; search by account_information name (first_name, last_name)."""
+    """List with pagination; sort by date_of_expiration (auth_expiry_date) ASC/DESC; search by account_information name (first_name, last_name); filter by account_information.designation."""
     stmt = (
         select(PersonnelAuthorization)
         .options(
@@ -31,19 +32,32 @@ async def list_personnel_authorizations(
         )
         .where(PersonnelAuthorization.is_deleted == False)
     )
+    need_join = False
+    if search and search.strip():
+        need_join = True
+    if designation is not None and str(designation).strip() != "":
+        need_join = True
+    sort_lower = (sort or "").lower()
+    if "account_information_id__auth_stamp" in sort_lower:
+        need_join = True
+
+    if need_join:
+        stmt = stmt.join(PersonnelAuthorization.account_information)
     if search and search.strip():
         q = f"%{search.strip()}%"
-        stmt = stmt.join(PersonnelAuthorization.account_information)
         stmt = stmt.where(
             or_(
                 AccountInformation.first_name.ilike(q),
                 AccountInformation.last_name.ilike(q),
             )
         )
+    if designation is not None and str(designation).strip() != "":
+        stmt = stmt.where(AccountInformation.designation == designation.strip())
 
     sortable = {
         "id": PersonnelAuthorization.id,
         "account_information_id": PersonnelAuthorization.account_information_id,
+        "account_information_id__auth_stamp": AccountInformation.auth_stamp,
         "auth_initial_doi": PersonnelAuthorization.auth_initial_doi,
         "auth_issue_date": PersonnelAuthorization.auth_issue_date,
         "auth_expiry_date": PersonnelAuthorization.auth_expiry_date,
@@ -75,16 +89,18 @@ async def list_personnel_authorizations(
         .select_from(PersonnelAuthorization)
         .where(PersonnelAuthorization.is_deleted == False)
     )
+    if need_join:
+        count_stmt = count_stmt.join(PersonnelAuthorization.account_information)
     if search and search.strip():
         q = f"%{search.strip()}%"
-        count_stmt = count_stmt.join(
-            PersonnelAuthorization.account_information
-        ).where(
+        count_stmt = count_stmt.where(
             or_(
                 AccountInformation.first_name.ilike(q),
                 AccountInformation.last_name.ilike(q),
             )
         )
+    if designation is not None and str(designation).strip() != "":
+        count_stmt = count_stmt.where(AccountInformation.designation == designation.strip())
     total = (await session.execute(count_stmt)).scalar()
     stmt = stmt.limit(limit).offset(offset)
     result = await session.execute(stmt)

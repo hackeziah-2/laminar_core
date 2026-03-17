@@ -1,12 +1,10 @@
-import uuid
 from typing import Optional, List, Tuple
 
-from fastapi import HTTPException, UploadFile
+from fastapi import HTTPException
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 from app.models.organizational_approval import OrganizationalApproval
 from app.models.certificate_category_type import CertificateCategoryType
 from app.schemas.organizational_approval_schema import (
@@ -14,32 +12,6 @@ from app.schemas.organizational_approval_schema import (
     OrganizationalApprovalUpdate,
     OrganizationalApprovalRead,
 )
-
-UPLOAD_SUBDIR = "organizational_approvals"
-
-
-def _sanitize_filename(name: str) -> str:
-    if not name or not isinstance(name, str):
-        return "upload"
-    base = (name.split("/")[-1].split("\\")[-1] or "upload").strip()
-    if not base or ".." in base:
-        return "upload"
-    return "".join(c for c in base if c.isalnum() or c in "._- ") or "upload"
-
-
-async def _save_upload(upload_file: Optional[UploadFile]) -> Optional[str]:
-    """Save uploaded file to uploads/organizational_approvals/; return relative path or None."""
-    if not upload_file or not getattr(upload_file, "filename", None) or not getattr(upload_file, "read", None):
-        return None
-    ensure_uploads_dir()
-    target_dir = UPLOAD_DIR / UPLOAD_SUBDIR
-    target_dir.mkdir(parents=True, exist_ok=True)
-    safe_base = _sanitize_filename(upload_file.filename)
-    unique_name = f"{uuid.uuid4().hex}_{safe_base}"
-    path = target_dir / unique_name
-    content = await upload_file.read()
-    path.write_bytes(content)
-    return f"{UPLOAD_SUBDIR}/{unique_name}"
 
 
 async def list_organizational_approvals(
@@ -67,7 +39,7 @@ async def list_organizational_approvals(
             )
         )
 
-    # Sort: certification = certificate name (join), date_of_expiration, created_at, etc.
+    # Sort: certificate_category_types__name / certification = certificate name (requires join), date_of_expiration, etc.
     sortable = {
         "id": OrganizationalApproval.id,
         "certificate_fk": OrganizationalApproval.certificate_fk,
@@ -76,16 +48,20 @@ async def list_organizational_approvals(
         "updated_at": OrganizationalApproval.updated_at,
         "number": OrganizationalApproval.number,
     }
-    if sort:
-        sort_names = [p.lstrip("-") for p in sort.split(",")]
-        if "certification" in sort_names:
+    name_sort_keys = ("certification", "certificate_category_types__name")
+    sort_parts = [p.strip() for p in (sort or "").split(",") if p.strip()]
+    if sort_parts:
+        sort_names = [p.lstrip("-").strip() for p in sort_parts]
+        if any(k in sort_names for k in name_sort_keys):
             stmt = stmt.outerjoin(OrganizationalApproval.certificate)
         order_parts = []
-        for part in sort.split(","):
+        for part in sort_parts:
             desc = part.startswith("-")
-            name = part.lstrip("-")
-            if name == "certification":
-                order_parts.append(CertificateCategoryType.name.desc() if desc else CertificateCategoryType.name.asc())
+            name = part.lstrip("-").strip()
+            if name in name_sort_keys:
+                order_parts.append(
+                    CertificateCategoryType.name.desc().nullslast() if desc else CertificateCategoryType.name.asc().nullslast()
+                )
             elif name in sortable:
                 order_parts.append(sortable[name].desc() if desc else sortable[name].asc())
         if order_parts:
@@ -132,13 +108,9 @@ async def get_organizational_approval(
 async def create_organizational_approval(
     session: AsyncSession,
     data: OrganizationalApprovalCreate,
-    upload_file: Optional[UploadFile] = None,
 ) -> OrganizationalApprovalRead:
-    """Create with optional file upload."""
+    """Create organizational approval (no file upload)."""
     approval_data = data.dict()
-    file_path = await _save_upload(upload_file)
-    if file_path:
-        approval_data["file_path"] = file_path
     try:
         obj = OrganizationalApproval(**approval_data)
         session.add(obj)
@@ -155,9 +127,8 @@ async def update_organizational_approval(
     session: AsyncSession,
     approval_id: int,
     data: OrganizationalApprovalUpdate,
-    upload_file: Optional[UploadFile] = None,
 ) -> Optional[OrganizationalApprovalRead]:
-    """Update; optional file upload replaces file_path."""
+    """Update organizational approval (no file upload)."""
     result = await session.execute(
         select(OrganizationalApproval)
         .options(selectinload(OrganizationalApproval.certificate))
@@ -168,9 +139,6 @@ async def update_organizational_approval(
     if not obj:
         return None
     update_data = data.dict(exclude_unset=True)
-    file_path = await _save_upload(upload_file)
-    if file_path:
-        update_data["file_path"] = file_path
     for k, v in update_data.items():
         setattr(obj, k, v)
     session.add(obj)

@@ -1,8 +1,7 @@
-import json
 from math import ceil
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, HTTPException, status, Form, File, UploadFile
+from fastapi import APIRouter, Depends, Query, HTTPException, status
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +9,8 @@ from app.schemas.organizational_approval_schema import (
     OrganizationalApprovalCreate,
     OrganizationalApprovalUpdate,
     OrganizationalApprovalRead,
+    OrganizationalApprovalCreateRequestBody,
+    OrganizationalApprovalUpdateRequestBody,
 )
 from app.repository.organizational_approval import (
     list_organizational_approvals,
@@ -34,11 +35,11 @@ async def api_list_paged(
     search: Optional[str] = Query(None, description="Search in number, web_link"),
     sort: Optional[str] = Query(
         "",
-        description="Sort: certification, date_of_expiration, -date_of_expiration, created_at, etc.",
+        description="Sort: certificate_category_types__name, certification, date_of_expiration, -date_of_expiration, created_at, etc.",
     ),
     session: AsyncSession = Depends(get_session),
 ):
-    """List organizational approvals with pagination. Sort ASC/DESC by certification (category name), date_of_expiration; search on number and web_link."""
+    """List organizational approvals with pagination. Sort by certificate_category_types__name (category name), date_of_expiration; search on number and web_link."""
     offset = (page - 1) * limit
     items, total = await list_organizational_approvals(
         session=session,
@@ -75,17 +76,12 @@ async def api_get(
     status_code=status.HTTP_201_CREATED,
 )
 async def api_create(
-    json_data: str = Form(...),
-    upload_file: UploadFile = File(None),
+    body: OrganizationalApprovalCreateRequestBody,
     session: AsyncSession = Depends(get_session),
 ):
-    """Create an organizational approval. Send JSON as 'json_data' and optional file as 'upload_file'."""
+    """Create an organizational approval. Send JSON body: { \"json_data\": { certificate_fk, number?, date_of_expiration?, web_link? } }."""
     try:
-        parsed = json.loads(json_data)
-        payload = OrganizationalApprovalCreate(**parsed)
-        return await create_organizational_approval(session, payload, upload_file)
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
+        return await create_organizational_approval(session, body.json_data)
     except ValidationError as e:
         raise HTTPException(
             status_code=422,
@@ -97,28 +93,21 @@ async def api_create(
         raise HTTPException(status_code=400, detail=f"Failed to create: {str(e)}")
 
 
-@router.put("/{approval_id}", response_model=OrganizationalApprovalRead)
-async def api_update(
+async def _api_update_impl(
     approval_id: int,
-    json_data: str = Form(...),
-    upload_file: UploadFile = File(None),
-    session: AsyncSession = Depends(get_session),
+    body: OrganizationalApprovalUpdateRequestBody,
+    session: AsyncSession,
 ):
-    """Update an organizational approval. Send JSON as 'json_data' and optional file as 'upload_file'."""
+    """Shared update logic for PUT and PATCH."""
     try:
-        parsed = json.loads(json_data)
-        payload = OrganizationalApprovalUpdate(**parsed)
         updated = await update_organizational_approval(
             session=session,
             approval_id=approval_id,
-            data=payload,
-            upload_file=upload_file,
+            data=body.json_data,
         )
         if not updated:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organizational approval not found")
         return updated
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
     except ValidationError as e:
         raise HTTPException(
             status_code=422,
@@ -128,6 +117,26 @@ async def api_update(
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to update: {str(e)}")
+
+
+@router.put("/{approval_id}", response_model=OrganizationalApprovalRead)
+async def api_update(
+    approval_id: int,
+    body: OrganizationalApprovalUpdateRequestBody,
+    session: AsyncSession = Depends(get_session),
+):
+    """Update an organizational approval. Send JSON body: { \"json_data\": { certificate_fk?, number?, date_of_expiration?, web_link? } }."""
+    return await _api_update_impl(approval_id, body, session)
+
+
+@router.patch("/{approval_id}", response_model=OrganizationalApprovalRead)
+async def api_patch(
+    approval_id: int,
+    body: OrganizationalApprovalUpdateRequestBody,
+    session: AsyncSession = Depends(get_session),
+):
+    """Update an organizational approval (partial). Send JSON body: { \"json_data\": { ... } }."""
+    return await _api_update_impl(approval_id, body, session)
 
 
 @router.delete("/{approval_id}", status_code=status.HTTP_204_NO_CONTENT)

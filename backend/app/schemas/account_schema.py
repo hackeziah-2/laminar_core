@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional
 from pydantic import BaseModel, Field
 
@@ -14,6 +14,7 @@ class AccountInformationBase(BaseModel):
     designation: Optional[str] = Field(None, max_length=100)
     license_no: Optional[str] = Field(None, max_length=100)
     auth_stamp: Optional[str] = Field(None, max_length=255)
+    auth_initial_doi: Optional[date] = Field(None, description="Authorization initial date of issue")
     role_id: Optional[int] = Field(None, description="FK to roles")
     status: bool = Field(True, description="True for active, False for inactive")
 
@@ -36,6 +37,7 @@ class AccountInformationUpdate(BaseModel):
     designation: Optional[str] = Field(None, max_length=100)
     license_no: Optional[str] = Field(None, max_length=100)
     auth_stamp: Optional[str] = Field(None, max_length=255)
+    auth_initial_doi: Optional[date] = Field(None, description="Authorization initial date of issue")
     role_id: Optional[int] = Field(None, description="FK to roles")
     status: Optional[bool] = Field(None, description="True for active, False for inactive")
 
@@ -47,7 +49,39 @@ class AccountInformationRead(AccountInformationBase):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     last_login: Optional[datetime] = None
+    auth_initial_doi: Optional[date] = None
     # Password is excluded for security - never return it in responses
+
+    class Config:
+        orm_mode = True
+
+
+# ---------- Account Information List Schema (Simplified) ----------
+# ---------- Account by auth_stamp (lookup response) ----------
+class AccountInformationByAuthStamp(BaseModel):
+    """Schema for account lookup by auth_stamp: id, full_name, designation, license_no, auth_stamp, auth_initial_doi."""
+    id: int
+    full_name: str
+    designation: str = ""
+    license_no: str = ""
+    auth_stamp: str = ""
+    auth_initial_doi: Optional[date] = None
+
+    @classmethod
+    def from_orm_auth_stamp(cls, obj):
+        """Build full_name as last_name, first_name, middle_name from ORM."""
+        parts = [obj.last_name or "", obj.first_name or ""]
+        if obj.middle_name:
+            parts.append(obj.middle_name)
+        full_name = ", ".join(p for p in parts if p) or ""
+        return cls(
+            id=obj.id,
+            full_name=full_name,
+            designation=obj.designation or "",
+            license_no=obj.license_no or "",
+            auth_stamp=obj.auth_stamp or "",
+            auth_initial_doi=getattr(obj, "auth_initial_doi", None),
+        )
 
     class Config:
         orm_mode = True

@@ -57,6 +57,7 @@ _default_origins = [
     "http://120.89.33.51:3002",   # prod frontend
     "http://120.89.33.51:8000",
     "http://fleet.llibus.com",
+    "https://api.llibus.com/",
 ]
 
 # Optional: still support old single-URL env like VITE_APP_URL
@@ -97,6 +98,19 @@ async def root():
 async def api_v1_root():
     """Health/connectivity check for API v1. Use this to verify backend is running and CORS allows the request."""
     return {"status": "ok", "version": "v1", "message": "Laminar API v1"}
+
+
+# Demo page: OEM Technical Publications list + CRUD with loading skeleton (same-origin API)
+_docs_dir = Path(__file__).resolve().parent.parent.parent / "docs"
+_oem_demo_path = _docs_dir / "oem_technical_publications_demo.html"
+
+
+@app.get("/demo/oem-technical-publications", tags=["demo"])
+async def demo_oem_technical_publications():
+    """Serve demo HTML for OEM Technical Publications (list view, CRUD, loading skeleton). Use same origin as API."""
+    if not _oem_demo_path.is_file():
+        raise HTTPException(status_code=404, detail="Demo file not found")
+    return FileResponse(_oem_demo_path, media_type="text/html")
 
 
 @app.get("/api/v1/health", tags=["health"])

@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OEM Technical Publications – List & CRUD</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 0 auto; padding: 1rem; }
+    h1 { margin-top: 0; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 0.5rem; text-align: left; border-bottom: 1px solid #eee; }
+    th { background: #f5f5f5; }
+    form { display: grid; gap: 0.75rem; max-width: 400px; margin-bottom: 1.5rem; }
+    label { display: flex; flex-direction: column; gap: 0.25rem; }
+    input, select, button { padding: 0.5rem; }
+    button { cursor: pointer; }
+    .actions button { margin-right: 0.5rem; }
+    .error { color: #c00; }
+    .success { color: #080; }
+    /* Loading skeleton */
+    .skeleton { background: linear-gradient(90deg, #eee 25%, #f5f5f5 50%, #eee 75%); background-size: 200% 100%; animation: skeleton 1s ease-in-out infinite; border-radius: 4px; }
+    @keyframes skeleton { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    .skeleton-row { height: 40px; margin-bottom: 8px; }
+    .skeleton-table .skeleton-row:nth-child(1) { width: 100%; }
+    .skeleton-table .skeleton-row:nth-child(2) { width: 95%; }
+    .skeleton-table .skeleton-row:nth-child(3) { width: 98%; }
+    .skeleton-table .skeleton-row:nth-child(4) { width: 90%; }
+    .skeleton-table .skeleton-row:nth-child(5) { width: 97%; }
+    #list-skeleton { margin-top: 1rem; }
+    #list-content { margin-top: 1rem; }
+    .hidden { display: none !important; }
+    .pagination { margin-top: 1rem; display: flex; align-items: center; gap: 0.5rem; }
+    .pagination button { padding: 0.35rem 0.75rem; }
+  </style>
+</head>
+<body>
+  <h1>OEM Technical Publications</h1>
+  <p>
+    <strong>List API:</strong> <code>GET /api/v1/oem-technical-publications/paged?limit=10&page=1</code>
+  </p>
+
+  <h2>Create / Edit</h2>
+  <form id="form">
+    <input type="hidden" id="publication-id" />
+    <label>
+      Item type
+      <select id="item-fk" required>
+        <option value="">Loading…</option>
+      </select>
+    </label>
+    <label>
+      Category type
+      <select id="category-type" required>
+        <option value="CERTIFICATE">CERTIFICATE</option>
+        <option value="SUBSCRIPTION">SUBSCRIPTION</option>
+        <option value="REGULATORY_CORRESPONDENCE_NON_CERT">REGULATORY CORRESPONDENCE (NON CERT)</option>
+        <option value="LICENSE">LICENSE</option>
+      </select>
+    </label>
+    <label>
+      Date of expiration
+      <input type="date" id="date-of-expiration" />
+    </label>
+    <label>
+      Web link
+      <input type="url" id="web-link" placeholder="https://..." />
+    </label>
+    <div>
+      <button type="submit" id="submit-btn">Create</button>
+      <button type="button" id="cancel-btn" class="hidden">Cancel</button>
+    </div>
+  </form>
+  <p id="form-message" class="hidden"></p>
+
+  <h2>List</h2>
+  <div id="list-skeleton" class="skeleton-table">
+    <div class="skeleton skeleton-row"></div>
+    <div class="skeleton skeleton-row"></div>
+    <div class="skeleton skeleton-row"></div>
+    <div class="skeleton skeleton-row"></div>
+    <div class="skeleton skeleton-row"></div>
+  </div>
+  <div id="list-content" class="hidden">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Item</th>
+          <th>Category type</th>
+          <th>Date of expiration</th>
+          <th>Web link</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    <div class="pagination">
+      <button type="button" id="prev-page" disabled>Previous</button>
+      <span id="page-info">Page 1 of 1</span>
+      <button type="button" id="next-page">Next</button>
+    </div>
+  </div>
+  <p id="list-error" class="error hidden"></p>
+
+  <script>
+    const API_BASE = (window.LAMINAR_API_BASE || '').trim() || (window.location.origin + '/api/v1');
+    const listSkeleton = document.getElementById('list-skeleton');
+    const listContent = document.getElementById('list-content');
+    const listError = document.getElementById('list-error');
+    const tbody = document.getElementById('tbody');
+    const form = document.getElementById('form');
+    const publicationIdInput = document.getElementById('publication-id');
+    const itemFkSelect = document.getElementById('item-fk');
+    const categoryTypeSelect = document.getElementById('category-type');
+    const dateOfExpirationInput = document.getElementById('date-of-expiration');
+    const webLinkInput = document.getElementById('web-link');
+    const submitBtn = document.getElementById('submit-btn');
+    const cancelBtn = document.getElementById('cancel-btn');
+    const formMessage = document.getElementById('form-message');
+    const prevPageBtn = document.getElementById('prev-page');
+    const nextPageBtn = document.getElementById('next-page');
+    const pageInfoSpan = document.getElementById('page-info');
+
+    let currentPage = 1;
+    const limit = 10;
+
+    function showSkeleton(show) {
+      listSkeleton.classList.toggle('hidden', !show);
+      listContent.classList.toggle('hidden', show);
+      listError.classList.add('hidden');
+    }
+
+    function setFormMessage(text, isError) {
+      formMessage.textContent = text;
+      formMessage.className = isError ? 'error' : 'success';
+      formMessage.classList.remove('hidden');
+    }
+
+    async function loadItemTypes() {
+      try {
+        const res = await fetch(API_BASE + '/oem-item-types/list');
+        if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
+        const items = await res.json();
+        itemFkSelect.innerHTML = '<option value="">-- Select --</option>' +
+          items.map(i => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join('');
+      } catch (e) {
+        itemFkSelect.innerHTML = '<option value="">Error loading items</option>';
+        console.error(e);
+      }
+    }
+
+    function escapeHtml(s) {
+      const div = document.createElement('div');
+      div.textContent = s;
+      return div.innerHTML;
+    }
+
+    async function loadList() {
+      showSkeleton(true);
+      try {
+        const url = `${API_BASE}/oem-technical-publications/paged?limit=${limit}&page=${currentPage}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
+        const data = await res.json();
+        showSkeleton(false);
+        renderTable(data.items || []);
+        const total = data.total || 0;
+        const pages = data.pages || 1;
+        pageInfoSpan.textContent = `Page ${currentPage} of ${pages} (${total} total)`;
+        prevPageBtn.disabled = currentPage <= 1;
+        nextPageBtn.disabled = currentPage >= pages;
+      } catch (e) {
+        showSkeleton(false);
+        listError.textContent = 'Failed to load list: ' + e.message;
+        listError.classList.remove('hidden');
+        console.error(e);
+      }
+    }
+
+    function renderTable(items) {
+      tbody.innerHTML = items.map(row => {
+        const itemName = row.item ? row.item.name : '—';
+        const exp = row.date_of_expiration || '—';
+        const webLinkCell = row.web_link
+          ? `<a href="${escapeHtml(row.web_link)}" target="_blank" rel="noopener">${escapeHtml(row.web_link)}</a>`
+          : '—';
+        return `<tr>
+          <td>${row.id}</td>
+          <td>${escapeHtml(itemName)}</td>
+          <td>${escapeHtml(row.category_type || '—')}</td>
+          <td>${exp}</td>
+          <td>${webLinkCell}</td>
+          <td class="actions">
+            <button type="button" data-edit="${row.id}">Edit</button>
+            <button type="button" data-delete="${row.id}">Delete</button>
+          </td>
+        </tr>`;
+      }).join('');
+
+      tbody.querySelectorAll('[data-edit]').forEach(btn => {
+        btn.addEventListener('click', () => editPublication(parseInt(btn.getAttribute('data-edit'), 10)));
+      });
+      tbody.querySelectorAll('[data-delete]').forEach(btn => {
+        btn.addEventListener('click', () => deletePublication(parseInt(btn.getAttribute('data-delete'), 10)));
+      });
+    }
+
+    async function editPublication(id) {
+      try {
+        const res = await fetch(API_BASE + '/oem-technical-publications/' + id);
+        if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
+        const row = await res.json();
+        publicationIdInput.value = row.id;
+        itemFkSelect.value = row.item_fk;
+        categoryTypeSelect.value = row.category_type || 'CERTIFICATE';
+        dateOfExpirationInput.value = row.date_of_expiration || '';
+        webLinkInput.value = row.web_link || '';
+        submitBtn.textContent = 'Update';
+        cancelBtn.classList.remove('hidden');
+      } catch (e) {
+        setFormMessage('Failed to load: ' + e.message, true);
+      }
+    }
+
+    function cancelEdit() {
+      publicationIdInput.value = '';
+      form.reset();
+      publicationIdInput.value = '';
+      submitBtn.textContent = 'Create';
+      cancelBtn.classList.add('hidden');
+      formMessage.classList.add('hidden');
+    }
+
+    async function deletePublication(id) {
+      if (!confirm('Delete this publication?')) return;
+      try {
+        const res = await fetch(API_BASE + '/oem-technical-publications/' + id, { method: 'DELETE' });
+        if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
+        setFormMessage('Deleted.', false);
+        loadList();
+      } catch (e) {
+        setFormMessage('Delete failed: ' + e.message, true);
+      }
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = publicationIdInput.value;
+      const payload = {
+        item_fk: parseInt(itemFkSelect.value, 10),
+        category_type: categoryTypeSelect.value,
+        date_of_expiration: dateOfExpirationInput.value || null,
+        web_link: webLinkInput.value.trim() || null,
+      };
+      const url = id
+        ? API_BASE + '/oem-technical-publications/' + id
+        : API_BASE + '/oem-technical-publications/';
+      const method = id ? 'PUT' : 'POST';
+      try {
+        const res = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || res.status + ' ' + res.statusText);
+        }
+        setFormMessage(id ? 'Updated.' : 'Created.', false);
+        cancelEdit();
+        loadList();
+      } catch (e) {
+        setFormMessage(String(e.message), true);
+      }
+    });
+
+    cancelBtn.addEventListener('click', cancelEdit);
+    prevPageBtn.addEventListener('click', () => { currentPage--; loadList(); });
+    nextPageBtn.addEventListener('click', () => { currentPage++; loadList(); });
+
+    loadItemTypes();
+    loadList();
+  </script>
+</body>
+</html>
