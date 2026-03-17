@@ -20,6 +20,7 @@ class Aircraft(Base, TimestampMixin, SoftDeleteMixin):
     manufacturer = Column(String(89), nullable=False, index=True)
     report_description = Column(Text, nullable=True)
     model = Column(String, nullable=False, index=True)
+    model_year = Column(Integer, nullable=True)
     msn = Column(String, nullable=False, unique=True, index=True)
     base = Column(String, nullable=False, index=True)
     ownership = Column(String, nullable=False)
@@ -38,12 +39,16 @@ class Aircraft(Base, TimestampMixin, SoftDeleteMixin):
     engine_serial_number = Column(String, nullable=True)
     engine_arc = Column(String, nullable=True)
     engine_life_time_limit = Column(Float, nullable=True)
-    
+    engine_tsn = Column(Float, default=0, nullable=False)   # Time Since New
+    engine_tso = Column(Float, default=0, nullable=False)   # Time Since Overhaul
+
     # Propeller Information
     propeller_model = Column(String, nullable=True)
     propeller_serial_number = Column(String, nullable=True)
     propeller_arc = Column(String, nullable=True)
     propeller_life_time_limit = Column(Float, nullable=True)
+    propeller_tsn = Column(Float, default=0, nullable=False)   # Time Since New
+    propeller_tso = Column(Float, default=0, nullable=False)   # Time Since Overhaul
 
     logbook_entries = relationship("AircraftLogbookEntry", back_populates="aircraft")
 
