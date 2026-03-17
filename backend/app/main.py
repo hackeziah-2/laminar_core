@@ -99,6 +99,19 @@ async def api_v1_root():
     return {"status": "ok", "version": "v1", "message": "Laminar API v1"}
 
 
+# Demo page: OEM Technical Publications list + CRUD with loading skeleton (same-origin API)
+_docs_dir = Path(__file__).resolve().parent.parent.parent / "docs"
+_oem_demo_path = _docs_dir / "oem_technical_publications_demo.html"
+
+
+@app.get("/demo/oem-technical-publications", tags=["demo"])
+async def demo_oem_technical_publications():
+    """Serve demo HTML for OEM Technical Publications (list view, CRUD, loading skeleton). Use same origin as API."""
+    if not _oem_demo_path.is_file():
+        raise HTTPException(status_code=404, detail="Demo file not found")
+    return FileResponse(_oem_demo_path, media_type="text/html")
+
+
 @app.get("/api/v1/health", tags=["health"])
 async def api_v1_health():
     """Health check including uploads directory (for deployment debugging)."""

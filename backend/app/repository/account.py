@@ -105,6 +105,30 @@ async def get_account_information(
     return AccountInformationRead.from_orm(obj)
 
 
+def _escape_like(value: str) -> str:
+    """Escape % and _ for use in LIKE patterns."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+async def get_account_information_by_auth_stamp(
+    session: AsyncSession,
+    auth_stamp: str,
+    limit: int = 10,
+) -> List[AccountInformation]:
+    """Get Account Information entries by auth_stamp (excludes soft-deleted). Case-insensitive partial match; e.g. '001' matches 'AUTH-KPL-001'. Returns list, max `limit` items."""
+    if not auth_stamp or not auth_stamp.strip():
+        return []
+    raw = auth_stamp.strip().lower()
+    pattern = f"%{_escape_like(raw)}%"
+    result = await session.execute(
+        select(AccountInformation)
+        .where(func.lower(AccountInformation.auth_stamp).like(pattern, escape="\\"))
+        .where(AccountInformation.is_deleted == False)
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
 async def update_account_information(
     session: AsyncSession,
     account_id: int,
@@ -224,6 +248,7 @@ async def list_account_informations(
         "last_name": AccountInformation.last_name,
         "status": AccountInformation.status,
         "last_login": AccountInformation.last_login,
+        "auth_initial_doi": AccountInformation.auth_initial_doi,
         "created_at": AccountInformation.created_at,
         "updated_at": AccountInformation.updated_at,
     }

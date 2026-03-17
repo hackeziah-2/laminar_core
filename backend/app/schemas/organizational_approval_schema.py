@@ -18,7 +18,6 @@ class OrganizationalApprovalBase(BaseModel):
     number: Optional[str] = Field(None, description="Certificate number (text)")
     date_of_expiration: Optional[date] = None
     web_link: Optional[str] = Field(None, max_length=2048)
-    file_path: Optional[str] = Field(None, max_length=500)
 
     class Config:
         orm_mode = True
@@ -28,15 +27,26 @@ class OrganizationalApprovalCreate(OrganizationalApprovalBase):
     pass
 
 
+class OrganizationalApprovalCreateRequestBody(BaseModel):
+    """Request body for POST: { \"json_data\": { ... } }."""
+
+    json_data: OrganizationalApprovalCreate
+
+
 class OrganizationalApprovalUpdate(BaseModel):
     certificate_fk: Optional[int] = None
     number: Optional[str] = None
     date_of_expiration: Optional[date] = None
     web_link: Optional[str] = Field(None, max_length=2048)
-    file_path: Optional[str] = Field(None, max_length=500)
 
     class Config:
         orm_mode = True
+
+
+class OrganizationalApprovalUpdateRequestBody(BaseModel):
+    """Request body for PUT/PATCH: { \"json_data\": { ... } }."""
+
+    json_data: OrganizationalApprovalUpdate
 
 
 class OrganizationalApprovalRead(OrganizationalApprovalBase):

@@ -1,0 +1,32 @@
+[
+    {
+        "name": "Dashboard"
+    },
+    {
+        "name": "Certificate Monitoring"
+    },
+    {
+        "name": "Daily Update"
+    }, 
+    {
+        "name": "Document On Board"
+    },
+    {
+        "name": "General Information"
+    },
+    {
+        "name": "Logbook"
+    },
+    {
+        "name": "Maintenance"
+    },
+    {
+        "name": "Operation"
+    },
+    {
+        "name": "Regulatory Compliance"
+    },
+    {
+        "name": "System Settings"
+    }
+]

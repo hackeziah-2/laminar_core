@@ -12,14 +12,19 @@ from fastapi import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas import account_schema
-from app.schemas.account_schema import AccountInformationRead, AccountInformationListItem
+from app.schemas.account_schema import (
+    AccountInformationRead,
+    AccountInformationListItem,
+    AccountInformationByAuthStamp,
+)
 from app.repository.account import (
     list_account_informations,
     get_account_information,
+    get_account_information_by_auth_stamp,
     create_account_information,
     update_account_information,
     soft_delete_account_information,
-    get_all_account_informations_list
+    get_all_account_informations_list,
 )
 from app.database import get_session
 
@@ -27,6 +32,21 @@ router = APIRouter(
     prefix="/api/v1/account-information",
     tags=["account-information"]
 )
+
+
+@router.get(
+    "/by-auth-stamp",
+    response_model=List[AccountInformationByAuthStamp],
+    summary="Get accounts by auth_stamp (search)",
+)
+async def api_get_by_auth_stamp(
+    search: str = Query(..., description="auth_stamp value to look up (case-insensitive)"),
+    limit: int = Query(10, ge=1, le=100, description="Max number of results"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Get account information list by auth_stamp. Returns list of { id, full_name, designation, license_no, auth_stamp }. Empty list if none match."""
+    items = await get_account_information_by_auth_stamp(session, search, limit=limit)
+    return [AccountInformationByAuthStamp.from_orm_auth_stamp(obj) for obj in items]
 
 
 @router.get("/account-informations-list", response_model=List[AccountInformationListItem])

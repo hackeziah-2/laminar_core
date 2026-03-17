@@ -8,6 +8,8 @@ from app.schemas.oem_technical_publication_schema import (
     OemTechnicalPublicationCreate,
     OemTechnicalPublicationUpdate,
     OemTechnicalPublicationRead,
+    OemTechnicalPublicationPagedResponse,
+    OemTechnicalPublicationCategoryTypeEnum,
 )
 from app.repository.oem_technical_publication import (
     list_oem_technical_publications,
@@ -24,11 +26,14 @@ router = APIRouter(
 )
 
 
-@router.get("/paged")
+@router.get("/paged", response_model=OemTechnicalPublicationPagedResponse)
 async def api_list_paged(
     limit: int = Query(10, ge=1, le=100),
     page: int = Query(1, ge=1),
     item_fk: Optional[int] = Query(None, description="Filter by OEM item type ID"),
+    category_type: Optional[OemTechnicalPublicationCategoryTypeEnum] = Query(
+        None, description="Filter by category type: CERTIFICATE, SUBSCRIPTION, REGULATORY_CORRESPONDENCE_NON_CERT, LICENSE"
+    ),
     search: Optional[str] = Query(None, description="Search by item type name"),
     sort: Optional[str] = Query(
         "",
@@ -43,16 +48,17 @@ async def api_list_paged(
         limit=limit,
         offset=offset,
         item_fk=item_fk,
+        category_type=category_type.value if category_type else None,
         search=search,
         sort=sort,
     )
     pages = ceil(total / limit) if total else 0
-    return {
-        "items": [OemTechnicalPublicationRead.from_orm(i) for i in items],
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+    return OemTechnicalPublicationPagedResponse(
+        items=[OemTechnicalPublicationRead.from_orm(i) for i in items],
+        total=total,
+        page=page,
+        pages=pages,
+    )
 
 
 @router.get("/{publication_id}", response_model=OemTechnicalPublicationRead)

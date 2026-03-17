@@ -45,6 +45,8 @@ services:
         condition: service_healthy
     env_file:
       - .env.prod
+    environment:
+      - RUN_MIGRATIONS=1
     volumes:
       - ./backend:/app
       - ./backend/uploads:/app/uploads
