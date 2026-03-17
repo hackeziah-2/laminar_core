@@ -57,6 +57,7 @@ _default_origins = [
     "http://120.89.33.51:3002",   # prod frontend
     "http://120.89.33.51:8000",
     "http://fleet.llibus.com",
+    "https://api.llibus.com/",
 ]
 
 # Optional: still support old single-URL env like VITE_APP_URL
