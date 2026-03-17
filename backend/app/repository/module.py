@@ -152,13 +152,18 @@ async def list_modules(
     return items, total
 
 
+# Module names excluded from modules-list (do not show in UI)
+EXCLUDED_MODULE_NAMES = frozenset({"Certificate Monitoring", "Document On Board"})
+
+
 async def get_all_modules_list(
     session: AsyncSession,
 ) -> List[Module]:
-    """Get all Modules (no pagination, for dropdowns)."""
+    """Get all Modules (no pagination, for dropdowns). Excludes Certificate Monitoring and Document On Board."""
     result = await session.execute(
         select(Module)
         .where(Module.is_deleted == False)
+        .where(Module.name.notin_(EXCLUDED_MODULE_NAMES))
         .order_by(Module.name.asc())
     )
     return list(result.scalars().all())
