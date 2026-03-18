@@ -7,12 +7,16 @@ from pydantic import BaseModel, Field
 class AdvisoryItem(BaseModel):
     """
     Single advisory row (paginated). Field sources:
+    - **id**: Source record primary key (e.g. aircraft_statutory_certificate id, organizational_approval id).
+    - **table_name**: Source table name (e.g. aircraft_statutory_certificates, organizational_approvals).
     - **item (ITEM)**: REGISTRATION (Aircraft Statutory Certificates) | certificate name (Organizational Approvals) | Item Type name (OEM Technical Publication) | NAME (Personnel Authorization).
     - **type (TYPE)**: REGULATORY_CORRESPONDENCE_NON_CERT if Certificate Type MARKING RESERVATION EXPIRY or BINARY CODE 24BIT else CERTIFICATE (Aircraft); CERTIFICATE (Organizational Approvals); category_type (OEM), SUBSCRIPTION; CAAP LIC EXPIRY → LICENSE else CERTIFICATE (Personnel Authorization).
     - **expiry**: date_of_expiration.
     - **remaining_validity**: (today - date_of_expiration).days; negative = days left, positive = overdue.
     """
 
+    id: int = Field(..., description="Source record primary key")
+    table_name: str = Field(..., description="Source table name (e.g. aircraft_statutory_certificates, organizational_approvals)")
     item: str = Field(
         ...,
         description="ITEM: from REGISTRATION (Aircraft Statutory Certificates), certificate name (Organizational Approvals), Item Type name (OEM Technical Publication), or NAME (Personnel Authorization)",
@@ -34,6 +38,8 @@ class AdvisoryItem(BaseModel):
 class AdvisoryExpiryEntry(BaseModel):
     """Expiry and remaining validity for one advisory entry (used when grouped by item and type)."""
 
+    id: int = Field(..., description="Source record primary key")
+    table_name: str = Field(..., description="Source table name")
     expiry: Optional[date] = Field(None, description="date_of_expiration")
     remaining_validity: Optional[int] = Field(
         None,
@@ -44,6 +50,8 @@ class AdvisoryExpiryEntry(BaseModel):
 class AdvisoryExpiryEntryWithItem(BaseModel):
     """Item plus expiry and remaining validity (used when grouped by type)."""
 
+    id: int = Field(..., description="Source record primary key")
+    table_name: str = Field(..., description="Source table name")
     item: str = Field(..., description="Item: registration, certificate name, item type name, or person name")
     expiry: Optional[date] = Field(None, description="date_of_expiration")
     remaining_validity: Optional[int] = Field(
@@ -53,7 +61,7 @@ class AdvisoryExpiryEntryWithItem(BaseModel):
 
 
 class AdvisoryTypeGroup(BaseModel):
-    """Advisory entries grouped by type only, with item and expiry per entry."""
+    """Advisory entries grouped by type only, with item, id, table_name and expiry per entry."""
 
     type: str = Field(
         ...,
@@ -66,8 +74,10 @@ class AdvisoryTypeGroup(BaseModel):
 
 
 class AdvisoryItemGroup(BaseModel):
-    """Advisory entries grouped by item and type, with all expiries listed."""
+    """Advisory entries grouped by item and type, with all expiries listed. id/table_name from first expiry in group."""
 
+    id: int = Field(..., description="Source record primary key (from first expiry in group)")
+    table_name: str = Field(..., description="Source table name")
     item: str = Field(..., description="Item: registration, certificate name, item type name, or person name")
     type: str = Field(
         ...,

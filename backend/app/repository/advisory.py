@@ -37,8 +37,17 @@ def _remaining_validity(expiry_date: date | None, today: date) -> int | None:
     return (today - expiry_date).days
 
 
-def _advisory_item(item: str, type_: str, expiry: date | None, today: date) -> AdvisoryItem:
+def _advisory_item(
+    id: int,
+    table_name: str,
+    item: str,
+    type_: str,
+    expiry: date | None,
+    today: date,
+) -> AdvisoryItem:
     return AdvisoryItem(
+        id=id,
+        table_name=table_name,
         item=item,
         type=type_,
         expiry=expiry,
@@ -98,7 +107,14 @@ async def list_advisory_items(
         else:
             type_val = "CERTIFICATE"
         rows.append(
-            _advisory_item(reg, type_val, c.date_of_expiration, today)
+            _advisory_item(
+                c.id,
+                AircraftStatutoryCertificate.__tablename__,
+                reg,
+                type_val,
+                c.date_of_expiration,
+                today,
+            )
         )
 
     # 2) Organizational Approvals: ITEM = certificate name, TYPE = CERTIFICATE
@@ -115,7 +131,14 @@ async def list_advisory_items(
     for oa in approvals:
         name = oa.certificate.name if oa.certificate else (oa.number or "")
         rows.append(
-            _advisory_item(name, "CERTIFICATE", oa.date_of_expiration, today)
+            _advisory_item(
+                oa.id,
+                OrganizationalApproval.__tablename__,
+                name,
+                "CERTIFICATE",
+                oa.date_of_expiration,
+                today,
+            )
         )
 
     # 3) OEM Technical Publications: ITEM = item type name, TYPE = SUBSCRIPTION if category_type SUBSCRIPTION else category_type value
@@ -136,7 +159,14 @@ async def list_advisory_items(
         else:
             type_val = pub.category_type.value if pub.category_type else "CERTIFICATE"
         rows.append(
-            _advisory_item(item_name, type_val, pub.date_of_expiration, today)
+            _advisory_item(
+                pub.id,
+                OemTechnicalPublication.__tablename__,
+                item_name,
+                type_val,
+                pub.date_of_expiration,
+                today,
+            )
         )
 
     # 4) Personnel Authorization: ITEM = account first_name + last_name, one row per expiry date; TYPE = LICENSE for caap_license_expiry else CERTIFICATE
@@ -164,7 +194,14 @@ async def list_advisory_items(
         for expiry_date, type_val in expiry_fields:
             if expiry_date is not None:
                 rows.append(
-                    _advisory_item(name, type_val, expiry_date, today)
+                    _advisory_item(
+                        pa.id,
+                        PersonnelAuthorization.__tablename__,
+                        name,
+                        type_val,
+                        expiry_date,
+                        today,
+                    )
                 )
 
     # Filter by type if requested
@@ -203,6 +240,8 @@ def _group_rows_by_item_type(
         key = (r.item, r.type)
         grouped[key].append(
             AdvisoryExpiryEntry(
+                id=r.id,
+                table_name=r.table_name,
                 expiry=r.expiry,
                 remaining_validity=r.remaining_validity,
             )
@@ -229,6 +268,8 @@ def _group_rows_by_item_type(
     sorted_keys = sorted(grouped.keys(), key=group_sort_key)
     return [
         AdvisoryItemGroup(
+            id=grouped[(item, type_)][0].id,
+            table_name=grouped[(item, type_)][0].table_name,
             item=item,
             type=type_,
             expiries=grouped[(item, type_)],
@@ -248,6 +289,8 @@ def _group_rows_by_type(
     for r in rows:
         grouped[r.type].append(
             AdvisoryExpiryEntryWithItem(
+                id=r.id,
+                table_name=r.table_name,
                 item=r.item,
                 expiry=r.expiry,
                 remaining_validity=r.remaining_validity,
