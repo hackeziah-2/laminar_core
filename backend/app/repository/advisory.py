@@ -1,4 +1,17 @@
-"""Aggregate advisory data from aircraft statutory certificates, organizational approvals, OEM technical publications, and personnel authorizations."""
+"""Aggregate advisory data from aircraft statutory certificates, organizational approvals, OEM technical publications, and personnel authorizations.
+
+PERSONNEL_EXPIRY_LABELS: category_type (display label) -> PersonnelAuthorization attribute name.
+
+ITEM:
+  - If from Organizational Approvals: APPROVAL TYPE (certificate__name) (NUMBER) — i.e. certificate name and number, e.g. "CERT NAME (123)".
+
+REMAINING VALIDITY (numeric, expiry - today; positive = days left, <= 0 = expired):
+  - If not date_of_expiration, from PERSONNEL AUTHORIZATION: auth_expiry_date - today, human_factors_training_expiry - today, type_training_expiry_cessna - today, type_training_expiry_baron - today.
+  - Else: date_of_expiration - today.
+
+Display: if REMAINING VALIDITY <= 0 → "Expired"; elif REMAINING VALIDITY <= 30 → REMAINING VALIDITY (int). Only items with REMAINING VALIDITY <= 30 are returned.
+"""
+import re
 
 from datetime import date
 from typing import List, Optional, Tuple
@@ -7,63 +20,77 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.account import AccountInformation
+from app.models.aircraft import Aircraft
 from app.models.aircraft_statutory_certificate import (
     AircraftStatutoryCertificate,
     CategoryTypeEnum as StatutoryCategoryTypeEnum,
 )
-from app.models.aircraft import Aircraft
-from app.models.organizational_approval import OrganizationalApproval
 from app.models.certificate_category_type import CertificateCategoryType
+from app.models.oem_item_type import OemItemType
 from app.models.oem_technical_publication import (
     OemTechnicalPublication,
     OemTechnicalPublicationCategoryTypeEnum as OemCategoryTypeEnum,
 )
-from app.models.oem_item_type import OemItemType
+from app.models.organizational_approval import OrganizationalApproval
 from app.models.personnel_authorization import PersonnelAuthorization
-from app.models.account import AccountInformation
-from app.schemas.advisory_schema import (
-    AdvisoryItem,
-    AdvisoryItemGroup,
-    AdvisoryExpiryEntry,
-    AdvisoryExpiryEntryWithItem,
-    AdvisoryTypeGroup,
-)
+from app.schemas.advisory_schema import AdvisoryItem, RegulatoryComplianceSource
+
+PERSONNEL_EXPIRY_LABELS = {
+    "AUTH EXPIRATION": "auth_expiry_date",
+    "CESSNA TRAINING": "type_training_expiry_cessna",
+    "CAAP LICENSE": "caap_license_expiry",
+    "HUMAN FACTORS TRAINING": "human_factors_training_expiry",
+    "BARON TRAINING": "type_training_expiry_baron",
+}
 
 
 def _remaining_validity(expiry_date: date | None, today: date) -> int | None:
-    """Remaining validity = (today - date_of_expiration).days; negative = days left, positive = overdue."""
+    """REMAINING VALIDITY = expiry_date - today (positive = days left, <= 0 = expired)."""
     if expiry_date is None:
         return None
-    return (today - expiry_date).days
+    return (expiry_date - today).days
 
 
-def _advisory_item(
-    id: int,
-    table_name: str,
+def _remaining_days_display(remaining_validity: int | None) -> Optional[str | int]:
+    """If REMAINING_VALIDITY <= 0 → 'Expired'; elif REMAINING_VALIDITY <= 30 → REMAINING_VALIDITY (int)."""
+    if remaining_validity is None:
+        return None
+    if remaining_validity <= 0:
+        return "Expired"
+    return remaining_validity
+
+
+def _build_item(
     item: str,
     type_: str,
     expiry: date | None,
     today: date,
+    id: Optional[int] = None,
+    regulatory_compliance: Optional[RegulatoryComplianceSource] = None,
+    category_type: Optional[str] = None,
 ) -> AdvisoryItem:
+    remaining = _remaining_validity(expiry, today)
     return AdvisoryItem(
         id=id,
-        table_name=table_name,
-        item=item,
-        type=type_,
-        expiry=expiry,
-        remaining_validity=_remaining_validity(expiry, today),
+        regulatory_compliance=regulatory_compliance or "personnel-authorization",
+        ITEM=item,
+        TYPE=type_,
+        EXPIRY=expiry,
+        REMAINING_VALIDITY=remaining,
+        REMAINING_DAYS=_remaining_days_display(remaining),
+        category_type=category_type,
     )
 
 
-# Normalize filter value: accept value or label; stored types are CERTIFICATE, REGULATORY_CORRESPONDENCE_NON_CERT, LICENSE, SUBSCRIPTION
 def _normalize_type_filter(type_filter: Optional[str]) -> Optional[str]:
     if not type_filter or not type_filter.strip():
         return None
-    v = type_filter.strip().upper().replace(" ", "_")
-    if "REGULATORY" in v and "NON_CERT" in v:
+    value = type_filter.strip().upper().replace(" ", "_")
+    if "REGULATORY" in value and "NON_CERT" in value:
         return "REGULATORY_CORRESPONDENCE_NON_CERT"
-    if v in ("CERTIFICATE", "LICENSE", "SUBSCRIPTION", "REGULATORY_CORRESPONDENCE_NON_CERT"):
-        return v
+    if value in {"CERTIFICATE", "LICENSE", "SUBSCRIPTION", "REGULATORY_CORRESPONDENCE_NON_CERT"}:
+        return value
     return type_filter.strip()
 
 
@@ -71,23 +98,14 @@ async def list_advisory_items(
     session: AsyncSession,
     limit: Optional[int] = 10,
     offset: int = 0,
-    sort_expiry_asc: bool = True,
+    sort_remaining_validity: Optional[str] = None,
     type_filter: Optional[str] = None,
+    item_filter: Optional[str] = None,
 ) -> Tuple[List[AdvisoryItem], int]:
-    """
-    Aggregate advisory rows from:
-    - Aircraft Statutory Certificates (ITEM=registration, TYPE=REGULATORY_CORRESPONDENCE_NON_CERT or CERTIFICATE)
-    - Organizational Approvals (ITEM=certificate name, TYPE=CERTIFICATE)
-    - OEM Technical Publications (ITEM=item type name, TYPE=SUBSCRIPTION or category_type)
-    - Personnel Authorization (ITEM=person name, TYPE=LICENSE for CAAP LIC EXPIRY else CERTIFICATE)
-    Optionally filter by type: CERTIFICATE, REGULATORY_CORRESPONDENCE_NON_CERT, LICENSE, SUBSCRIPTION.
-    Sort by expiry and return paginated items.
-    """
     today = date.today()
     rows: List[AdvisoryItem] = []
 
-    # 1) Aircraft Statutory Certificates: ITEM = aircraft.registration, TYPE = REGULATORY_CORRESPONDENCE_NON_CERT if MARKING_RESERVATION or BINARY_CODE_24BIT else CERTIFICATE
-    stmt_asc = (
+    stmt_certificates = (
         select(AircraftStatutoryCertificate)
         .options(selectinload(AircraftStatutoryCertificate.aircraft))
         .join(Aircraft, AircraftStatutoryCertificate.aircraft_fk == Aircraft.id)
@@ -95,30 +113,33 @@ async def list_advisory_items(
         .where(Aircraft.is_deleted == False)
         .where(AircraftStatutoryCertificate.date_of_expiration.isnot(None))
     )
-    result_asc = await session.execute(stmt_asc)
-    certs = result_asc.scalars().all()
-    for c in certs:
-        reg = c.aircraft.registration if c.aircraft else ""
-        if c.category_type in (
-            StatutoryCategoryTypeEnum.MARKING_RESERVATION,
-            StatutoryCategoryTypeEnum.BINARY_CODE_24BIT,
-        ):
-            type_val = "REGULATORY_CORRESPONDENCE_NON_CERT"
-        else:
-            type_val = "CERTIFICATE"
+    result_certificates = await session.execute(stmt_certificates)
+    for certificate in result_certificates.scalars().all():
+        registration = certificate.aircraft.registration if certificate.aircraft else ""
+        category_type = certificate.category_type.value if certificate.category_type else ""
+        item = (f"{category_type} ({registration})" if category_type and registration else (category_type or registration)).upper()
+        advisory_type = (
+            "REGULATORY_CORRESPONDENCE_NON_CERT"
+            if certificate.category_type
+            in (
+                StatutoryCategoryTypeEnum.MARKING_RESERVATION,
+                StatutoryCategoryTypeEnum.BINARY_CODE_24BIT,
+            )
+            else "CERTIFICATE"
+        )
         rows.append(
-            _advisory_item(
-                c.id,
-                AircraftStatutoryCertificate.__tablename__,
-                reg,
-                type_val,
-                c.date_of_expiration,
+            _build_item(
+                item,
+                advisory_type,
+                certificate.date_of_expiration,
                 today,
+                id=certificate.id,
+                regulatory_compliance="aircraft-statutory-certificates",
+                category_type=category_type
             )
         )
 
-    # 2) Organizational Approvals: ITEM = certificate name, TYPE = CERTIFICATE
-    stmt_oa = (
+    stmt_approvals = (
         select(OrganizationalApproval)
         .options(selectinload(OrganizationalApproval.certificate))
         .join(CertificateCategoryType, OrganizationalApproval.certificate_fk == CertificateCategoryType.id)
@@ -126,23 +147,29 @@ async def list_advisory_items(
         .where(CertificateCategoryType.is_deleted == False)
         .where(OrganizationalApproval.date_of_expiration.isnot(None))
     )
-    result_oa = await session.execute(stmt_oa)
-    approvals = result_oa.scalars().all()
-    for oa in approvals:
-        name = oa.certificate.name if oa.certificate else (oa.number or "")
+    result_approvals = await session.execute(stmt_approvals)
+    for approval in result_approvals.scalars().all():
+        # ITEM from Organizational Approvals: APPROVAL TYPE (certificate__name) (NUMBER)
+        cert_name = (approval.certificate.name if approval.certificate else "").strip()
+        num = (approval.number or "").strip()
+        if cert_name and num:
+            item_name = f"{cert_name} ({num})".upper()
+        else:
+            item_name = (cert_name or num or "").upper()
+        category_type_approval = cert_name or ""
         rows.append(
-            _advisory_item(
-                oa.id,
-                OrganizationalApproval.__tablename__,
-                name,
+            _build_item(
+                item_name,
                 "CERTIFICATE",
-                oa.date_of_expiration,
+                approval.date_of_expiration,
                 today,
+                id=approval.id,
+                regulatory_compliance="organizational-approvals",
+                category_type=category_type_approval,
             )
         )
 
-    # 3) OEM Technical Publications: ITEM = item type name, TYPE = SUBSCRIPTION if category_type SUBSCRIPTION else category_type value
-    stmt_oem = (
+    stmt_publications = (
         select(OemTechnicalPublication)
         .options(selectinload(OemTechnicalPublication.item))
         .join(OemItemType, OemTechnicalPublication.item_fk == OemItemType.id)
@@ -150,220 +177,157 @@ async def list_advisory_items(
         .where(OemItemType.is_deleted == False)
         .where(OemTechnicalPublication.date_of_expiration.isnot(None))
     )
-    result_oem = await session.execute(stmt_oem)
-    pubs = result_oem.scalars().all()
-    for pub in pubs:
-        item_name = pub.item.name if pub.item else ""
-        if pub.category_type == OemCategoryTypeEnum.SUBSCRIPTION:
-            type_val = "SUBSCRIPTION"
-        else:
-            type_val = pub.category_type.value if pub.category_type else "CERTIFICATE"
+    result_publications = await session.execute(stmt_publications)
+    for publication in result_publications.scalars().all():
+        item_name = (publication.item.name if publication.item else "").upper()
+        advisory_type = (
+            "SUBSCRIPTION"
+            if publication.category_type == OemCategoryTypeEnum.SUBSCRIPTION
+            else publication.category_type.value if publication.category_type else "CERTIFICATE"
+        )
+        category_type_pub = publication.category_type.value if publication.category_type else item_name or ""
         rows.append(
-            _advisory_item(
-                pub.id,
-                OemTechnicalPublication.__tablename__,
+            _build_item(
                 item_name,
-                type_val,
-                pub.date_of_expiration,
+                advisory_type,
+                publication.date_of_expiration,
                 today,
+                id=publication.id,
+                regulatory_compliance="oem-technical-publication",
+                category_type=category_type_pub,
             )
         )
 
-    # 4) Personnel Authorization: ITEM = account first_name + last_name, one row per expiry date; TYPE = LICENSE for caap_license_expiry else CERTIFICATE
-    stmt_pa = (
+    stmt_personnel = (
         select(PersonnelAuthorization)
         .options(selectinload(PersonnelAuthorization.account_information))
         .join(AccountInformation, PersonnelAuthorization.account_information_id == AccountInformation.id)
         .where(PersonnelAuthorization.is_deleted == False)
         .where(AccountInformation.is_deleted == False)
     )
-    result_pa = await session.execute(stmt_pa)
-    personnels = result_pa.scalars().all()
-    for pa in personnels:
-        acc = pa.account_information
-        name = ""
-        if acc:
-            name = f"{acc.first_name or ''} {acc.last_name or ''}".strip() or getattr(acc, "username", "") or ""
-        expiry_fields = [
-            (pa.auth_expiry_date, "CERTIFICATE"),
-            (pa.caap_license_expiry, "LICENSE"),
-            (pa.human_factors_training_expiry, "CERTIFICATE"),
-            (pa.type_training_expiry_cessna, "CERTIFICATE"),
-            (pa.type_training_expiry_baron, "CERTIFICATE"),
-        ]
-        for expiry_date, type_val in expiry_fields:
+    result_personnel = await session.execute(stmt_personnel)
+    for personnel in result_personnel.scalars().all():
+        account = personnel.account_information
+        full_name = ""
+        if account:
+            full_name = f"{account.first_name or ''} {account.last_name or ''}".strip() or getattr(account, "username", "") or ""
+        full_name_upper = full_name.upper()
+
+        # PERSONNEL AUTHORIZATION: ITEM = "LABEL (FULL_NAME)" per expiry type; all in CAPS.
+        personnel_expiry_labels = (
+            (personnel.auth_expiry_date, "AUTH EXPIRATION"),
+            (personnel.type_training_expiry_cessna, "CESSNA TRAINING"),
+            (personnel.caap_license_expiry, "CAAP LICENSE"),
+            (personnel.human_factors_training_expiry, "HUMAN FACTORS TRAINING"),
+            (personnel.type_training_expiry_baron, "BARON TRAINING"),
+        )
+        for expiry_date, label in personnel_expiry_labels:
             if expiry_date is not None:
+                item = f"{label} ({full_name_upper})"
+                advisory_type = "LICENSE" if label == "CAAP LICENSE" else "CERTIFICATE"
                 rows.append(
-                    _advisory_item(
-                        pa.id,
-                        PersonnelAuthorization.__tablename__,
-                        name,
-                        type_val,
+                    _build_item(
+                        item,
+                        advisory_type,
                         expiry_date,
                         today,
+                        id=personnel.id,
+                        regulatory_compliance="personnel-authorization",
+                        category_type=label,
                     )
                 )
 
-    # Filter by type if requested
     normalized_type = _normalize_type_filter(type_filter)
     if normalized_type is not None:
-        rows = [r for r in rows if r.type == normalized_type]
+        rows = [row for row in rows if row.TYPE == normalized_type]
 
-    # Sort by expiry (nulls last). Asc = earliest first, desc = latest first.
-    def sort_key_asc(r: AdvisoryItem):
-        return (r.expiry is None, r.expiry or date.max, r.item)
+    # Search by ITEM: case-insensitive substring match
+    if item_filter and item_filter.strip():
+        needle = item_filter.strip().upper()
+        rows = [row for row in rows if row.ITEM and needle in (row.ITEM or "").upper()]
 
-    def sort_key_desc(r: AdvisoryItem):
-        return (r.expiry is None, -(r.expiry or date.min).toordinal() if r.expiry else 0, r.item)
+    # Only items with REMAINING VALIDITY <= 30 (expiry - today; positive = days left)
+    rows = [row for row in rows if row.REMAINING_VALIDITY is not None and row.REMAINING_VALIDITY <= 30]
 
-    if sort_expiry_asc:
-        rows.sort(key=sort_key_asc)
+    # Sort by REMAINING_VALIDITY: asc = lowest first (0, 1, 2, ...), desc = highest first (30, ..., 0)
+    def _rv(row: AdvisoryItem) -> int:
+        v = row.REMAINING_VALIDITY
+        return v if v is not None else 0
+
+    sort_desc = (sort_remaining_validity or "asc").strip().lower() == "desc"
+    if sort_desc:
+        rows.sort(key=lambda row: (-_rv(row), (row.ITEM or "")))
     else:
-        rows.sort(key=sort_key_desc)
+        rows.sort(key=lambda row: (_rv(row), (row.ITEM or "")))
 
     total = len(rows)
     if limit is None:
         return rows, total
-    page_items = rows[offset : offset + limit]
-    return page_items, total
+    return rows[offset : offset + limit], total
 
 
-def _group_rows_by_item_type(
-    rows: List[AdvisoryItem],
-    sort_expiry_asc: bool,
-) -> List[AdvisoryItemGroup]:
-    """Group flat advisory rows by (item, type) and annotate with expiries."""
-    from collections import defaultdict
-
-    grouped: dict[tuple[str, str], List[AdvisoryExpiryEntry]] = defaultdict(list)
-    for r in rows:
-        key = (r.item, r.type)
-        grouped[key].append(
-            AdvisoryExpiryEntry(
-                id=r.id,
-                table_name=r.table_name,
-                expiry=r.expiry,
-                remaining_validity=r.remaining_validity,
-            )
-        )
-    # Sort expiries within each group
-    for key in grouped:
-        entries = grouped[key]
-        entries.sort(
-            key=lambda e: (e.expiry is None, e.expiry or date.max),
-            reverse=not sort_expiry_asc,
-        )
-    # Build groups; sort groups by earliest (or latest) expiry in group, then item, then type
-    def group_sort_key(item_type: tuple[str, str]) -> tuple:
-        item, type_ = item_type
-        entries = grouped[item_type]
-        min_expiry = None
-        for e in entries:
-            if e.expiry is not None:
-                min_expiry = min(min_expiry, e.expiry) if min_expiry else e.expiry
-        if sort_expiry_asc:
-            return (min_expiry is None, min_expiry or date.max, item, type_)
-        return (min_expiry is None, -(min_expiry or date.min).toordinal(), item, type_)
-
-    sorted_keys = sorted(grouped.keys(), key=group_sort_key)
-    return [
-        AdvisoryItemGroup(
-            id=grouped[(item, type_)][0].id,
-            table_name=grouped[(item, type_)][0].table_name,
-            item=item,
-            type=type_,
-            expiries=grouped[(item, type_)],
-        )
-        for item, type_ in sorted_keys
-    ]
-
-
-def _group_rows_by_type(
-    rows: List[AdvisoryItem],
-    sort_expiry_asc: bool,
-) -> List[AdvisoryTypeGroup]:
-    """Group flat advisory rows by type; each group lists (item, expiry, remaining_validity) entries."""
-    from collections import defaultdict
-
-    grouped: dict[str, List[AdvisoryExpiryEntryWithItem]] = defaultdict(list)
-    for r in rows:
-        grouped[r.type].append(
-            AdvisoryExpiryEntryWithItem(
-                id=r.id,
-                table_name=r.table_name,
-                item=r.item,
-                expiry=r.expiry,
-                remaining_validity=r.remaining_validity,
-            )
-        )
-    # Sort entries within each group by expiry
-    for type_key in grouped:
-        entries = grouped[type_key]
-        entries.sort(
-            key=lambda e: (e.expiry is None, e.expiry or date.max, e.item),
-            reverse=not sort_expiry_asc,
-        )
-    # Sort groups by earliest expiry in group, then type name
-    def group_sort_key(type_key: str) -> tuple:
-        entries = grouped[type_key]
-        min_expiry = None
-        for e in entries:
-            if e.expiry is not None:
-                min_expiry = min(min_expiry, e.expiry) if min_expiry else e.expiry
-        if sort_expiry_asc:
-            return (min_expiry is None, min_expiry or date.max, type_key)
-        return (min_expiry is None, -(min_expiry or date.min).toordinal(), type_key)
-
-    sorted_types = sorted(grouped.keys(), key=group_sort_key)
-    return [
-        AdvisoryTypeGroup(type=type_key, entries=grouped[type_key])
-        for type_key in sorted_types
-    ]
-
-
-async def list_advisory_items_grouped(
+async def update_advisory_expiry(
     session: AsyncSession,
-    limit: int = 10,
-    offset: int = 0,
-    sort_expiry_asc: bool = True,
-    type_filter: Optional[str] = None,
-) -> Tuple[List[AdvisoryItemGroup], int]:
-    """
-    Same as list_advisory_items but grouped by (item, type). Each group lists all
-    expiries for that item+type. Pagination applies to groups.
-    """
-    rows, _ = await list_advisory_items(
-        session=session,
-        limit=None,
-        offset=0,
-        sort_expiry_asc=sort_expiry_asc,
-        type_filter=type_filter,
-    )
-    groups = _group_rows_by_item_type(rows, sort_expiry_asc)
-    total = len(groups)
-    page_groups = groups[offset : offset + limit]
-    return page_groups, total
+    regulatory_compliance: RegulatoryComplianceSource,
+    id: int,
+    expiry: date,
+    category_type: Optional[str] = None,
+) -> None:
+    """Update expiry for an advisory item by id and regulatory_compliance.
 
+    For aircraft-statutory-certificates, organizational-approvals, oem-technical-publication:
+      set date_of_expiration = expiry.
 
-async def list_advisory_items_grouped_by_type(
-    session: AsyncSession,
-    limit: int = 10,
-    offset: int = 0,
-    sort_expiry_asc: bool = True,
-    type_filter: Optional[str] = None,
-) -> Tuple[List[AdvisoryTypeGroup], int]:
+    For personnel-authorization: use category_type to pick the field (PERSONNEL_EXPIRY_LABELS)
+      and set that attribute to expiry.
+
+    Raises:
+        ValueError: If advisory item not found or invalid category_type for personnel.
     """
-    Same as list_advisory_items but grouped by type only. Each group lists all
-    (item, expiry, remaining_validity) entries for that type. Pagination applies to type groups.
-    """
-    rows, _ = await list_advisory_items(
-        session=session,
-        limit=None,
-        offset=0,
-        sort_expiry_asc=sort_expiry_asc,
-        type_filter=type_filter,
-    )
-    type_groups = _group_rows_by_type(rows, sort_expiry_asc)
-    total = len(type_groups)
-    page_groups = type_groups[offset : offset + limit]
-    return page_groups, total
+    if regulatory_compliance != "personnel-authorization":
+        if regulatory_compliance == "aircraft-statutory-certificates":
+            stmt = select(AircraftStatutoryCertificate).where(
+                AircraftStatutoryCertificate.id == id,
+                AircraftStatutoryCertificate.is_deleted == False,
+            )
+            result = await session.execute(stmt)
+            instance = result.scalars().one_or_none()
+        elif regulatory_compliance == "organizational-approvals":
+            stmt = select(OrganizationalApproval).where(
+                OrganizationalApproval.id == id,
+                OrganizationalApproval.is_deleted == False,
+            )
+            result = await session.execute(stmt)
+            instance = result.scalars().one_or_none()
+        elif regulatory_compliance == "oem-technical-publication":
+            stmt = select(OemTechnicalPublication).where(
+                OemTechnicalPublication.id == id,
+                OemTechnicalPublication.is_deleted == False,
+            )
+            result = await session.execute(stmt)
+            instance = result.scalars().one_or_none()
+        else:
+            raise ValueError("Invalid regulatory_compliance")
+        if not instance:
+            raise ValueError("Advisory item not found")
+        instance.date_of_expiration = expiry
+    else:
+        personnel_expiry_labels = PERSONNEL_EXPIRY_LABELS
+        print(personnel_expiry_labels, "personnel_expiry_labels")
+        print(category_type, "category_type")
+        category_type = (category_type or "").strip()
+        if not category_type:
+            raise ValueError("Invalid category_type")
+        field_name = personnel_expiry_labels.get(category_type)
+        if not field_name:
+            raise ValueError("Invalid category_type")
+        stmt = select(PersonnelAuthorization).where(
+            PersonnelAuthorization.id == id,
+            PersonnelAuthorization.is_deleted == False,
+        )
+        result = await session.execute(stmt)
+        personnel_instance = result.scalars().one_or_none()
+        if not personnel_instance:
+            raise ValueError("Advisory item not found")
+        setattr(personnel_instance, field_name, expiry)
+    await session.commit()
