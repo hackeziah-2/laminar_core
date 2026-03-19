@@ -6,12 +6,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.repository.advisory import list_advisory_items, update_advisory_expiry
+from app.repository.advisory import list_advisory_items, update_advisory_expiry, update_advisory_withhold
 from app.schemas.advisory_schema import (
     AdvisoryFilterOption,
     AdvisoryFilterOptionsResponse,
     AdvisoryPagedResponse,
     AdvisoryUpdateExpiryBody,
+    RegulatoryComplianceSource,
 )
 
 router = APIRouter(prefix="/api/v1/advisory", tags=["advisory"])
@@ -174,9 +175,40 @@ async def put_advisory_expiry(
     return {"message": "Expiry updated"}
 
 
+@router.put(
+    "/withhold/{id}/{regulatory_compliance}",
+    status_code=200,
+    summary="Set advisory item to withhold",
+)
+async def put_advisory_withhold(
+    id: int,
+    regulatory_compliance: RegulatoryComplianceSource,
+    session: AsyncSession = Depends(get_session),
+):
+    """Set is_withhold to True for an advisory item by id and regulatory_compliance.
+
+    regulatory_compliance selects the table: aircraft-statutory-certificates,
+    organizational-approvals, oem-technical-publication, or personnel-authorization.
+    The record with the given id is updated to is_withhold=True.
+    """
+    try:
+        await update_advisory_withhold(
+            session=session,
+            regulatory_compliance=regulatory_compliance,
+            id=id,
+        )
+    except ValueError as e:
+        msg = str(e)
+        if "not found" in msg.lower():
+            raise HTTPException(status_code=404, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
+    return {"message": "Withhold updated"}
+
+
 router_advisory.get("/filter-options", response_model=AdvisoryFilterOptionsResponse)(get_advisory_filter_options)
 router_advisory.get("", response_model=AdvisoryPagedResponse)(get_advisory)
 router_advisory.get("/", response_model=AdvisoryPagedResponse)(get_advisory)
 router_advisory.get("/paged", response_model=AdvisoryPagedResponse)(get_advisory_paged)
 router_advisory.get("/paged/", response_model=AdvisoryPagedResponse)(get_advisory_paged)
 router_advisory.put("/{id}/{expiry}/", status_code=200)(put_advisory_expiry)
+router_advisory.put("/withhold/{id}/{regulatory_compliance}", status_code=200)(put_advisory_withhold)

@@ -1,6 +1,6 @@
 import enum
 
-from sqlalchemy import Column, Integer, String, Date, ForeignKey
+from sqlalchemy import Boolean, Column, Integer, String, Date, ForeignKey
 from sqlalchemy.dialects.postgresql import ENUM as PGEnum
 from sqlalchemy.orm import relationship
 
@@ -38,6 +38,7 @@ class AircraftStatutoryCertificate(Base, TimestampMixin, SoftDeleteMixin):
     date_of_expiration = Column(Date, nullable=True)
     web_link = Column(String(2048), nullable=True)
     file_path = Column(String(500), nullable=True)
+    is_withhold = Column(Boolean, default=False, nullable=False)
 
     aircraft = relationship("Aircraft", back_populates="statutory_certificates")
 

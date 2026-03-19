@@ -104,6 +104,7 @@ class PersonnelAuthorizationBase(BaseModel):
     human_factors_training_expiry: Optional[date] = None
     type_training_expiry_cessna: Optional[date] = None
     type_training_expiry_baron: Optional[date] = None
+    is_withhold: bool = False
 
     class Config:
         orm_mode = True
@@ -134,6 +135,7 @@ class PersonnelAuthorizationUpdate(BaseModel):
     human_factors_training_expiry: Optional[date] = None
     type_training_expiry_cessna: Optional[date] = None
     type_training_expiry_baron: Optional[date] = None
+    is_withhold: Optional[bool] = None
 
     class Config:
         orm_mode = True

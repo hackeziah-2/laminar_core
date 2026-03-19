@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, Date, ForeignKey
+from sqlalchemy import Boolean, Column, Integer, Date, ForeignKey
 from sqlalchemy.orm import relationship
 
 from app.database import Base, TimestampMixin, SoftDeleteMixin
@@ -40,6 +40,7 @@ class PersonnelAuthorization(Base, TimestampMixin, SoftDeleteMixin):
     human_factors_training_expiry = Column(Date, nullable=True)
     type_training_expiry_cessna = Column(Date, nullable=True)
     type_training_expiry_baron = Column(Date, nullable=True)
+    is_withhold = Column(Boolean, default=False, nullable=False)
 
     account_information = relationship(
         "AccountInformation",

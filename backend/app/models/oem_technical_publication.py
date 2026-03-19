@@ -1,6 +1,6 @@
 import enum
 
-from sqlalchemy import Column, Integer, Date, String, ForeignKey
+from sqlalchemy import Boolean, Column, Integer, Date, String, ForeignKey
 from sqlalchemy.dialects.postgresql import ENUM as PGEnum
 from sqlalchemy.orm import relationship
 
@@ -34,6 +34,7 @@ class OemTechnicalPublication(Base, TimestampMixin, SoftDeleteMixin):
     )
     date_of_expiration = Column(Date, nullable=True)
     web_link = Column(String(2048), nullable=True)
+    is_withhold = Column(Boolean, default=False, nullable=False)
 
     item = relationship(
         "OemItemType",

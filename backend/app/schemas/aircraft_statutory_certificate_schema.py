@@ -35,6 +35,7 @@ class AircraftStatutoryCertificateBase(BaseModel):
     date_of_expiration: Optional[date] = None
     web_link: Optional[str] = Field(None, max_length=2048)
     file_path: Optional[str] = Field(None, max_length=500)
+    is_withhold: bool = False
 
     @validator("category_type", pre=True)
     def category_type_to_enum(cls, v):
@@ -60,6 +61,7 @@ class AircraftStatutoryCertificateUpdate(BaseModel):
     date_of_expiration: Optional[date] = None
     web_link: Optional[str] = Field(None, max_length=2048)
     file_path: Optional[str] = Field(None, max_length=500)
+    is_withhold: Optional[bool] = None
 
     @validator("category_type", pre=True)
     def category_type_to_enum(cls, v):

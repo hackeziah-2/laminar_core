@@ -110,6 +110,7 @@ async def list_advisory_items(
         .options(selectinload(AircraftStatutoryCertificate.aircraft))
         .join(Aircraft, AircraftStatutoryCertificate.aircraft_fk == Aircraft.id)
         .where(AircraftStatutoryCertificate.is_deleted == False)
+        .where(AircraftStatutoryCertificate.is_withhold == False)
         .where(Aircraft.is_deleted == False)
         .where(AircraftStatutoryCertificate.date_of_expiration.isnot(None))
     )
@@ -144,6 +145,7 @@ async def list_advisory_items(
         .options(selectinload(OrganizationalApproval.certificate))
         .join(CertificateCategoryType, OrganizationalApproval.certificate_fk == CertificateCategoryType.id)
         .where(OrganizationalApproval.is_deleted == False)
+        .where(OrganizationalApproval.is_withhold == False)
         .where(CertificateCategoryType.is_deleted == False)
         .where(OrganizationalApproval.date_of_expiration.isnot(None))
     )
@@ -174,6 +176,7 @@ async def list_advisory_items(
         .options(selectinload(OemTechnicalPublication.item))
         .join(OemItemType, OemTechnicalPublication.item_fk == OemItemType.id)
         .where(OemTechnicalPublication.is_deleted == False)
+        .where(OemTechnicalPublication.is_withhold == False)
         .where(OemItemType.is_deleted == False)
         .where(OemTechnicalPublication.date_of_expiration.isnot(None))
     )
@@ -203,6 +206,7 @@ async def list_advisory_items(
         .options(selectinload(PersonnelAuthorization.account_information))
         .join(AccountInformation, PersonnelAuthorization.account_information_id == AccountInformation.id)
         .where(PersonnelAuthorization.is_deleted == False)
+        .where(PersonnelAuthorization.is_withhold == False)
         .where(AccountInformation.is_deleted == False)
     )
     result_personnel = await session.execute(stmt_personnel)
@@ -330,4 +334,54 @@ async def update_advisory_expiry(
         if not personnel_instance:
             raise ValueError("Advisory item not found")
         setattr(personnel_instance, field_name, expiry)
+    await session.commit()
+
+
+async def update_advisory_withhold(
+    session: AsyncSession,
+    regulatory_compliance: RegulatoryComplianceSource,
+    id: int,
+) -> None:
+    """Set is_withhold=True for an advisory item by id and regulatory_compliance.
+
+    Selects the table by regulatory_compliance, finds the record by id, sets is_withhold to True.
+
+    Raises:
+        ValueError: If advisory item not found or invalid regulatory_compliance.
+    """
+    if regulatory_compliance == "aircraft-statutory-certificates":
+        stmt = select(AircraftStatutoryCertificate).where(
+            AircraftStatutoryCertificate.id == id,
+            AircraftStatutoryCertificate.is_deleted == False,
+        )
+        result = await session.execute(stmt)
+        instance = result.scalars().one_or_none()
+    elif regulatory_compliance == "organizational-approvals":
+        stmt = select(OrganizationalApproval).where(
+            OrganizationalApproval.id == id,
+            OrganizationalApproval.is_deleted == False,
+        )
+        result = await session.execute(stmt)
+        instance = result.scalars().one_or_none()
+    elif regulatory_compliance == "oem-technical-publication":
+        stmt = select(OemTechnicalPublication).where(
+            OemTechnicalPublication.id == id,
+            OemTechnicalPublication.is_deleted == False,
+        )
+        result = await session.execute(stmt)
+        instance = result.scalars().one_or_none()
+    elif regulatory_compliance == "personnel-authorization":
+        stmt = select(PersonnelAuthorization).where(
+            PersonnelAuthorization.id == id,
+            PersonnelAuthorization.is_deleted == False,
+        )
+        result = await session.execute(stmt)
+        instance = result.scalars().one_or_none()
+    else:
+        raise ValueError("Invalid regulatory_compliance")
+
+    if not instance:
+        raise ValueError("Advisory item not found")
+
+    instance.is_withhold = True
     await session.commit()

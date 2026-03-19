@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Date, ForeignKey, Text
+from sqlalchemy import Boolean, Column, Integer, String, Date, ForeignKey, Text
 from sqlalchemy.orm import relationship
 
 from app.database import Base, TimestampMixin, SoftDeleteMixin
@@ -18,6 +18,7 @@ class OrganizationalApproval(Base, TimestampMixin, SoftDeleteMixin):
     date_of_expiration = Column(Date, nullable=True)
     web_link = Column(String(2048), nullable=True)
     file_path = Column(String(500), nullable=True)
+    is_withhold = Column(Boolean, default=False, nullable=False)
 
     certificate = relationship(
         "CertificateCategoryType",
