@@ -18,6 +18,7 @@ class OrganizationalApprovalBase(BaseModel):
     number: Optional[str] = Field(None, description="Certificate number (text)")
     date_of_expiration: Optional[date] = None
     web_link: Optional[str] = Field(None, max_length=2048)
+    is_withhold: bool = False
 
     class Config:
         orm_mode = True
@@ -38,6 +39,7 @@ class OrganizationalApprovalUpdate(BaseModel):
     number: Optional[str] = None
     date_of_expiration: Optional[date] = None
     web_link: Optional[str] = Field(None, max_length=2048)
+    is_withhold: Optional[bool] = None
 
     class Config:
         orm_mode = True
