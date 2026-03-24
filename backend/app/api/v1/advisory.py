@@ -147,13 +147,12 @@ async def put_advisory_expiry(
 ):
     """Update the expiry date for an advisory item by id.
 
-    Body: regulatory_compliance (required), category (required for personnel-authorization).
+    Body: regulatory_compliance (required).
 
     For aircraft-statutory-certificates, organizational-approvals, oem-technical-publication:
       sets date_of_expiration = expiry.
 
-    For personnel-authorization: uses category to select the field
-      (e.g. CESSNA TRAINING -> type_training_expiry_cessna) and sets it to expiry.
+    For personnel-compliance: sets expiry_date on the personnel compliance record.
     """
     try:
         expiry_date = datetime.strptime(expiry, "%Y-%m-%d").date()
@@ -165,7 +164,6 @@ async def put_advisory_expiry(
             regulatory_compliance=body.regulatory_compliance,
             id=id,
             expiry=expiry_date,
-            category_type=body.category_type,
         )
     except ValueError as e:
         msg = str(e)
@@ -188,7 +186,7 @@ async def put_advisory_withhold(
     """Set is_withhold to True for an advisory item by id and regulatory_compliance.
 
     regulatory_compliance selects the table: aircraft-statutory-certificates,
-    organizational-approvals, oem-technical-publication, or personnel-authorization.
+    organizational-approvals, oem-technical-publication, or personnel-compliance.
     The record with the given id is updated to is_withhold=True.
     """
     try:

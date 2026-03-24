@@ -14,6 +14,10 @@ class AuthorizationScopeCessna(Base, TimestampMixin, SoftDeleteMixin):
         "PersonnelAuthorization",
         back_populates="authorization_scope_cessna",
     )
+    personnel_compliances = relationship(
+        "PersonnelCompliance",
+        back_populates="authorization_scope_cessna",
+    )
 
     def __repr__(self):
         return f"<AuthorizationScopeCessna(id={self.id}, name='{self.name}')>"

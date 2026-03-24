@@ -9,7 +9,7 @@ from .aircraft_logbook_entries import AircraftLogbookEntry
 from .aircraft_techinical_log import AircraftTechnicalLog, ComponentPartsRecord
 from .atl_monitoring import LDNDMonitoring
 from .account import AccountInformation
-from.fleet_daily_update import FleetDailyUpdate
+from .fleet_daily_update import FleetDailyUpdate
 from .logbooks import (
     EngineLogbook,
     EngineComponentRecord,
@@ -32,4 +32,5 @@ from .authorization_scope_cessna import AuthorizationScopeCessna
 from .authorization_scope_baron import AuthorizationScopeBaron
 from .authorization_scope_others import AuthorizationScopeOthers
 from .personnel_authorization import PersonnelAuthorization
+from .personnel_compliance import PersonnelCompliance, PersonnelComplianceItemType
 

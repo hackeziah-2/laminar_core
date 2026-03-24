@@ -37,14 +37,17 @@ router = APIRouter(
 @router.get(
     "/by-auth-stamp",
     response_model=List[AccountInformationByAuthStamp],
-    summary="Get accounts by auth_stamp (search)",
+    summary="Get accounts by auth stamp or name (search)",
 )
 async def api_get_by_auth_stamp(
-    search: str = Query(..., description="auth_stamp value to look up (case-insensitive)"),
+    search: str = Query(
+        ...,
+        description="Case-insensitive partial match on auth_stamp, first_name, or last_name",
+    ),
     limit: int = Query(10, ge=1, le=100, description="Max number of results"),
     session: AsyncSession = Depends(get_session),
 ):
-    """Get account information list by auth_stamp. Returns list of { id, full_name, designation, license_no, auth_stamp }. Empty list if none match."""
+    """Get account information matching search on auth_stamp, first name, or last name. Returns list of { id, full_name, designation, license_no, auth_stamp }. Empty list if none match."""
     items = await get_account_information_by_auth_stamp(session, search, limit=limit)
     return [AccountInformationByAuthStamp.from_orm_auth_stamp(obj) for obj in items]
 
