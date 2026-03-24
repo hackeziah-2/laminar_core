@@ -1,20 +1,15 @@
-"""Aggregate advisory data from aircraft statutory certificates, organizational approvals, OEM technical publications, and personnel authorizations.
+"""Aggregate advisory data from aircraft statutory certificates, organizational approvals, OEM technical publications, and personnel compliance.
 
-PERSONNEL_EXPIRY_LABELS: category_type (display label) -> PersonnelAuthorization attribute name.
+ITEM (personnel compliance): ITEM_TYPE label plus AccountInformation full_name, e.g. "CAAP LICENSE (JOHN DOE)".
 
-ITEM:
-  - If from Organizational Approvals: APPROVAL TYPE (certificate__name) (NUMBER) — i.e. certificate name and number, e.g. "CERT NAME (123)".
+TYPE (personnel compliance): LICENSE if item_type is CAAP_LICENSE; otherwise CERTIFICATE.
 
-REMAINING VALIDITY (numeric, expiry - today; positive = days left, <= 0 = expired):
-  - If not date_of_expiration, from PERSONNEL AUTHORIZATION: auth_expiry_date - today, human_factors_training_expiry - today, type_training_expiry_cessna - today, type_training_expiry_baron - today.
-  - Else: date_of_expiration - today.
+REMAINING VALIDITY: expiry_date - today (positive = days left). Only rows with is_withhold == False.
 
-Display: if REMAINING VALIDITY <= 0 → "Expired"; elif REMAINING VALIDITY <= 30 → REMAINING VALIDITY (int). Only items with REMAINING VALIDITY <= 30 are returned.
+Display: if REMAINING VALIDITY <= 0 → "Expired"; elif <= 30 → int. Only items with REMAINING VALIDITY <= 30 are returned.
 """
-import re
-
 from datetime import date
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,26 +28,29 @@ from app.models.oem_technical_publication import (
     OemTechnicalPublicationCategoryTypeEnum as OemCategoryTypeEnum,
 )
 from app.models.organizational_approval import OrganizationalApproval
-from app.models.personnel_authorization import PersonnelAuthorization
+from app.models.personnel_compliance import PersonnelCompliance, PersonnelComplianceItemType
 from app.schemas.advisory_schema import AdvisoryItem, RegulatoryComplianceSource
 
-PERSONNEL_EXPIRY_LABELS = {
-    "AUTH EXPIRATION": "auth_expiry_date",
-    "CESSNA TRAINING": "type_training_expiry_cessna",
-    "CAAP LICENSE": "caap_license_expiry",
-    "HUMAN FACTORS TRAINING": "human_factors_training_expiry",
-    "BARON TRAINING": "type_training_expiry_baron",
-}
+
+def _personnel_compliance_item_label(item_type: PersonnelComplianceItemType) -> str:
+    return item_type.value.replace("_", " ")
 
 
-def _remaining_validity(expiry_date: date | None, today: date) -> int | None:
+def _account_full_name_upper(account: Optional[AccountInformation]) -> str:
+    if not account:
+        return ""
+    raw = f"{account.first_name or ''} {account.last_name or ''}".strip() or getattr(account, "username", "") or ""
+    return raw.upper()
+
+
+def _remaining_validity(expiry_date: Optional[date], today: date) -> Optional[int]:
     """REMAINING VALIDITY = expiry_date - today (positive = days left, <= 0 = expired)."""
     if expiry_date is None:
         return None
     return (expiry_date - today).days
 
 
-def _remaining_days_display(remaining_validity: int | None) -> Optional[str | int]:
+def _remaining_days_display(remaining_validity: Optional[int]) -> Optional[Union[str, int]]:
     """If REMAINING_VALIDITY <= 0 → 'Expired'; elif REMAINING_VALIDITY <= 30 → REMAINING_VALIDITY (int)."""
     if remaining_validity is None:
         return None
@@ -64,16 +62,16 @@ def _remaining_days_display(remaining_validity: int | None) -> Optional[str | in
 def _build_item(
     item: str,
     type_: str,
-    expiry: date | None,
+    expiry: Optional[date],
     today: date,
+    regulatory_compliance: RegulatoryComplianceSource,
     id: Optional[int] = None,
-    regulatory_compliance: Optional[RegulatoryComplianceSource] = None,
     category_type: Optional[str] = None,
 ) -> AdvisoryItem:
     remaining = _remaining_validity(expiry, today)
     return AdvisoryItem(
         id=id,
-        regulatory_compliance=regulatory_compliance or "personnel-authorization",
+        regulatory_compliance=regulatory_compliance,
         ITEM=item,
         TYPE=type_,
         EXPIRY=expiry,
@@ -134,9 +132,9 @@ async def list_advisory_items(
                 advisory_type,
                 certificate.date_of_expiration,
                 today,
+                "aircraft-statutory-certificates",
                 id=certificate.id,
-                regulatory_compliance="aircraft-statutory-certificates",
-                category_type=category_type
+                category_type=category_type,
             )
         )
 
@@ -165,8 +163,8 @@ async def list_advisory_items(
                 "CERTIFICATE",
                 approval.date_of_expiration,
                 today,
+                "organizational-approvals",
                 id=approval.id,
-                regulatory_compliance="organizational-approvals",
                 category_type=category_type_approval,
             )
         )
@@ -195,51 +193,43 @@ async def list_advisory_items(
                 advisory_type,
                 publication.date_of_expiration,
                 today,
+                "oem-technical-publication",
                 id=publication.id,
-                regulatory_compliance="oem-technical-publication",
                 category_type=category_type_pub,
             )
         )
 
-    stmt_personnel = (
-        select(PersonnelAuthorization)
-        .options(selectinload(PersonnelAuthorization.account_information))
-        .join(AccountInformation, PersonnelAuthorization.account_information_id == AccountInformation.id)
-        .where(PersonnelAuthorization.is_deleted == False)
-        .where(PersonnelAuthorization.is_withhold == False)
+    stmt_personnel_compliance = (
+        select(PersonnelCompliance)
+        .options(selectinload(PersonnelCompliance.account_information))
+        .join(AccountInformation, PersonnelCompliance.account_information_id == AccountInformation.id)
+        .where(PersonnelCompliance.is_deleted == False)
+        .where(PersonnelCompliance.is_withhold == False)
         .where(AccountInformation.is_deleted == False)
+        .where(PersonnelCompliance.expiry_date.isnot(None))
     )
-    result_personnel = await session.execute(stmt_personnel)
-    for personnel in result_personnel.scalars().all():
-        account = personnel.account_information
-        full_name = ""
-        if account:
-            full_name = f"{account.first_name or ''} {account.last_name or ''}".strip() or getattr(account, "username", "") or ""
-        full_name_upper = full_name.upper()
-
-        # PERSONNEL AUTHORIZATION: ITEM = "LABEL (FULL_NAME)" per expiry type; all in CAPS.
-        personnel_expiry_labels = (
-            (personnel.auth_expiry_date, "AUTH EXPIRATION"),
-            (personnel.type_training_expiry_cessna, "CESSNA TRAINING"),
-            (personnel.caap_license_expiry, "CAAP LICENSE"),
-            (personnel.human_factors_training_expiry, "HUMAN FACTORS TRAINING"),
-            (personnel.type_training_expiry_baron, "BARON TRAINING"),
+    result_pc = await session.execute(stmt_personnel_compliance)
+    for compliance in result_pc.scalars().all():
+        account = compliance.account_information
+        label = _personnel_compliance_item_label(compliance.item_type)
+        full_name_upper = _account_full_name_upper(account)
+        item = f"{label} ({full_name_upper})"
+        advisory_type = (
+            "LICENSE"
+            if compliance.item_type == PersonnelComplianceItemType.CAAP_LICENSE
+            else "CERTIFICATE"
         )
-        for expiry_date, label in personnel_expiry_labels:
-            if expiry_date is not None:
-                item = f"{label} ({full_name_upper})"
-                advisory_type = "LICENSE" if label == "CAAP LICENSE" else "CERTIFICATE"
-                rows.append(
-                    _build_item(
-                        item,
-                        advisory_type,
-                        expiry_date,
-                        today,
-                        id=personnel.id,
-                        regulatory_compliance="personnel-authorization",
-                        category_type=label,
-                    )
-                )
+        rows.append(
+            _build_item(
+                item,
+                advisory_type,
+                compliance.expiry_date,
+                today,
+                "personnel-compliance",
+                id=compliance.id,
+                category_type=compliance.item_type.value if compliance.item_type else None,
+            )
+        )
 
     normalized_type = _normalize_type_filter(type_filter)
     if normalized_type is not None:
@@ -275,65 +265,59 @@ async def update_advisory_expiry(
     regulatory_compliance: RegulatoryComplianceSource,
     id: int,
     expiry: date,
-    category_type: Optional[str] = None,
 ) -> None:
     """Update expiry for an advisory item by id and regulatory_compliance.
 
     For aircraft-statutory-certificates, organizational-approvals, oem-technical-publication:
       set date_of_expiration = expiry.
 
-    For personnel-authorization: use category_type to pick the field (PERSONNEL_EXPIRY_LABELS)
-      and set that attribute to expiry.
+    For personnel-compliance: set expiry_date on the PersonnelCompliance row.
 
     Raises:
-        ValueError: If advisory item not found or invalid category_type for personnel.
+        ValueError: If advisory item not found or invalid regulatory_compliance.
     """
-    if regulatory_compliance != "personnel-authorization":
-        if regulatory_compliance == "aircraft-statutory-certificates":
-            stmt = select(AircraftStatutoryCertificate).where(
-                AircraftStatutoryCertificate.id == id,
-                AircraftStatutoryCertificate.is_deleted == False,
-            )
-            result = await session.execute(stmt)
-            instance = result.scalars().one_or_none()
-        elif regulatory_compliance == "organizational-approvals":
-            stmt = select(OrganizationalApproval).where(
-                OrganizationalApproval.id == id,
-                OrganizationalApproval.is_deleted == False,
-            )
-            result = await session.execute(stmt)
-            instance = result.scalars().one_or_none()
-        elif regulatory_compliance == "oem-technical-publication":
-            stmt = select(OemTechnicalPublication).where(
-                OemTechnicalPublication.id == id,
-                OemTechnicalPublication.is_deleted == False,
-            )
-            result = await session.execute(stmt)
-            instance = result.scalars().one_or_none()
-        else:
-            raise ValueError("Invalid regulatory_compliance")
+    if regulatory_compliance == "personnel-compliance":
+        stmt = select(PersonnelCompliance).where(
+            PersonnelCompliance.id == id,
+            PersonnelCompliance.is_deleted == False,
+        )
+        result = await session.execute(stmt)
+        instance = result.scalars().one_or_none()
+        if not instance:
+            raise ValueError("Advisory item not found")
+        instance.expiry_date = expiry
+    elif regulatory_compliance == "aircraft-statutory-certificates":
+        stmt = select(AircraftStatutoryCertificate).where(
+            AircraftStatutoryCertificate.id == id,
+            AircraftStatutoryCertificate.is_deleted == False,
+        )
+        result = await session.execute(stmt)
+        instance = result.scalars().one_or_none()
+        if not instance:
+            raise ValueError("Advisory item not found")
+        instance.date_of_expiration = expiry
+    elif regulatory_compliance == "organizational-approvals":
+        stmt = select(OrganizationalApproval).where(
+            OrganizationalApproval.id == id,
+            OrganizationalApproval.is_deleted == False,
+        )
+        result = await session.execute(stmt)
+        instance = result.scalars().one_or_none()
+        if not instance:
+            raise ValueError("Advisory item not found")
+        instance.date_of_expiration = expiry
+    elif regulatory_compliance == "oem-technical-publication":
+        stmt = select(OemTechnicalPublication).where(
+            OemTechnicalPublication.id == id,
+            OemTechnicalPublication.is_deleted == False,
+        )
+        result = await session.execute(stmt)
+        instance = result.scalars().one_or_none()
         if not instance:
             raise ValueError("Advisory item not found")
         instance.date_of_expiration = expiry
     else:
-        personnel_expiry_labels = PERSONNEL_EXPIRY_LABELS
-        print(personnel_expiry_labels, "personnel_expiry_labels")
-        print(category_type, "category_type")
-        category_type = (category_type or "").strip()
-        if not category_type:
-            raise ValueError("Invalid category_type")
-        field_name = personnel_expiry_labels.get(category_type)
-        if not field_name:
-            raise ValueError("Invalid category_type")
-        stmt = select(PersonnelAuthorization).where(
-            PersonnelAuthorization.id == id,
-            PersonnelAuthorization.is_deleted == False,
-        )
-        result = await session.execute(stmt)
-        personnel_instance = result.scalars().one_or_none()
-        if not personnel_instance:
-            raise ValueError("Advisory item not found")
-        setattr(personnel_instance, field_name, expiry)
+        raise ValueError("Invalid regulatory_compliance")
     await session.commit()
 
 
@@ -370,10 +354,10 @@ async def update_advisory_withhold(
         )
         result = await session.execute(stmt)
         instance = result.scalars().one_or_none()
-    elif regulatory_compliance == "personnel-authorization":
-        stmt = select(PersonnelAuthorization).where(
-            PersonnelAuthorization.id == id,
-            PersonnelAuthorization.is_deleted == False,
+    elif regulatory_compliance == "personnel-compliance":
+        stmt = select(PersonnelCompliance).where(
+            PersonnelCompliance.id == id,
+            PersonnelCompliance.is_deleted == False,
         )
         result = await session.execute(stmt)
         instance = result.scalars().one_or_none()

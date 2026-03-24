@@ -37,6 +37,14 @@ class AccountInformation(Base, TimestampMixin, SoftDeleteMixin):
         "PersonnelAuthorization",
         back_populates="account_information",
     )
+    personnel_compliances = relationship(
+        "PersonnelCompliance",
+        back_populates="account_information",
+    )
 
     def __repr__(self):
         return f"<AccountInformation(username='{self.username}', name='{self.first_name} {self.last_name}')>"
+
+    @property
+    def full_name(self):
+        return f"{self.first_name or ''} {self.last_name or ''}".strip()

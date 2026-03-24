@@ -4,6 +4,16 @@ from typing import Optional, Any
 from pydantic import BaseModel, Field, root_validator, validator
 
 
+def _format_personnel_account_full_name(
+    last: str, first: str, middle: Optional[str] = None
+) -> str:
+    """Same rule as AccountInformationByAuthStamp: last_name, first_name [, middle_name]."""
+    parts = [last or "", first or ""]
+    if middle and str(middle).strip():
+        parts.append(str(middle).strip())
+    return ", ".join(p for p in parts if p) or ""
+
+
 class AccountInformationNameSummary(BaseModel):
     id: int
     first_name: str
@@ -27,31 +37,52 @@ class AccountInformationPersonnelSummary(BaseModel):
     @root_validator(pre=True)
     def build_from_orm(cls, values: Any) -> Any:
         """Build from AccountInformation ORM or dict: full_name as last_name, first_name; license from license_no."""
-        # Already has full_name (e.g. from a previous validator or dict)
-        if isinstance(values, dict) and "full_name" in values and values["full_name"] is not None:
-            return values
-        # ORM object: has first_name / last_name attributes
-        if hasattr(values, "first_name") and hasattr(values, "last_name"):
-            first = getattr(values, "first_name", None) or ""
-            last = getattr(values, "last_name", None) or ""
-            full_name = ", ".join(filter(None, [last, first]))
+        if hasattr(values, "get") and callable(values.get):
+            # dict or Pydantic GetterDict (ORM from_orm)
+            first = values.get("first_name") or getattr(values, "first_name", "") or ""
+            last = values.get("last_name") or getattr(values, "last_name", "") or ""
+            middle = values.get("middle_name") or getattr(values, "middle_name", "") or None
+            formatted = _format_personnel_account_full_name(last, first, middle)
+            explicit = values.get("full_name")
+            explicit_str = str(explicit).strip() if explicit is not None else ""
+            if formatted:
+                full_name = formatted
+            elif explicit_str:
+                full_name = explicit_str
+            else:
+                username = values.get("username") or getattr(values, "username", "") or ""
+                full_name = str(username).strip()
+
+            if isinstance(values, dict):
+                out = dict(values)
+                out["full_name"] = full_name
+                out.setdefault("license", values.get("license_no"))
+                return out
             return {
-                "id": getattr(values, "id", None),
-                "designation": getattr(values, "designation", None),
-                "auth_stamp": getattr(values, "auth_stamp", None),
+                "id": values.get("id"),
+                "designation": values.get("designation"),
+                "auth_stamp": values.get("auth_stamp"),
                 "full_name": full_name,
-                "license": getattr(values, "license_no", None),
+                "license": values.get("license_no") or values.get("license"),
             }
-        # Dict from ORM (e.g. only some keys present): build full_name from first_name/last_name
-        if isinstance(values, dict):
-            first = values.get("first_name") or ""
-            last = values.get("last_name") or ""
-            full_name = ", ".join(filter(None, [last, first]))
-            out = dict(values)
-            out["full_name"] = full_name
-            out.setdefault("license", values.get("license_no"))
-            return out
-        return values
+
+        first = getattr(values, "first_name", None) or ""
+        last = getattr(values, "last_name", None) or ""
+        middle = getattr(values, "middle_name", None)
+        full_name = _format_personnel_account_full_name(last, first, middle)
+        if not full_name:
+            prop = getattr(values, "full_name", None)
+            if prop is not None and str(prop).strip():
+                full_name = str(prop).strip()
+        if not full_name:
+            full_name = str(getattr(values, "username", None) or "").strip()
+        return {
+            "id": getattr(values, "id", None),
+            "designation": getattr(values, "designation", None),
+            "auth_stamp": getattr(values, "auth_stamp", None),
+            "full_name": full_name,
+            "license": getattr(values, "license_no", None),
+        }
 
 
 class AuthorizationScopeCessnaSummary(BaseModel):
@@ -151,32 +182,54 @@ class PersonnelAuthorizationUpdate(BaseModel):
 
 
 def _account_info_to_summary(obj: Any) -> Optional[AccountInformationPersonnelSummary]:
-    """Build AccountInformationPersonnelSummary from ORM or dict; return None if obj is None."""
+    """Build AccountInformationPersonnelSummary from ORM, Pydantic GetterDict, or dict."""
     if obj is None:
         return None
-    if hasattr(obj, "first_name") and hasattr(obj, "last_name"):
-        first = getattr(obj, "first_name", None) or ""
-        last = getattr(obj, "last_name", None) or ""
-        full_name = ", ".join(filter(None, [last, first]))
-        return AccountInformationPersonnelSummary(
-            id=getattr(obj, "id", None),
-            designation=getattr(obj, "designation", None),
-            auth_stamp=getattr(obj, "auth_stamp", None),
-            full_name=full_name,
-            license=getattr(obj, "license_no", None),
-        )
+
     if isinstance(obj, dict):
-        first = obj.get("first_name") or ""
-        last = obj.get("last_name") or ""
-        full_name = ", ".join(filter(None, [last, first]))
+        first = str(obj.get("first_name") or "").strip()
+        last = str(obj.get("last_name") or "").strip()
+        middle = obj.get("middle_name")
+        if middle is not None:
+            middle = str(middle).strip() or None
+        formatted = _format_personnel_account_full_name(last, first, middle)
+        existing = str(obj.get("full_name") or "").strip()
+        if formatted:
+            full_name = formatted
+        elif existing:
+            full_name = existing
+        else:
+            full_name = str(obj.get("username") or "").strip()
+        license_val = obj.get("license_no") or obj.get("license")
         return AccountInformationPersonnelSummary(
             id=obj.get("id"),
             designation=obj.get("designation"),
             auth_stamp=obj.get("auth_stamp"),
             full_name=full_name,
-            license=obj.get("license") or obj.get("license_no"),
+            license=license_val,
         )
-    return None
+
+    # ORM or GetterDict: read attributes directly; .get on GetterDict can yield empty for column keys.
+    first = str(getattr(obj, "first_name", None) or "").strip()
+    last = str(getattr(obj, "last_name", None) or "").strip()
+    middle = getattr(obj, "middle_name", None)
+    if middle is not None:
+        middle = str(middle).strip() or None
+    full_name = _format_personnel_account_full_name(last, first, middle)
+    if not full_name:
+        alt = getattr(obj, "full_name", None)
+        if alt is not None and str(alt).strip():
+            full_name = str(alt).strip()
+    if not full_name:
+        full_name = str(getattr(obj, "username", None) or "").strip()
+
+    return AccountInformationPersonnelSummary(
+        id=getattr(obj, "id", None),
+        designation=getattr(obj, "designation", None),
+        auth_stamp=getattr(obj, "auth_stamp", None),
+        full_name=full_name,
+        license=getattr(obj, "license_no", None),
+    )
 
 
 class PersonnelAuthorizationRead(PersonnelAuthorizationBase):

@@ -7,7 +7,7 @@ RegulatoryComplianceSource = Literal[
     "aircraft-statutory-certificates",
     "organizational-approvals",
     "oem-technical-publication",
-    "personnel-authorization",
+    "personnel-compliance",
 ]
 
 
@@ -15,20 +15,23 @@ class AdvisoryItem(BaseModel):
     id: Optional[int] = Field(None, description="ID of the source record")
     regulatory_compliance: RegulatoryComplianceSource = Field(
         ...,
-        description="Source of the advisory: aircraft-statutory-certificates, organizational-approvals, oem-technical-publication, or personnel-authorization",
+        description="Source of the advisory: aircraft-statutory-certificates, organizational-approvals, oem-technical-publication, or personnel-compliance",
     )
     ITEM: str = Field(..., description="Source item name")
     TYPE: str = Field(..., description="Advisory type")
     EXPIRY: Optional[date] = Field(None, description="Expiry date")
     REMAINING_VALIDITY: Optional[int] = Field(
         None,
-        description="expiry_date - today. From Personnel: auth_expiry_date, human_factors_training_expiry, type_training_expiry_cessna/baron - today; else date_of_expiration - today. Positive = days left, <= 0 = expired.",
+        description="expiry_date - today (personnel compliance: expiry_date; else date_of_expiration). Positive = days left, <= 0 = expired.",
     )
     REMAINING_DAYS: Optional[Union[str, int]] = Field(
         None,
         description="If REMAINING_VALIDITY <= 0: 'Expired'; elif REMAINING_VALIDITY <= 30: REMAINING_VALIDITY (int).",
     )
-    category_type: Optional[str] = Field(None, description="Category type (e.g. AUTH EXPIRATION, CESSNA TRAINING, or source-specific label)")
+    category_type: Optional[str] = Field(
+        None,
+        description="Source-specific label; for personnel-compliance, PersonnelComplianceItemType value (e.g. CAAP_LICENSE).",
+    )
 
     class Config:
         orm_mode = False
@@ -58,9 +61,9 @@ class AdvisoryUpdateExpiryBody(BaseModel):
 
     regulatory_compliance: RegulatoryComplianceSource = Field(
         ...,
-        description="Source of the advisory: aircraft-statutory-certificates, organizational-approvals, oem-technical-publication, or personnel-authorization",
+        description="Source of the advisory: aircraft-statutory-certificates, organizational-approvals, oem-technical-publication, or personnel-compliance",
     )
     category_type: Optional[str] = Field(
         None,
-        description="Required for personnel-authorization: AUTH EXPIRATION, CESSNA TRAINING, CAAP LICENSE, HUMAN FACTORS TRAINING, BARON TRAINING. Ignored for other types.",
+        description="Optional; ignored. Personnel compliance rows use item_type on the record (not this field).",
     )

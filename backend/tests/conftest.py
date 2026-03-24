@@ -1,5 +1,9 @@
 """Pytest configuration and shared fixtures."""
 import os
+
+# App settings load at import time; provide a dummy URL for CI/local without .env.
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+
 import pytest
 from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import (

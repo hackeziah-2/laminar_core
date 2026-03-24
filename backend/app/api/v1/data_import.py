@@ -1,3 +1,5 @@
+from typing import Optional, Union
+
 from fastapi import APIRouter, UploadFile, File, Depends, Form, Query, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,7 +41,7 @@ async def import_aircraft_endpoint(
     )
 
 
-def _parse_aircraft_id(value: str | int | None) -> int | None:
+def _parse_aircraft_id(value: Union[str, int, None]) -> Optional[int]:
     """Parse aircraft_id from form (may be empty string or int)."""
     if value is None:
         return None
@@ -61,8 +63,8 @@ def _parse_aircraft_id(value: str | int | None) -> int | None:
 )
 async def import_atl_endpoint(
     file: UploadFile = File(..., description="Excel (.xlsx, .xls) or CSV file with aircraft technical log data"),
-    aircraft_id: str | None = Form(None, description="Aircraft ID to assign to all imported ATL rows"),
-    registration: str | None = Form(None, description="Aircraft registration; used to look up aircraft_id if aircraft_id not provided"),
+    aircraft_id: Optional[str] = Form(None, description="Aircraft ID to assign to all imported ATL rows"),
+    registration: Optional[str] = Form(None, description="Aircraft registration; used to look up aircraft_id if aircraft_id not provided"),
     dry_run: bool = Query(False, description="If true, validate only and return counts without writing"),
     session: AsyncSession = Depends(get_session),
 ):

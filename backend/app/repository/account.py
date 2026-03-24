@@ -112,17 +112,23 @@ def _escape_like(value: str) -> str:
 
 async def get_account_information_by_auth_stamp(
     session: AsyncSession,
-    auth_stamp: str,
+    search: str,
     limit: int = 10,
 ) -> List[AccountInformation]:
-    """Get Account Information entries by auth_stamp (excludes soft-deleted). Case-insensitive partial match; e.g. '001' matches 'AUTH-KPL-001'. Returns list, max `limit` items."""
-    if not auth_stamp or not auth_stamp.strip():
+    """Match auth_stamp, first_name, or last_name (excludes soft-deleted). Case-insensitive partial LIKE; e.g. '001' matches 'AUTH-KPL-001', 'john' matches first name."""
+    if not search or not search.strip():
         return []
-    raw = auth_stamp.strip().lower()
+    raw = search.strip().lower()
     pattern = f"%{_escape_like(raw)}%"
     result = await session.execute(
         select(AccountInformation)
-        .where(func.lower(AccountInformation.auth_stamp).like(pattern, escape="\\"))
+        .where(
+            or_(
+                func.lower(AccountInformation.auth_stamp).like(pattern, escape="\\"),
+                func.lower(AccountInformation.first_name).like(pattern, escape="\\"),
+                func.lower(AccountInformation.last_name).like(pattern, escape="\\"),
+            )
+        )
         .where(AccountInformation.is_deleted == False)
         .limit(limit)
     )

@@ -35,6 +35,7 @@ from app.api.v1 import (
     authorization_scope_baron as authorization_scope_baron_router,
     authorization_scope_others as authorization_scope_others_router,
     personnel_authorization as personnel_authorization_router,
+    personnel_compliance as personnel_compliance_router,
     advisory as advisory_router,
 )
 from app.database import engine, Base
@@ -273,6 +274,7 @@ app.include_router(authorization_scope_cessna_router.router)
 app.include_router(authorization_scope_baron_router.router)
 app.include_router(authorization_scope_others_router.router)
 app.include_router(personnel_authorization_router.router)
+app.include_router(personnel_compliance_router.router)
 app.include_router(advisory_router.router)
 app.include_router(advisory_router.router_advisory)
 app.include_router(dashboard_router.router)

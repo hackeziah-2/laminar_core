@@ -14,6 +14,10 @@ class AuthorizationScopeOthers(Base, TimestampMixin, SoftDeleteMixin):
         "PersonnelAuthorization",
         back_populates="authorization_scope_others",
     )
+    personnel_compliances = relationship(
+        "PersonnelCompliance",
+        back_populates="authorization_scope_others",
+    )
 
     def __repr__(self):
         return f"<AuthorizationScopeOthers(id={self.id}, name='{self.name}')>"
