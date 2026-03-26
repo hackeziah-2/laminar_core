@@ -172,3 +172,43 @@ def test_create_invalid_category(client: TestClient, aircraft_id: int):
         files={},
     )
     assert response.status_code == 422
+
+
+def test_create_duplicate_certificate_returns_409(
+    client: TestClient, certificate_payload: dict
+):
+    """POST with same aircraft_fk, category_type, and date_of_expiration returns 409."""
+    first = client.post(
+        "/api/v1/aircraft-statutory-certificates/",
+        data={"json_data": json.dumps(certificate_payload)},
+        files={},
+    )
+    assert first.status_code == 201
+
+    duplicate = client.post(
+        "/api/v1/aircraft-statutory-certificates/",
+        data={"json_data": json.dumps(certificate_payload)},
+        files={},
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"] == "Entry already Exists"
+
+
+def test_create_same_aircraft_category_different_expiration_ok(
+    client: TestClient, certificate_payload: dict
+):
+    """Same aircraft and category_type but different date_of_expiration is allowed."""
+    first = client.post(
+        "/api/v1/aircraft-statutory-certificates/",
+        data={"json_data": json.dumps(certificate_payload)},
+        files={},
+    )
+    assert first.status_code == 201
+
+    other = {**certificate_payload, "date_of_expiration": "2027-01-15"}
+    second = client.post(
+        "/api/v1/aircraft-statutory-certificates/",
+        data={"json_data": json.dumps(other)},
+        files={},
+    )
+    assert second.status_code == 201

@@ -29,6 +29,8 @@ from app.api.v1 import (
     aircraft_statutory_certificate as aircraft_statutory_certificate_router,
     certificate_category_type as certificate_category_type_router,
     organizational_approval as organizational_approval_router,
+    organizational_approval_history as organizational_approval_history_router,
+    aircraft_statutory_certificate_history as aircraft_statutory_certificate_history_router,
     oem_item_type as oem_item_type_router,
     oem_technical_publication as oem_technical_publication_router,
     authorization_scope_cessna as authorization_scope_cessna_router,
@@ -36,6 +38,7 @@ from app.api.v1 import (
     authorization_scope_others as authorization_scope_others_router,
     personnel_authorization as personnel_authorization_router,
     personnel_compliance as personnel_compliance_router,
+    personnel_compliance_matrix_2 as personnel_compliance_matrix_2_router,
     advisory as advisory_router,
 )
 from app.database import engine, Base
@@ -268,6 +271,8 @@ app.include_router(fleet_daily_update_router.router)
 app.include_router(aircraft_statutory_certificate_router.router)
 app.include_router(certificate_category_type_router.router)
 app.include_router(organizational_approval_router.router)
+app.include_router(organizational_approval_history_router.router)
+app.include_router(aircraft_statutory_certificate_history_router.router)
 app.include_router(oem_item_type_router.router)
 app.include_router(oem_technical_publication_router.router)
 app.include_router(authorization_scope_cessna_router.router)
@@ -275,6 +280,7 @@ app.include_router(authorization_scope_baron_router.router)
 app.include_router(authorization_scope_others_router.router)
 app.include_router(personnel_authorization_router.router)
 app.include_router(personnel_compliance_router.router)
+app.include_router(personnel_compliance_matrix_2_router.router)
 app.include_router(advisory_router.router)
 app.include_router(advisory_router.router_advisory)
 app.include_router(dashboard_router.router)

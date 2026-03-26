@@ -6,8 +6,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.repository.advisory import list_advisory_items, update_advisory_expiry, update_advisory_withhold
+from app.repository.advisory import (
+    get_advisory_detail,
+    list_advisory_items,
+    update_advisory_expiry,
+    update_advisory_withhold,
+)
 from app.schemas.advisory_schema import (
+    AdvisoryDetailResponse,
     AdvisoryFilterOption,
     AdvisoryFilterOptionsResponse,
     AdvisoryPagedResponse,
@@ -134,6 +140,39 @@ async def get_advisory_paged(
     )
 
 
+@router.get(
+    "/{id}",
+    response_model=AdvisoryDetailResponse,
+    summary="Get advisory expiry_date and web_link",
+)
+@router.get(
+    "/{id}/",
+    response_model=AdvisoryDetailResponse,
+    summary="Get advisory expiry_date and web_link",
+)
+async def get_advisory_by_id(
+    id: int,
+    regulatory_compliance: RegulatoryComplianceSource = Query(
+        ...,
+        description="Source table: aircraft-statutory-certificates, organizational-approvals, oem-technical-publication, or personnel-compliance",
+    ),
+    session: AsyncSession = Depends(get_session),
+):
+    """Return expiry_date and web_link for the source row (id + regulatory_compliance)."""
+    try:
+        expiry_date, web_link = await get_advisory_detail(
+            session=session,
+            regulatory_compliance=regulatory_compliance,
+            id=id,
+        )
+    except ValueError as e:
+        msg = str(e)
+        if "not found" in msg.lower():
+            raise HTTPException(status_code=404, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
+    return AdvisoryDetailResponse(expiry_date=expiry_date, web_link=web_link)
+
+
 @router.put(
     "/{id}/{expiry}/",
     status_code=200,
@@ -147,12 +186,12 @@ async def put_advisory_expiry(
 ):
     """Update the expiry date for an advisory item by id.
 
-    Body: regulatory_compliance (required).
+    Body: regulatory_compliance (required); optional web_link (stored on statutory / approval / OEM rows only).
 
     For aircraft-statutory-certificates, organizational-approvals, oem-technical-publication:
-      sets date_of_expiration = expiry.
+      sets date_of_expiration = expiry and web_link when provided.
 
-    For personnel-compliance: sets expiry_date on the personnel compliance record.
+    For personnel-compliance: sets expiry_date on the personnel compliance record (web_link ignored).
     """
     try:
         expiry_date = datetime.strptime(expiry, "%Y-%m-%d").date()
@@ -164,6 +203,7 @@ async def put_advisory_expiry(
             regulatory_compliance=body.regulatory_compliance,
             id=id,
             expiry=expiry_date,
+            web_link=body.web_link,
         )
     except ValueError as e:
         msg = str(e)
@@ -208,5 +248,7 @@ router_advisory.get("", response_model=AdvisoryPagedResponse)(get_advisory)
 router_advisory.get("/", response_model=AdvisoryPagedResponse)(get_advisory)
 router_advisory.get("/paged", response_model=AdvisoryPagedResponse)(get_advisory_paged)
 router_advisory.get("/paged/", response_model=AdvisoryPagedResponse)(get_advisory_paged)
+router_advisory.get("/{id}", response_model=AdvisoryDetailResponse)(get_advisory_by_id)
+router_advisory.get("/{id}/", response_model=AdvisoryDetailResponse)(get_advisory_by_id)
 router_advisory.put("/{id}/{expiry}/", status_code=200)(put_advisory_expiry)
 router_advisory.put("/withhold/{id}/{regulatory_compliance}", status_code=200)(put_advisory_withhold)

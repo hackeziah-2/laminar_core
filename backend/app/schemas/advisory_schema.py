@@ -32,6 +32,11 @@ class AdvisoryItem(BaseModel):
         None,
         description="Source-specific label; for personnel-compliance, PersonnelComplianceItemType value (e.g. CAAP_LICENSE).",
     )
+    web_link: str = Field(
+        default="",
+        max_length=2048,
+        description="Source URL when the row has web_link; empty string if unset or personnel-compliance.",
+    )
 
     class Config:
         orm_mode = False
@@ -56,6 +61,22 @@ class AdvisoryFilterOptionsResponse(BaseModel):
     filters: list[AdvisoryFilterOption] = Field(default_factory=list)
 
 
+class AdvisoryDetailResponse(BaseModel):
+    """Response for GET /advisory/{id}/ — source row expiry and link when applicable."""
+
+    expiry_date: Optional[date] = Field(
+        None,
+        description="Personnel: expiry_date; statutory / approval / OEM: date_of_expiration.",
+    )
+    web_link: Optional[str] = Field(
+        None,
+        description="URL on the source record; null for personnel-compliance (no column).",
+    )
+
+    class Config:
+        orm_mode = False
+
+
 class AdvisoryUpdateExpiryBody(BaseModel):
     """Request body for PUT /advisory/{id}/{expiry}/."""
 
@@ -66,4 +87,12 @@ class AdvisoryUpdateExpiryBody(BaseModel):
     category_type: Optional[str] = Field(
         None,
         description="Optional; ignored. Personnel compliance rows use item_type on the record (not this field).",
+    )
+    web_link: Optional[str] = Field(
+        default=None,
+        max_length=2048,
+        description=(
+            "Optional URL for statutory / approval / OEM records (ignored for personnel-compliance). "
+            "Omit to leave unchanged; send empty string to clear."
+        ),
     )

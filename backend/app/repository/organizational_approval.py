@@ -1,7 +1,8 @@
+from datetime import date
 from typing import Optional, List, Tuple
 
-from fastapi import HTTPException
-from sqlalchemy import select, func, or_
+from fastapi import HTTPException, status
+from sqlalchemy import and_, select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -105,11 +106,46 @@ async def get_organizational_approval(
     return result.scalar_one_or_none()
 
 
+async def organizational_approval_duplicate_exists(
+    session: AsyncSession,
+    certificate_fk: int,
+    date_of_expiration: Optional[date],
+    number: Optional[str],
+) -> bool:
+    """True if a non-deleted row matches certificate, expiration date, and number (NULL-safe)."""
+    conditions = [
+        OrganizationalApproval.certificate_fk == certificate_fk,
+        OrganizationalApproval.is_deleted == False,
+    ]
+    if date_of_expiration is None:
+        conditions.append(OrganizationalApproval.date_of_expiration.is_(None))
+    else:
+        conditions.append(OrganizationalApproval.date_of_expiration == date_of_expiration)
+    if number is None:
+        conditions.append(OrganizationalApproval.number.is_(None))
+    else:
+        conditions.append(OrganizationalApproval.number == number)
+    result = await session.execute(
+        select(OrganizationalApproval.id).where(and_(*conditions)).limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
 async def create_organizational_approval(
     session: AsyncSession,
     data: OrganizationalApprovalCreate,
 ) -> OrganizationalApprovalRead:
     """Create organizational approval (no file upload)."""
+    if await organizational_approval_duplicate_exists(
+        session,
+        data.certificate_fk,
+        data.date_of_expiration,
+        data.number,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Entry already exists",
+        )
     approval_data = data.dict()
     try:
         obj = OrganizationalApproval(**approval_data)

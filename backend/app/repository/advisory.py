@@ -59,6 +59,10 @@ def _remaining_days_display(remaining_validity: Optional[int]) -> Optional[Union
     return remaining_validity
 
 
+def _advisory_item_web_link(value: Optional[str]) -> str:
+    return (value or "").strip()
+
+
 def _build_item(
     item: str,
     type_: str,
@@ -67,6 +71,7 @@ def _build_item(
     regulatory_compliance: RegulatoryComplianceSource,
     id: Optional[int] = None,
     category_type: Optional[str] = None,
+    web_link: str = "",
 ) -> AdvisoryItem:
     remaining = _remaining_validity(expiry, today)
     return AdvisoryItem(
@@ -78,6 +83,7 @@ def _build_item(
         REMAINING_VALIDITY=remaining,
         REMAINING_DAYS=_remaining_days_display(remaining),
         category_type=category_type,
+        web_link=web_link,
     )
 
 
@@ -135,6 +141,7 @@ async def list_advisory_items(
                 "aircraft-statutory-certificates",
                 id=certificate.id,
                 category_type=category_type,
+                web_link=_advisory_item_web_link(certificate.web_link),
             )
         )
 
@@ -166,6 +173,7 @@ async def list_advisory_items(
                 "organizational-approvals",
                 id=approval.id,
                 category_type=category_type_approval,
+                web_link=_advisory_item_web_link(approval.web_link),
             )
         )
 
@@ -196,6 +204,7 @@ async def list_advisory_items(
                 "oem-technical-publication",
                 id=publication.id,
                 category_type=category_type_pub,
+                web_link=_advisory_item_web_link(publication.web_link),
             )
         )
 
@@ -260,18 +269,80 @@ async def list_advisory_items(
     return rows[offset : offset + limit], total
 
 
+def _normalize_advisory_web_link(web_link: str) -> Optional[str]:
+    stripped = (web_link or "").strip()
+    return stripped or None
+
+
+async def get_advisory_detail(
+    session: AsyncSession,
+    regulatory_compliance: RegulatoryComplianceSource,
+    id: int,
+) -> tuple[Optional[date], Optional[str]]:
+    """Load expiry_date (or date_of_expiration) and web_link for one advisory source row.
+
+    Returns:
+        (expiry_date, web_link). web_link is always None for personnel-compliance.
+
+    Raises:
+        ValueError: If advisory item not found or invalid regulatory_compliance.
+    """
+    if regulatory_compliance == "personnel-compliance":
+        stmt = select(PersonnelCompliance).where(
+            PersonnelCompliance.id == id,
+            PersonnelCompliance.is_deleted == False,
+        )
+        result = await session.execute(stmt)
+        instance = result.scalars().one_or_none()
+        if not instance:
+            raise ValueError("Advisory item not found")
+        return instance.expiry_date, None
+    if regulatory_compliance == "aircraft-statutory-certificates":
+        stmt = select(AircraftStatutoryCertificate).where(
+            AircraftStatutoryCertificate.id == id,
+            AircraftStatutoryCertificate.is_deleted == False,
+        )
+        result = await session.execute(stmt)
+        instance = result.scalars().one_or_none()
+        if not instance:
+            raise ValueError("Advisory item not found")
+        return instance.date_of_expiration, instance.web_link
+    if regulatory_compliance == "organizational-approvals":
+        stmt = select(OrganizationalApproval).where(
+            OrganizationalApproval.id == id,
+            OrganizationalApproval.is_deleted == False,
+        )
+        result = await session.execute(stmt)
+        instance = result.scalars().one_or_none()
+        if not instance:
+            raise ValueError("Advisory item not found")
+        return instance.date_of_expiration, instance.web_link
+    if regulatory_compliance == "oem-technical-publication":
+        stmt = select(OemTechnicalPublication).where(
+            OemTechnicalPublication.id == id,
+            OemTechnicalPublication.is_deleted == False,
+        )
+        result = await session.execute(stmt)
+        instance = result.scalars().one_or_none()
+        if not instance:
+            raise ValueError("Advisory item not found")
+        return instance.date_of_expiration, instance.web_link
+    raise ValueError("Invalid regulatory_compliance")
+
+
 async def update_advisory_expiry(
     session: AsyncSession,
     regulatory_compliance: RegulatoryComplianceSource,
     id: int,
     expiry: date,
+    web_link: Optional[str] = None,
 ) -> None:
     """Update expiry for an advisory item by id and regulatory_compliance.
 
     For aircraft-statutory-certificates, organizational-approvals, oem-technical-publication:
-      set date_of_expiration = expiry.
+      set date_of_expiration = expiry; if web_link is not None, set web_link (empty clears).
 
-    For personnel-compliance: set expiry_date on the PersonnelCompliance row.
+    For personnel-compliance: set expiry_date on the PersonnelCompliance row (no web_link column).
 
     Raises:
         ValueError: If advisory item not found or invalid regulatory_compliance.
@@ -296,6 +367,8 @@ async def update_advisory_expiry(
         if not instance:
             raise ValueError("Advisory item not found")
         instance.date_of_expiration = expiry
+        if web_link is not None:
+            instance.web_link = _normalize_advisory_web_link(web_link)
     elif regulatory_compliance == "organizational-approvals":
         stmt = select(OrganizationalApproval).where(
             OrganizationalApproval.id == id,
@@ -306,6 +379,8 @@ async def update_advisory_expiry(
         if not instance:
             raise ValueError("Advisory item not found")
         instance.date_of_expiration = expiry
+        if web_link is not None:
+            instance.web_link = _normalize_advisory_web_link(web_link)
     elif regulatory_compliance == "oem-technical-publication":
         stmt = select(OemTechnicalPublication).where(
             OemTechnicalPublication.id == id,
@@ -316,6 +391,8 @@ async def update_advisory_expiry(
         if not instance:
             raise ValueError("Advisory item not found")
         instance.date_of_expiration = expiry
+        if web_link is not None:
+            instance.web_link = _normalize_advisory_web_link(web_link)
     else:
         raise ValueError("Invalid regulatory_compliance")
     await session.commit()

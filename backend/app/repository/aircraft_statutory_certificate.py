@@ -133,6 +133,22 @@ async def create_aircraft_statutory_certificate(
 ) -> AircraftStatutoryCertificateRead:
     """Create a new certificate with optional file upload."""
     cert_data = data.dict()
+    duplicate_stmt = (
+        select(AircraftStatutoryCertificate)
+        .where(AircraftStatutoryCertificate.aircraft_fk == data.aircraft_fk)
+        .where(AircraftStatutoryCertificate.category_type == data.category_type)
+        .where(AircraftStatutoryCertificate.is_deleted == False)
+    )
+    if data.date_of_expiration is None:
+        duplicate_stmt = duplicate_stmt.where(AircraftStatutoryCertificate.date_of_expiration.is_(None))
+    else:
+        duplicate_stmt = duplicate_stmt.where(
+            AircraftStatutoryCertificate.date_of_expiration == data.date_of_expiration
+        )
+    duplicate_result = await session.execute(duplicate_stmt.limit(1))
+    if duplicate_result.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Entry already Exists")
+
     file_path = await _save_certificate_upload(upload_file)
     if file_path:
         cert_data["file_path"] = file_path
