@@ -8,6 +8,7 @@ from app.schemas.aircraft_statutory_certificate_schema import CategoryTypeEnum
 
 class AircraftStatutoryCertificateHistoryBase(BaseModel):
     aircraft_fk: int
+    asc_history: Optional[int] = None
     category_type: CategoryTypeEnum
     date_of_expiration: Optional[date] = None
     web_link: Optional[str] = Field(None, max_length=2048)

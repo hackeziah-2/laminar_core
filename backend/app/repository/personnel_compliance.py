@@ -1,6 +1,7 @@
 from typing import List, Optional, Tuple
 
-from sqlalchemy import func, or_, select
+from fastapi import HTTPException, status
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -11,6 +12,29 @@ from app.schemas.personnel_compliance_schema import (
     PersonnelComplianceUpdate,
     PersonnelComplianceRead,
 )
+
+
+async def validate_personnel_compliance_duplicate(
+    session: AsyncSession,
+    data: PersonnelComplianceCreate,
+) -> None:
+    item_type = data.item_type.name
+    result = await session.execute(
+        select(PersonnelCompliance.id).where(
+            and_(
+                PersonnelCompliance.account_information_id == data.account_information_id,
+                PersonnelCompliance.item_type == data.item_type,
+                PersonnelCompliance.is_withhold == False,
+                PersonnelCompliance.is_deleted == False,
+            )
+        ).limit(1)
+    )
+
+    if result.scalar():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f'Entry Already Exists "{item_type}"'
+        )
 
 
 async def list_personnel_compliances(
@@ -192,6 +216,7 @@ async def create_personnel_compliance(
     session: AsyncSession,
     data: PersonnelComplianceCreate,
 ) -> PersonnelComplianceRead:
+    await validate_personnel_compliance_duplicate(session, data)
     obj = PersonnelCompliance(**data.dict())
     session.add(obj)
     await session.commit()

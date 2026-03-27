@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 class OrganizationalApprovalHistoryBase(BaseModel):
     certificate_fk: int
+    oa_history: Optional[int] = Field(None, description="organizational_approvals.id")
     number: Optional[str] = None
     date_of_expiration: Optional[date] = None
     web_link: Optional[str] = Field(None, max_length=2048)

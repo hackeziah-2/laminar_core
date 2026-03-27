@@ -15,15 +15,19 @@ async def list_organizational_approvals_history(
     limit: int = 0,
     offset: int = 0,
     certificate_fk: Optional[int] = None,
+    oa_history: Optional[int] = None,
     sort: Optional[str] = "",
 ) -> Tuple[List[OrganizationalApprovalHistory], int]:
     stmt = select(OrganizationalApprovalHistory)
     if certificate_fk is not None:
         stmt = stmt.where(OrganizationalApprovalHistory.certificate_fk == certificate_fk)
+    if oa_history is not None:
+        stmt = stmt.where(OrganizationalApprovalHistory.oa_history == oa_history)
 
     sortable = {
         "id": OrganizationalApprovalHistory.id,
         "certificate_fk": OrganizationalApprovalHistory.certificate_fk,
+        "oa_history": OrganizationalApprovalHistory.oa_history,
         "date_of_expiration": OrganizationalApprovalHistory.date_of_expiration,
         "created_at": OrganizationalApprovalHistory.created_at,
         "updated_at": OrganizationalApprovalHistory.updated_at,
@@ -41,6 +45,8 @@ async def list_organizational_approvals_history(
     count_stmt = select(func.count()).select_from(OrganizationalApprovalHistory)
     if certificate_fk is not None:
         count_stmt = count_stmt.where(OrganizationalApprovalHistory.certificate_fk == certificate_fk)
+    if oa_history is not None:
+        count_stmt = count_stmt.where(OrganizationalApprovalHistory.oa_history == oa_history)
 
     total = (await session.execute(count_stmt)).scalar()
     stmt = stmt.limit(limit).offset(offset)
@@ -62,7 +68,21 @@ async def create_organizational_approval_history(
     session: AsyncSession,
     data: OrganizationalApprovalHistoryCreate,
 ) -> OrganizationalApprovalHistoryRead:
-    obj = OrganizationalApprovalHistory(**data.dict())
+    payload = data.dict()
+    if payload.get("oa_history") is None:
+        from app.repository.organizational_approval import (
+            get_organizational_approval_id_by_natural_key,
+        )
+
+        approval_id = await get_organizational_approval_id_by_natural_key(
+            session,
+            payload["certificate_fk"],
+            payload.get("date_of_expiration"),
+            payload.get("number"),
+        )
+        if approval_id is not None:
+            payload["oa_history"] = approval_id
+    obj = OrganizationalApprovalHistory(**payload)
     session.add(obj)
     await session.commit()
     await session.refresh(obj)

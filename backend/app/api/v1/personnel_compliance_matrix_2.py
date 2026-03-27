@@ -46,7 +46,7 @@ async def api_matrix_2_paged(
     session: AsyncSession = Depends(get_session),
 ):
     offset = (page - 1) * limit
-    rows, total = await list_personnel_compliance_matrix_2_paged(
+    rows, total, compliance_by_account = await list_personnel_compliance_matrix_2_paged(
         session=session,
         limit=limit,
         offset=offset,
@@ -56,7 +56,13 @@ async def api_matrix_2_paged(
     )
     pages = ceil(total / limit) if total else 0
     return PersonnelComplianceMatrix2PagedResponse(
-        items=[PersonnelComplianceMatrix2Item.from_personnel_authorization(r) for r in rows],
+        items=[
+            PersonnelComplianceMatrix2Item.from_personnel_authorization(
+                r,
+                compliance_by_type=compliance_by_account.get(r.account_information_id),
+            )
+            for r in rows
+        ],
         total=total,
         page=page,
         pages=pages,

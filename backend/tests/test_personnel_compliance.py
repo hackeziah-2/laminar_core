@@ -51,6 +51,31 @@ def test_personnel_compliance_paged_includes_nonempty_account_full_name(client: 
     assert fn == "Pilot, Jane"
 
 
+def test_personnel_compliance_create_rejects_duplicate_account_and_item_type(client: TestClient):
+    account_data = {
+        "first_name": "Dup",
+        "last_name": "User",
+        "username": "dupuser_pc",
+        "password": "securepassword123",
+        "status": True,
+    }
+    r = client.post("/api/v1/account-information/", json=account_data)
+    assert r.status_code == 201, r.text
+    account_id = r.json()["id"]
+
+    compliance_payload = {
+        "account_information_id": account_id,
+        "item_type": PersonnelComplianceItemType.HF_TRAINING.value,
+        "is_withhold": False,
+    }
+    r1 = client.post("/api/v1/personnel-compliance/", json=compliance_payload)
+    assert r1.status_code == 201, r1.text
+
+    r2 = client.post("/api/v1/personnel-compliance/", json=compliance_payload)
+    assert r2.status_code == 409, r2.text
+    assert r2.json()["detail"] == "Entry Already Exists"
+
+
 def test_personnel_compliance_read_from_orm_full_name_from_first_last():
     """Regression: ORM-like nested account must produce last_name, first_name style full_name."""
     account = SimpleNamespace(

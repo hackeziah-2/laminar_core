@@ -26,6 +26,10 @@ async def api_list_paged(
     limit: int = Query(10, ge=1, le=100),
     page: int = Query(1, ge=1),
     certificate_fk: Optional[int] = Query(None),
+    oa_history: Optional[int] = Query(
+        None,
+        description="Filter by organizational_approvals.id (FK)",
+    ),
     sort: Optional[str] = Query(""),
     session: AsyncSession = Depends(get_session),
 ):
@@ -35,6 +39,32 @@ async def api_list_paged(
         limit=limit,
         offset=offset,
         certificate_fk=certificate_fk,
+        oa_history=oa_history,
+        sort=sort,
+    )
+    pages = ceil(total / limit) if total else 0
+    return {
+        "items": [OrganizationalApprovalHistoryRead.from_orm(i) for i in items],
+        "total": total,
+        "page": page,
+        "pages": pages,
+    }
+
+
+@router.get("/{oa_history}/paged")
+async def api_list_paged_by_oa_history(
+    oa_history: int,
+    limit: int = Query(10, ge=1, le=100),
+    page: int = Query(1, ge=1),
+    sort: Optional[str] = Query(""),
+    session: AsyncSession = Depends(get_session),
+):
+    offset = (page - 1) * limit
+    items, total = await list_organizational_approvals_history(
+        session=session,
+        limit=limit,
+        offset=offset,
+        oa_history=oa_history,
         sort=sort,
     )
     pages = ceil(total / limit) if total else 0

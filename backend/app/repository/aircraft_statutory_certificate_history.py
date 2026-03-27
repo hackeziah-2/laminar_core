@@ -16,18 +16,22 @@ async def list_aircraft_statutory_certificates_history(
     limit: int = 0,
     offset: int = 0,
     aircraft_fk: Optional[int] = None,
+    asc_history: Optional[int] = None,
     category_type: Optional[CategoryTypeEnum] = None,
     sort: Optional[str] = "",
 ) -> Tuple[List[AircraftStatutoryCertificateHistory], int]:
     stmt = select(AircraftStatutoryCertificateHistory)
     if aircraft_fk is not None:
         stmt = stmt.where(AircraftStatutoryCertificateHistory.aircraft_fk == aircraft_fk)
+    if asc_history is not None:
+        stmt = stmt.where(AircraftStatutoryCertificateHistory.asc_history == asc_history)
     if category_type is not None:
         stmt = stmt.where(AircraftStatutoryCertificateHistory.category_type == category_type)
 
     sortable = {
         "id": AircraftStatutoryCertificateHistory.id,
         "aircraft_fk": AircraftStatutoryCertificateHistory.aircraft_fk,
+        "asc_history": AircraftStatutoryCertificateHistory.asc_history,
         "category_type": AircraftStatutoryCertificateHistory.category_type,
         "date_of_expiration": AircraftStatutoryCertificateHistory.date_of_expiration,
         "created_at": AircraftStatutoryCertificateHistory.created_at,
@@ -46,6 +50,8 @@ async def list_aircraft_statutory_certificates_history(
     count_stmt = select(func.count()).select_from(AircraftStatutoryCertificateHistory)
     if aircraft_fk is not None:
         count_stmt = count_stmt.where(AircraftStatutoryCertificateHistory.aircraft_fk == aircraft_fk)
+    if asc_history is not None:
+        count_stmt = count_stmt.where(AircraftStatutoryCertificateHistory.asc_history == asc_history)
     if category_type is not None:
         count_stmt = count_stmt.where(AircraftStatutoryCertificateHistory.category_type == category_type)
 
@@ -69,7 +75,17 @@ async def create_aircraft_statutory_certificate_history(
     session: AsyncSession,
     data: AircraftStatutoryCertificateHistoryCreate,
 ) -> AircraftStatutoryCertificateHistoryRead:
-    obj = AircraftStatutoryCertificateHistory(**data.dict())
+    payload = data.dict()
+    # asc_history = aircraft_statutory_certificates.id
+    if payload.get("asc_history") is None:
+        from app.repository.aircraft_statutory_certificate import get_existing_record
+
+        cert = await get_existing_record(
+            session, payload["aircraft_fk"], data.category_type
+        )
+        if cert is not None:
+            payload["asc_history"] = cert.id
+    obj = AircraftStatutoryCertificateHistory(**payload)
     session.add(obj)
     await session.commit()
     await session.refresh(obj)

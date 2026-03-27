@@ -1,5 +1,5 @@
 from math import ceil
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from pydantic import ValidationError
@@ -37,17 +37,29 @@ async def api_list_paged(
         "",
         description="Sort: certificate_category_types__name, certification, date_of_expiration, -date_of_expiration, created_at, etc.",
     ),
+    sort_by: Optional[str] = Query(
+        None,
+        description="Sort column when not using sort. E.g. date_of_expiration, id, certification.",
+    ),
+    order: Literal["asc", "desc"] = Query(
+        "asc",
+        description="Direction for sort_by (ignored when sort is non-empty).",
+    ),
     session: AsyncSession = Depends(get_session),
 ):
     """List organizational approvals with pagination. Sort by certificate_category_types__name (category name), date_of_expiration; search on number and web_link."""
     offset = (page - 1) * limit
+    effective_sort = (sort or "").strip()
+    if not effective_sort and sort_by and sort_by.strip():
+        col = sort_by.strip()
+        effective_sort = f"-{col}" if order == "desc" else col
     items, total = await list_organizational_approvals(
         session=session,
         limit=limit,
         offset=offset,
         certificate_fk=certificate_fk,
         search=search,
-        sort=sort,
+        sort=effective_sort,
     )
     pages = ceil(total / limit) if total else 0
     return {

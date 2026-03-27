@@ -54,6 +54,49 @@ def test_personnel_compliance_matrix_2_paged_one_row_per_account_latest_auth(cli
     assert row["caap_lic_expiry"] == "2030-06-15"
 
 
+def test_personnel_compliance_matrix_2_paged_others_expiry_from_compliance_others(
+    client: TestClient,
+):
+    account_data = {
+        "first_name": "O",
+        "last_name": "OthersExpiryMatrix",
+        "username": "m2_others_exp",
+        "password": "securepassword123",
+        "status": True,
+        "designation": "FO",
+        "license_no": "CPL-1",
+        "auth_stamp": "AUTH-M2-OE",
+    }
+    r = client.post("/api/v1/account-information/", json=account_data)
+    assert r.status_code == 201, r.text
+    account_id = r.json()["id"]
+
+    pa = {
+        "account_information_id": account_id,
+        "is_withhold": False,
+    }
+    r_pa = client.post("/api/v1/personnel-authorization/", json=pa)
+    assert r_pa.status_code == 201, r_pa.text
+
+    pc = {
+        "account_information_id": account_id,
+        "item_type": "OTHERS",
+        "expiry_date": "2028-03-01",
+        "is_withhold": False,
+    }
+    r_pc = client.post("/api/v1/personnel-compliance/", json=pc)
+    assert r_pc.status_code == 201, r_pc.text
+
+    r3 = client.get(
+        "/api/v1/personnel-compliance-matrix-2/paged?page=1&limit=50&search=OthersExpiryMatrix"
+    )
+    assert r3.status_code == 200, r3.text
+    body = r3.json()
+    assert body["total"] == 1
+    row = body["items"][0]
+    assert row["others_expiry_date"] == "2028-03-01"
+
+
 def test_personnel_compliance_matrix_2_from_personnel_authorization_fallback_auth_doi():
     from types import SimpleNamespace
 
@@ -85,3 +128,9 @@ def test_personnel_compliance_matrix_2_from_personnel_authorization_fallback_aut
     )
     item = PersonnelComplianceMatrix2Item.from_personnel_authorization(pa)
     assert item.auth_initial_doi == date(2019, 1, 1)
+    assert item.others_expiry_date is None
+
+    item2 = PersonnelComplianceMatrix2Item.from_personnel_authorization(
+        pa, others_expiry_date=date(2027, 1, 2)
+    )
+    assert item2.others_expiry_date == date(2027, 1, 2)

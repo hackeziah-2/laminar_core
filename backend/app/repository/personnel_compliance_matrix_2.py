@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,6 +6,15 @@ from sqlalchemy.orm import selectinload
 
 from app.models.account import AccountInformation
 from app.models.personnel_authorization import PersonnelAuthorization
+from app.models.personnel_compliance import PersonnelCompliance, PersonnelComplianceItemType
+
+_MATRIX_COMPLIANCE_TYPES = (
+    PersonnelComplianceItemType.CAAP_LICENSE,
+    PersonnelComplianceItemType.HF_TRAINING,
+    PersonnelComplianceItemType.CESSNA,
+    PersonnelComplianceItemType.BARON,
+    PersonnelComplianceItemType.OTHERS,
+)
 
 
 async def list_personnel_compliance_matrix_2_paged(
@@ -15,7 +24,11 @@ async def list_personnel_compliance_matrix_2_paged(
     search: Optional[str] = None,
     sort: str = "",
     designation: Optional[str] = None,
-) -> Tuple[List[PersonnelAuthorization], int]:
+) -> Tuple[
+    List[PersonnelAuthorization],
+    int,
+    Dict[int, Dict[PersonnelComplianceItemType, PersonnelCompliance]],
+]:
     """
     One row per account_information_id: use the latest non-deleted PersonnelAuthorization
     (by updated_at desc nulls last, then id desc) to merge multiple authorizations per person.
@@ -153,4 +166,27 @@ async def list_personnel_compliance_matrix_2_paged(
     stmt = stmt.limit(limit).offset(offset)
     result = await session.execute(stmt)
     items = result.scalars().all()
-    return items, total
+
+    compliance_by_account: Dict[int, Dict[PersonnelComplianceItemType, PersonnelCompliance]] = {}
+    account_ids = [pa.account_information_id for pa in items]
+    if account_ids:
+        pc_stmt = (
+            select(PersonnelCompliance)
+            .where(
+                PersonnelCompliance.account_information_id.in_(account_ids),
+                PersonnelCompliance.item_type.in_(_MATRIX_COMPLIANCE_TYPES),
+                PersonnelCompliance.is_deleted == False,
+            )
+            .options(
+                selectinload(PersonnelCompliance.authorization_scope_cessna),
+                selectinload(PersonnelCompliance.authorization_scope_baron),
+                selectinload(PersonnelCompliance.authorization_scope_others),
+            )
+        )
+        pc_result = await session.execute(pc_stmt)
+        for pc in pc_result.scalars().all():
+            compliance_by_account.setdefault(pc.account_information_id, {})[
+                pc.item_type
+            ] = pc
+
+    return items, total, compliance_by_account

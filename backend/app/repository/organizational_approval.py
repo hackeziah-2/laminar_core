@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.organizational_approval import OrganizationalApproval
+from app.models.organizational_approval_history import OrganizationalApprovalHistory
 from app.models.certificate_category_type import CertificateCategoryType
 from app.schemas.organizational_approval_schema import (
     OrganizationalApprovalCreate,
@@ -64,7 +65,13 @@ async def list_organizational_approvals(
                     CertificateCategoryType.name.desc().nullslast() if desc else CertificateCategoryType.name.asc().nullslast()
                 )
             elif name in sortable:
-                order_parts.append(sortable[name].desc() if desc else sortable[name].asc())
+                col = sortable[name]
+                if name == "date_of_expiration":
+                    order_parts.append(
+                        col.desc().nullslast() if desc else col.asc().nullslast()
+                    )
+                else:
+                    order_parts.append(col.desc() if desc else col.asc())
         if order_parts:
             stmt = stmt.order_by(*order_parts)
     else:
@@ -106,6 +113,31 @@ async def get_organizational_approval(
     return result.scalar_one_or_none()
 
 
+async def get_organizational_approval_id_by_natural_key(
+    session: AsyncSession,
+    certificate_fk: int,
+    date_of_expiration: Optional[date],
+    number: Optional[str],
+) -> Optional[int]:
+    """Return organizational_approvals.id for a non-deleted row matching certificate, expiration, and number (NULL-safe)."""
+    conditions = [
+        OrganizationalApproval.certificate_fk == certificate_fk,
+        OrganizationalApproval.is_deleted == False,
+    ]
+    if date_of_expiration is None:
+        conditions.append(OrganizationalApproval.date_of_expiration.is_(None))
+    else:
+        conditions.append(OrganizationalApproval.date_of_expiration == date_of_expiration)
+    if number is None:
+        conditions.append(OrganizationalApproval.number.is_(None))
+    else:
+        conditions.append(OrganizationalApproval.number == number)
+    result = await session.execute(
+        select(OrganizationalApproval.id).where(and_(*conditions)).limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def organizational_approval_duplicate_exists(
     session: AsyncSession,
     certificate_fk: int,
@@ -131,31 +163,76 @@ async def organizational_approval_duplicate_exists(
     return result.scalar_one_or_none() is not None
 
 
+async def get_existing_organizational_approval(
+    session: AsyncSession,
+    certificate_fk: int,
+    number: Optional[str],
+) -> Optional[OrganizationalApproval]:
+    """One non-deleted row matching certificate (approval type) and number (NULL-safe)."""
+    conditions = [
+        OrganizationalApproval.certificate_fk == certificate_fk,
+        OrganizationalApproval.is_deleted == False,
+    ]
+    if number is None:
+        conditions.append(OrganizationalApproval.number.is_(None))
+    else:
+        conditions.append(OrganizationalApproval.number == number)
+    result = await session.execute(
+        select(OrganizationalApproval)
+        .options(selectinload(OrganizationalApproval.certificate))
+        .where(and_(*conditions))
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def create_organizational_approval(
     session: AsyncSession,
     data: OrganizationalApprovalCreate,
 ) -> OrganizationalApprovalRead:
-    """Create organizational approval (no file upload)."""
-    if await organizational_approval_duplicate_exists(
-        session,
-        data.certificate_fk,
-        data.date_of_expiration,
-        data.number,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Entry already exists",
-        )
-    approval_data = data.dict()
+    """Create organizational approval, or snapshot prior state to history and update if one exists for certificate + number."""
     try:
-        obj = OrganizationalApproval(**approval_data)
-        session.add(obj)
-        await session.commit()
-        await session.refresh(obj)
-        await session.refresh(obj, ["certificate"])
+        async with session.begin():
+            if await organizational_approval_duplicate_exists(
+                session,
+                data.certificate_fk,
+                data.date_of_expiration,
+                data.number,
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Entry already exists",
+                )
+            existing = await get_existing_organizational_approval(
+                session, data.certificate_fk, data.number
+            )
+            if existing:
+                snapshot = OrganizationalApprovalHistory(
+                    certificate_fk=existing.certificate_fk,
+                    oa_history=existing.id,
+                    number=existing.number,
+                    date_of_expiration=existing.date_of_expiration,
+                    web_link=existing.web_link,
+                )
+                session.add(snapshot)
+                existing.date_of_expiration = data.date_of_expiration
+                existing.web_link = data.web_link
+                existing.is_withhold = False
+                session.add(existing)
+                obj = existing
+            else:
+                obj = OrganizationalApproval(**data.dict())
+                session.add(obj)
+    except HTTPException:
+        raise
     except Exception as e:
         await session.rollback()
-        raise HTTPException(status_code=400, detail=f"Failed to create organizational approval: {str(e)}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to create organizational approval: {str(e)}",
+        )
+    await session.refresh(obj)
+    await session.refresh(obj, ["certificate"])
     return OrganizationalApprovalRead.from_orm(obj)
 
 

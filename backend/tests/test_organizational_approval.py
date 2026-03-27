@@ -70,3 +70,41 @@ def test_create_same_cert_different_number_ok(
         json={"json_data": other},
     )
     assert second.status_code == 201
+
+
+def test_create_same_cert_and_number_updates_row_and_appends_history(
+    client: TestClient, approval_payload: dict
+):
+    first = client.post(
+        "/api/v1/organizational-approvals/",
+        json={"json_data": approval_payload},
+    )
+    assert first.status_code == 201, first.text
+    approval_id = first.json()["id"]
+
+    renewed = {
+        **approval_payload,
+        "date_of_expiration": "2027-06-30",
+        "web_link": "https://example.com/renewed",
+        "is_withhold": True,
+    }
+    second = client.post(
+        "/api/v1/organizational-approvals/",
+        json={"json_data": renewed},
+    )
+    assert second.status_code == 201, second.text
+    body = second.json()
+    assert body["id"] == approval_id
+    assert body["date_of_expiration"] == "2027-06-30"
+    assert body["web_link"] == "https://example.com/renewed"
+    assert body["is_withhold"] is False
+
+    hist = client.get(
+        f"/api/v1/organizational-approvals-history/paged?oa_history={approval_id}"
+    )
+    assert hist.status_code == 200
+    items = hist.json()["items"]
+    assert len(items) >= 1
+    snap = next(i for i in items if i["date_of_expiration"] == "2026-12-31")
+    assert snap["oa_history"] == approval_id
+    assert snap["web_link"] == "https://example.com/approval"

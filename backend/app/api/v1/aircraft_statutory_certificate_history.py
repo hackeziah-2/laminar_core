@@ -27,6 +27,7 @@ async def api_list_paged(
     limit: int = Query(10, ge=1, le=100),
     page: int = Query(1, ge=1),
     aircraft_fk: Optional[int] = Query(None),
+    asc_history: Optional[int] = Query(None),
     category_type: Optional[CategoryTypeEnum] = Query(None),
     sort: Optional[str] = Query(""),
     session: AsyncSession = Depends(get_session),
@@ -37,6 +38,34 @@ async def api_list_paged(
         limit=limit,
         offset=offset,
         aircraft_fk=aircraft_fk,
+        asc_history=asc_history,
+        category_type=category_type,
+        sort=sort,
+    )
+    pages = ceil(total / limit) if total else 0
+    return {
+        "items": [AircraftStatutoryCertificateHistoryRead.from_orm(i) for i in items],
+        "total": total,
+        "page": page,
+        "pages": pages,
+    }
+
+
+@router.get("/{asc_history}/paged")
+async def api_list_paged_by_asc_history(
+    asc_history: int,
+    limit: int = Query(10, ge=1, le=100),
+    page: int = Query(1, ge=1),
+    category_type: Optional[CategoryTypeEnum] = Query(None),
+    sort: Optional[str] = Query(""),
+    session: AsyncSession = Depends(get_session),
+):
+    offset = (page - 1) * limit
+    items, total = await list_aircraft_statutory_certificates_history(
+        session=session,
+        limit=limit,
+        offset=offset,
+        asc_history=asc_history,
         category_type=category_type,
         sort=sort,
     )

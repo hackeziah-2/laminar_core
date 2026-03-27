@@ -15,6 +15,12 @@ class AircraftStatutoryCertificateHistory(Base, TimestampMixin):
         nullable=False,
         index=True,
     )
+    asc_history = Column(
+        Integer,
+        ForeignKey("aircraft_statutory_certificates.id"),
+        nullable=True,
+        index=True,
+    )
     category_type = Column(
         PGEnum(CategoryTypeEnum, name="statutory_certificate_category_type", create_type=False),
         nullable=False,
