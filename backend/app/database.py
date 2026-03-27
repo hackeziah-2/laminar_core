@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy import Boolean, Column, DateTime
 from sqlalchemy.sql import func
-from sqlalchemy import select
+from sqlalchemy import select, Column, Integer, ForeignKey
 
 
 # Load database URL from environment
@@ -48,3 +48,7 @@ class SoftDeleteMixin:
 
 def active_query(model):
     return select(model).where(model.is_deleted.is_(False))
+
+class AuditMixin:
+    created_by = Column(Integer, ForeignKey("account_information.id"), nullable=True)
+    updated_by = Column(Integer, ForeignKey("account_information.id"), nullable=True)
