@@ -52,3 +52,4 @@ def active_query(model):
 class AuditMixin:
     created_by = Column(Integer, ForeignKey("account_information.id"), nullable=True)
     updated_by = Column(Integer, ForeignKey("account_information.id"), nullable=True)
+    
