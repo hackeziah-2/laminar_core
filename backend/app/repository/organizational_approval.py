@@ -6,6 +6,7 @@ from sqlalchemy import and_, select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.database import set_audit_fields
 from app.models.organizational_approval import OrganizationalApproval
 from app.models.organizational_approval_history import OrganizationalApprovalHistory
 from app.models.certificate_category_type import CertificateCategoryType
@@ -189,6 +190,8 @@ async def get_existing_organizational_approval(
 async def create_organizational_approval(
     session: AsyncSession,
     data: OrganizationalApprovalCreate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> OrganizationalApprovalRead:
     """Create organizational approval, or snapshot prior state to history and update if one exists for certificate + number."""
     try:
@@ -220,9 +223,14 @@ async def create_organizational_approval(
                 existing.is_withhold = False
                 session.add(existing)
                 obj = existing
+                if audit_account_id is not None:
+                    await set_audit_fields(snapshot, audit_account_id, is_create=True)
+                    await set_audit_fields(existing, audit_account_id, is_create=False)
             else:
                 obj = OrganizationalApproval(**data.dict())
                 session.add(obj)
+                if audit_account_id is not None:
+                    await set_audit_fields(obj, audit_account_id, is_create=True)
     except HTTPException:
         raise
     except Exception as e:
@@ -240,6 +248,8 @@ async def update_organizational_approval(
     session: AsyncSession,
     approval_id: int,
     data: OrganizationalApprovalUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[OrganizationalApprovalRead]:
     """Update organizational approval (no file upload)."""
     result = await session.execute(
@@ -255,6 +265,8 @@ async def update_organizational_approval(
     for k, v in update_data.items():
         setattr(obj, k, v)
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["certificate"])

@@ -4,7 +4,7 @@ from sqlalchemy import Boolean, Column, Integer, String, Date, ForeignKey
 from sqlalchemy.dialects.postgresql import ENUM as PGEnum
 from sqlalchemy.orm import relationship
 
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
 class CategoryTypeEnum(str, enum.Enum):
@@ -21,7 +21,7 @@ class CategoryTypeEnum(str, enum.Enum):
     IBRD_CORPAS = "IBRD_CORPAS"
 
 
-class AircraftStatutoryCertificate(Base, TimestampMixin, SoftDeleteMixin):
+class AircraftStatutoryCertificate(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "aircraft_statutory_certificates"
 
     id = Column(Integer, primary_key=True, index=True)

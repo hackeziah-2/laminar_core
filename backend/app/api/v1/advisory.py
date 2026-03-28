@@ -5,7 +5,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
 from app.repository.advisory import (
     get_advisory_detail,
     list_advisory_items,
@@ -183,6 +185,7 @@ async def put_advisory_expiry(
     expiry: str,
     body: AdvisoryUpdateExpiryBody,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update the expiry date for an advisory item by id.
 
@@ -222,6 +225,7 @@ async def put_advisory_withhold(
     id: int,
     regulatory_compliance: RegulatoryComplianceSource,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Set is_withhold to True for an advisory item by id and regulatory_compliance.
 
@@ -234,6 +238,7 @@ async def put_advisory_withhold(
             session=session,
             regulatory_compliance=regulatory_compliance,
             id=id,
+            audit_account_id=current_account.id,
         )
     except ValueError as e:
         msg = str(e)

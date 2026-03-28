@@ -1,10 +1,10 @@
 from sqlalchemy import Column, Integer, Float, String, Date, ForeignKey
 from sqlalchemy.orm import relationship
 
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
-class ADMonitoring(Base, TimestampMixin, SoftDeleteMixin):
+class ADMonitoring(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     """AD Monitoring (one) -> many WorkOrderADMonitoring. Belongs to one Aircraft via aircraft_fk."""
 
     __tablename__ = "ad_monitoring"
@@ -30,7 +30,7 @@ class ADMonitoring(Base, TimestampMixin, SoftDeleteMixin):
     )
 
 
-class WorkOrderADMonitoring(Base, TimestampMixin, SoftDeleteMixin):
+class WorkOrderADMonitoring(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     """Work order for an AD; belongs to one ADMonitoring via ad_monitoring_fk."""
 
     __tablename__ = "workorder_ad_monitoring"

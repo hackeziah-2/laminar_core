@@ -4,6 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import set_audit_fields
 from app.models.authorization_scope_others import AuthorizationScopeOthers
 from app.schemas.authorization_scope_others_schema import (
     AuthorizationScopeOthersCreate,
@@ -15,6 +16,8 @@ from app.schemas.authorization_scope_others_schema import (
 async def create_authorization_scope_others(
     session: AsyncSession,
     data: AuthorizationScopeOthersCreate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> AuthorizationScopeOthersRead:
     result = await session.execute(
         select(AuthorizationScopeOthers).where(
@@ -29,6 +32,8 @@ async def create_authorization_scope_others(
         )
     obj = AuthorizationScopeOthers(**data.dict())
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=True)
     await session.commit()
     await session.refresh(obj)
     return AuthorizationScopeOthersRead.from_orm(obj)
@@ -53,6 +58,8 @@ async def update_authorization_scope_others(
     session: AsyncSession,
     scope_id: int,
     data: AuthorizationScopeOthersUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[AuthorizationScopeOthersRead]:
     obj = await session.get(AuthorizationScopeOthers, scope_id)
     if not obj or obj.is_deleted:
@@ -74,6 +81,8 @@ async def update_authorization_scope_others(
     for k, v in update_data.items():
         setattr(obj, k, v)
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     return AuthorizationScopeOthersRead.from_orm(obj)

@@ -4,6 +4,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.database import set_audit_fields
 from app.models.oem_technical_publication import (
     OemTechnicalPublication,
     OemTechnicalPublicationCategoryTypeEnum,
@@ -115,6 +116,8 @@ async def get_oem_technical_publication(
 async def create_oem_technical_publication(
     session: AsyncSession,
     data: OemTechnicalPublicationCreate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> OemTechnicalPublicationRead:
     """Create."""
     payload = data.dict()
@@ -127,6 +130,8 @@ async def create_oem_technical_publication(
         payload["category_type"] = raw_cat
     obj = OemTechnicalPublication(**payload)
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=True)
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["item"])
@@ -137,6 +142,8 @@ async def update_oem_technical_publication(
     session: AsyncSession,
     publication_id: int,
     data: OemTechnicalPublicationUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[OemTechnicalPublicationRead]:
     """Update."""
     result = await session.execute(
@@ -156,6 +163,8 @@ async def update_oem_technical_publication(
     for k, v in update_data.items():
         setattr(obj, k, v)
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["item"])

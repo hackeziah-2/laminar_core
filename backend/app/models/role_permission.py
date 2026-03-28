@@ -1,9 +1,9 @@
 from sqlalchemy import Column, Integer, Boolean, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
-class RolePermission(Base, TimestampMixin, SoftDeleteMixin):
+class RolePermission(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "role_permissions"
 
     id = Column(Integer, primary_key=True, index=True)

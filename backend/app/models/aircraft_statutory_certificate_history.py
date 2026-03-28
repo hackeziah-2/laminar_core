@@ -1,11 +1,11 @@
 from sqlalchemy import Column, Integer, String, Date, ForeignKey
 from sqlalchemy.dialects.postgresql import ENUM as PGEnum
 
-from app.database import Base, TimestampMixin
+from app.database import Base, TimestampMixin, AuditMixin
 from app.models.aircraft_statutory_certificate import CategoryTypeEnum
 
 
-class AircraftStatutoryCertificateHistory(Base, TimestampMixin):
+class AircraftStatutoryCertificateHistory(Base, TimestampMixin, AuditMixin):
     __tablename__ = "aircraft_statutory_certificates_history"
 
     id = Column(Integer, primary_key=True, index=True)

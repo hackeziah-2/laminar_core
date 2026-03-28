@@ -1,10 +1,10 @@
 from sqlalchemy import Boolean, Column, Integer, Date, ForeignKey
 from sqlalchemy.orm import relationship
 
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
-class PersonnelAuthorization(Base, TimestampMixin, SoftDeleteMixin):
+class PersonnelAuthorization(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "personnel_authorization"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -44,6 +44,7 @@ class PersonnelAuthorization(Base, TimestampMixin, SoftDeleteMixin):
 
     account_information = relationship(
         "AccountInformation",
+        foreign_keys=[account_information_id],
         back_populates="personnel_authorizations",
     )
     authorization_scope_cessna = relationship(

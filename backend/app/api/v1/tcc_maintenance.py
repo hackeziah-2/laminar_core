@@ -16,7 +16,9 @@ from app.repository.tcc_maintenance import (
     soft_delete_tcc_maintenance_by_aircraft,
 )
 from app.repository.aircraft import get_aircraft
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
 
 router = APIRouter(
     prefix="/api/v1/tcc-maintenance",
@@ -99,9 +101,12 @@ async def api_get_tcc_maintenance(
 async def api_create_tcc_maintenance(
     payload: tcc_maintenance_schema.TCCMaintenanceCreate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new TCC Maintenance entry."""
-    return await create_tcc_maintenance(session, payload)
+    return await create_tcc_maintenance(
+        session, payload, audit_account_id=current_account.id
+    )
 
 
 @router.put(
@@ -114,9 +119,15 @@ async def api_update_tcc_maintenance(
     maintenance_id: int,
     payload: tcc_maintenance_schema.TCCMaintenanceUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update a TCC Maintenance entry."""
-    updated = await update_tcc_maintenance(session, maintenance_id, payload)
+    updated = await update_tcc_maintenance(
+        session,
+        maintenance_id,
+        payload,
+        audit_account_id=current_account.id,
+    )
     if not updated:
         raise HTTPException(
             status_code=404,
@@ -219,6 +230,7 @@ async def api_create_tcc_maintenance_by_aircraft(
     aircraft_id: int,
     payload: tcc_maintenance_schema.TCCMaintenanceCreate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new TCC Maintenance entry for a specific aircraft."""
     aircraft = await get_aircraft(session, aircraft_id)
@@ -228,7 +240,9 @@ async def api_create_tcc_maintenance_by_aircraft(
     data = payload.dict()
     data["aircraft_fk"] = aircraft_id
     create_payload = tcc_maintenance_schema.TCCMaintenanceCreate(**data)
-    return await create_tcc_maintenance(session, create_payload)
+    return await create_tcc_maintenance(
+        session, create_payload, audit_account_id=current_account.id
+    )
 
 
 @router_aircraft_scoped.put(
@@ -242,12 +256,18 @@ async def api_update_tcc_maintenance_by_aircraft(
     maintenance_id: int,
     payload: tcc_maintenance_schema.TCCMaintenanceUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update a TCC Maintenance entry for a specific aircraft. ATL Reference: use /api/v1/aircraft-technical-log/search?search={sequence_no} and set atl_ref to the chosen item id."""
     existing = await get_tcc_maintenance_by_aircraft(session, maintenance_id, aircraft_id)
     if not existing:
         raise HTTPException(status_code=404, detail="TCC Maintenance not found")
-    updated = await update_tcc_maintenance(session, maintenance_id, payload)
+    updated = await update_tcc_maintenance(
+        session,
+        maintenance_id,
+        payload,
+        audit_account_id=current_account.id,
+    )
     if not updated:
         raise HTTPException(status_code=404, detail="TCC Maintenance not found")
     return updated

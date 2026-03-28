@@ -4,7 +4,7 @@ from sqlalchemy import Boolean, Column, Integer, Date, ForeignKey
 from sqlalchemy.dialects.postgresql import ENUM as PGEnum
 from sqlalchemy.orm import relationship
 
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
 class PersonnelComplianceItemType(str, enum.Enum):
@@ -16,7 +16,7 @@ class PersonnelComplianceItemType(str, enum.Enum):
     OTHERS = "OTHERS"
 
 
-class PersonnelCompliance(Base, TimestampMixin, SoftDeleteMixin):
+class PersonnelCompliance(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "personnel_compliance"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -59,6 +59,7 @@ class PersonnelCompliance(Base, TimestampMixin, SoftDeleteMixin):
 
     account_information = relationship(
         "AccountInformation",
+        foreign_keys=[account_information_id],
         back_populates="personnel_compliances",
     )
     authorization_scope_cessna = relationship(

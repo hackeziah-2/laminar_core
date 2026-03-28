@@ -1,5 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database import set_audit_fields
 from app.models.flight import Flight
 from app.schemas.flight_schema import FlightCreate, FlightUpdate
 from typing import List, Optional, Tuple
@@ -7,7 +9,12 @@ from typing import List, Optional, Tuple
 async def get_flight(session: AsyncSession, flight_id: int) -> Optional[Flight]:
     return await session.get(Flight, flight_id)
 
-async def create_flight(session: AsyncSession, flight_in: FlightCreate) -> Flight:
+async def create_flight(
+    session: AsyncSession,
+    flight_in: FlightCreate,
+    *,
+    audit_account_id: Optional[int] = None,
+) -> Flight:
     
     if flight_in.departure_time and flight_in.departure_time.tzinfo is not None:
         flight_in.departure_time = flight_in.departure_time.replace(tzinfo=None)
@@ -17,17 +24,27 @@ async def create_flight(session: AsyncSession, flight_in: FlightCreate) -> Fligh
 
     obj = Flight(**flight_in.dict())
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=True)
     await session.commit()
     await session.refresh(obj)
     return obj
 
-async def update_flight(session: AsyncSession, flight_id: int, flight_in: FlightUpdate) -> Optional[Flight]:
+async def update_flight(
+    session: AsyncSession,
+    flight_id: int,
+    flight_in: FlightUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
+) -> Optional[Flight]:
     obj = await session.get(Flight, flight_id)
     if not obj:
         return None
     for k, v in flight_in.dict(exclude_unset=True).items():
         setattr(obj, k, v)
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     return obj

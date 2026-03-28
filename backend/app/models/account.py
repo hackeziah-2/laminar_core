@@ -1,9 +1,9 @@
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Date
 from sqlalchemy.orm import relationship
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
-class AccountInformation(Base, TimestampMixin, SoftDeleteMixin):
+class AccountInformation(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     """Account Information model for referencing pilots and maintenance personnel."""
     __tablename__ = "account_information"
 
@@ -27,18 +27,25 @@ class AccountInformation(Base, TimestampMixin, SoftDeleteMixin):
     status = Column(Boolean, default=True, nullable=False, comment="True for active, False for inactive")
     last_login = Column(DateTime(timezone=True), nullable=True)
 
-    role = relationship("Role", back_populates="account_informations")
+    role = relationship(
+        "Role",
+        foreign_keys=[role_id],
+        back_populates="account_informations",
+    )
     user_permissions = relationship(
         "UserPermission",
+        foreign_keys="[UserPermission.account_id]",
         back_populates="account_information",
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
     )
     personnel_authorizations = relationship(
         "PersonnelAuthorization",
+        foreign_keys="[PersonnelAuthorization.account_information_id]",
         back_populates="account_information",
     )
     personnel_compliances = relationship(
         "PersonnelCompliance",
+        foreign_keys="[PersonnelCompliance.account_information_id]",
         back_populates="account_information",
     )
 

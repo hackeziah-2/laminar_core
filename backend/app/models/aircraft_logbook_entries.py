@@ -12,10 +12,10 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from app.models.aircraft import Aircraft
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
-class AircraftLogbookEntry(Base, TimestampMixin, SoftDeleteMixin):
+class AircraftLogbookEntry(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "aircraft_logbook_entries"
 
     id = Column(Integer, primary_key=True, index=True)

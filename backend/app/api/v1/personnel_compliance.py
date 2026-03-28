@@ -4,7 +4,9 @@ from typing import Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
 from app.models.personnel_compliance import PersonnelComplianceItemType
 from app.repository.personnel_compliance import (
     create_personnel_compliance,
@@ -126,8 +128,11 @@ async def api_list_paged(
 async def api_create(
     payload: PersonnelComplianceCreate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
-    return await create_personnel_compliance(session, payload)
+    return await create_personnel_compliance(
+        session, payload, audit_account_id=current_account.id
+    )
 
 
 @router.get("/{compliance_id}", response_model=PersonnelComplianceRead)
@@ -149,8 +154,14 @@ async def api_update(
     compliance_id: int = Path(..., ge=1, description="Personnel compliance ID"),
     payload: PersonnelComplianceUpdate = Body(...),
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
-    updated = await update_personnel_compliance(session, compliance_id, payload)
+    updated = await update_personnel_compliance(
+        session,
+        compliance_id,
+        payload,
+        audit_account_id=current_account.id,
+    )
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

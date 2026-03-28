@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.database import set_audit_fields
 from app.models.account import AccountInformation
 from app.models.aircraft import Aircraft
 from app.models.aircraft_statutory_certificate import (
@@ -336,6 +337,8 @@ async def update_advisory_expiry(
     id: int,
     expiry: date,
     web_link: Optional[str] = None,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> None:
     """Update expiry for an advisory item by id and regulatory_compliance.
 
@@ -395,6 +398,8 @@ async def update_advisory_expiry(
             instance.web_link = _normalize_advisory_web_link(web_link)
     else:
         raise ValueError("Invalid regulatory_compliance")
+    if audit_account_id is not None:
+        await set_audit_fields(instance, audit_account_id, is_create=False)
     await session.commit()
 
 
@@ -402,6 +407,8 @@ async def update_advisory_withhold(
     session: AsyncSession,
     regulatory_compliance: RegulatoryComplianceSource,
     id: int,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> None:
     """Set is_withhold=True for an advisory item by id and regulatory_compliance.
 
@@ -445,4 +452,6 @@ async def update_advisory_withhold(
         raise ValueError("Advisory item not found")
 
     instance.is_withhold = True
+    if audit_account_id is not None:
+        await set_audit_fields(instance, audit_account_id, is_create=False)
     await session.commit()

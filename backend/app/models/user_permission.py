@@ -1,9 +1,9 @@
 from sqlalchemy import Column, Integer, Boolean, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
-class UserPermission(Base, TimestampMixin, SoftDeleteMixin):
+class UserPermission(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "user_permissions"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -21,7 +21,8 @@ class UserPermission(Base, TimestampMixin, SoftDeleteMixin):
 
     account_information = relationship(
         "AccountInformation",
-        back_populates="user_permissions"
+        foreign_keys=[account_id],
+        back_populates="user_permissions",
     )
     module = relationship("Module", back_populates="user_permissions")
 

@@ -18,7 +18,9 @@ from app.repository.oem_technical_publication import (
     update_oem_technical_publication,
     soft_delete_oem_technical_publication,
 )
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
 
 router = APIRouter(
     prefix="/api/v1/oem-technical-publications",
@@ -81,9 +83,12 @@ async def api_get(
 async def api_create(
     payload: OemTechnicalPublicationCreate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create an OEM technical publication."""
-    return await create_oem_technical_publication(session, payload)
+    return await create_oem_technical_publication(
+        session, payload, audit_account_id=current_account.id
+    )
 
 
 @router.put("/{publication_id}", response_model=OemTechnicalPublicationRead)
@@ -91,9 +96,15 @@ async def api_update(
     publication_id: int,
     payload: OemTechnicalPublicationUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update an OEM technical publication."""
-    updated = await update_oem_technical_publication(session, publication_id, payload)
+    updated = await update_oem_technical_publication(
+        session,
+        publication_id,
+        payload,
+        audit_account_id=current_account.id,
+    )
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OEM technical publication not found")
     return updated

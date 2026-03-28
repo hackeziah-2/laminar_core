@@ -4,6 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import set_audit_fields
 from app.models.oem_item_type import OemItemType
 from app.schemas.oem_item_type_schema import (
     OemItemTypeCreate,
@@ -15,6 +16,8 @@ from app.schemas.oem_item_type_schema import (
 async def create_oem_item_type(
     session: AsyncSession,
     data: OemItemTypeCreate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> OemItemTypeRead:
     """Create a new OEM Item Type."""
     result = await session.execute(
@@ -30,6 +33,8 @@ async def create_oem_item_type(
         )
     obj = OemItemType(**data.dict())
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=True)
     await session.commit()
     await session.refresh(obj)
     return OemItemTypeRead.from_orm(obj)
@@ -55,6 +60,8 @@ async def update_oem_item_type(
     session: AsyncSession,
     item_type_id: int,
     data: OemItemTypeUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[OemItemTypeRead]:
     """Update an OEM Item Type."""
     obj = await session.get(OemItemType, item_type_id)
@@ -77,6 +84,8 @@ async def update_oem_item_type(
     for k, v in update_data.items():
         setattr(obj, k, v)
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     return OemItemTypeRead.from_orm(obj)

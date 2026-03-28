@@ -4,7 +4,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
 from app.models.aircraft_statutory_certificate import CategoryTypeEnum
 from app.repository.aircraft_statutory_certificate_history import (
     list_aircraft_statutory_certificates_history,
@@ -97,5 +99,8 @@ async def api_get(
 async def api_create(
     body: AircraftStatutoryCertificateHistoryCreate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
-    return await create_aircraft_statutory_certificate_history(session, body)
+    return await create_aircraft_statutory_certificate_history(
+        session, body, audit_account_id=current_account.id
+    )

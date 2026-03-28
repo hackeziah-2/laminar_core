@@ -25,7 +25,9 @@ from app.repository.aircraft_statutory_certificate import (
     update_aircraft_statutory_certificate,
     soft_delete_aircraft_statutory_certificate,
 )
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
 
 router = APIRouter(
     prefix="/api/v1/aircraft-statutory-certificates",
@@ -86,12 +88,18 @@ async def api_create(
     json_data: str = Form(...),
     upload_file: Optional[UploadFile] = File(None, description="Upload file (optional)"),
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new aircraft statutory certificate. Send JSON as 'json_data' and optional file as 'upload_file'."""
     try:
         parsed = json.loads(json_data)
         payload = aircraft_statutory_certificate_schema.AircraftStatutoryCertificateCreate(**parsed)
-        return await create_aircraft_statutory_certificate(session, payload, upload_file)
+        return await create_aircraft_statutory_certificate(
+            session,
+            payload,
+            upload_file,
+            audit_account_id=current_account.id,
+        )
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
     except ValidationError as e:
@@ -114,6 +122,7 @@ async def api_update(
     json_data: str = Form(...),
     upload_file: Optional[UploadFile] = File(None, description="Upload file (optional)"),
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update an aircraft statutory certificate. Send JSON as 'json_data' and optional file as 'upload_file'."""
     try:
@@ -124,6 +133,7 @@ async def api_update(
             cert_id=cert_id,
             data=payload,
             upload_file=upload_file,
+            audit_account_id=current_account.id,
         )
         if not updated:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Certificate not found")
@@ -208,13 +218,19 @@ async def api_create_by_aircraft(
     json_data: str = Form(...),
     upload_file: Optional[UploadFile] = File(None, description="Upload file (optional)"),
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a certificate for a specific aircraft (aircraft_fk is set from path)."""
     try:
         parsed = json.loads(json_data)
         parsed["aircraft_fk"] = aircraft_id
         payload = aircraft_statutory_certificate_schema.AircraftStatutoryCertificateCreate(**parsed)
-        return await create_aircraft_statutory_certificate(session, payload, upload_file)
+        return await create_aircraft_statutory_certificate(
+            session,
+            payload,
+            upload_file,
+            audit_account_id=current_account.id,
+        )
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
     except ValidationError as e:
@@ -238,6 +254,7 @@ async def api_update_by_aircraft(
     json_data: str = Form(...),
     upload_file: Optional[UploadFile] = File(None, description="Upload file (optional)"),
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update a certificate scoped to aircraft."""
     existing = await get_aircraft_statutory_certificate_by_aircraft(session, cert_id, aircraft_id)
@@ -251,6 +268,7 @@ async def api_update_by_aircraft(
             cert_id=cert_id,
             data=payload,
             upload_file=upload_file,
+            audit_account_id=current_account.id,
         )
         return updated
     except json.JSONDecodeError as e:

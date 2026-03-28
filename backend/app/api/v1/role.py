@@ -28,7 +28,9 @@ from app.repository.role import (
     soft_delete_role,
     get_all_roles_list,
 )
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
 
 router = APIRouter(
     prefix="/api/v1/roles",
@@ -137,10 +139,13 @@ async def api_get(
 )
 async def api_create(
     payload: RoleCreate,
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new Role. Optionally include permissions (module, read, write, approve) per module."""
-    role = await create_role(session, payload)
+    role = await create_role(
+        session, payload, audit_account_id=current_account.id
+    )
     role_with_perms = await get_role_with_permissions(session, role.id)
     base = RoleRead.from_orm(role_with_perms)
     return RoleReadWithPermissions(
@@ -154,12 +159,14 @@ async def api_update(
     role_id: int,
     role_in: RoleUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update a Role. Optionally include permissions to replace existing ones."""
     updated = await update_role(
         session=session,
         role_id=role_id,
         role_in=role_in,
+        audit_account_id=current_account.id,
     )
     if not updated:
         raise HTTPException(

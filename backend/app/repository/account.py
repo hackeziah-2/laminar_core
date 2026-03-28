@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import set_audit_fields
 from app.models.account import AccountInformation
 from app.models.role import Role
 from app.schemas.account_schema import (
@@ -17,7 +18,9 @@ from app.core.security import get_password_hash
 
 async def create_account_information(
     session: AsyncSession,
-    data: AccountInformationCreate
+    data: AccountInformationCreate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> AccountInformationRead:
     """Create a new Account Information entry."""
     # Check for duplicate username (excluding soft-deleted)
@@ -78,6 +81,11 @@ async def create_account_information(
     try:
         account = AccountInformation(**account_data)
         session.add(account)
+        if audit_account_id is not None:
+            await set_audit_fields(account, audit_account_id, is_create=True)
+        else:
+            await session.flush()
+            await set_audit_fields(account, account.id, is_create=True)
         await session.commit()
         await session.refresh(account)
     except Exception as e:
@@ -138,7 +146,9 @@ async def get_account_information_by_auth_stamp(
 async def update_account_information(
     session: AsyncSession,
     account_id: int,
-    account_in: AccountInformationUpdate
+    account_in: AccountInformationUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[AccountInformationRead]:
     """Update an Account Information entry."""
     obj = await session.get(AccountInformation, account_id)
@@ -205,6 +215,8 @@ async def update_account_information(
 
     try:
         session.add(obj)
+        if audit_account_id is not None:
+            await set_audit_fields(obj, audit_account_id, is_create=False)
         await session.commit()
         await session.refresh(obj)
     except Exception as e:

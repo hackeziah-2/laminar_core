@@ -6,6 +6,7 @@ from sqlalchemy import select, or_, cast, String, Integer, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 
+from app.database import set_audit_fields
 from app.models.aircraft_techinical_log import (
     AircraftTechnicalLog,
     ComponentPartsRecord,
@@ -50,7 +51,9 @@ def generate_range(start_id: str, end_id: str) -> list[str]:
 
 async def create_aircraft_technical_log(
     session: AsyncSession,
-    data: AircraftTechnicalLogCreate
+    data: AircraftTechnicalLogCreate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> AircraftTechnicalLogRead:
     """Create a new Aircraft Technical Log entry with optional gap-fill (skipped when first ATL for aircraft). Sequence numbers stored as number only (e.g. 001)."""
 
@@ -135,6 +138,8 @@ async def create_aircraft_technical_log(
                 gap_entry = AircraftTechnicalLog(sequence_no=seq_no, aircraft_fk=data.aircraft_fk)
                 session.add(gap_entry)
                 await session.flush()
+                if audit_account_id is not None:
+                    await set_audit_fields(gap_entry, audit_account_id, is_create=True)
 
     # Create component parts if provided
     if data.component_parts:
@@ -144,6 +149,11 @@ async def create_aircraft_technical_log(
                 **part_data.dict()
             )
             session.add(part)
+            if audit_account_id is not None:
+                await set_audit_fields(part, audit_account_id, is_create=True)
+
+    if audit_account_id is not None:
+        await set_audit_fields(entry, audit_account_id, is_create=True)
 
     await session.commit()
     await session.refresh(entry)
@@ -209,7 +219,9 @@ async def get_aircraft_technical_log(
 async def update_aircraft_technical_log(
     session: AsyncSession,
     log_id: int,
-    log_in: AircraftTechnicalLogUpdate
+    log_in: AircraftTechnicalLogUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[AircraftTechnicalLogRead]:
     """Update an Aircraft Technical Log entry."""
     obj = await session.get(AircraftTechnicalLog, log_id)
@@ -264,8 +276,12 @@ async def update_aircraft_technical_log(
                 **part_data.dict()
             )
             session.add(part)
+            if audit_account_id is not None:
+                await set_audit_fields(part, audit_account_id, is_create=True)
 
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ['aircraft', 'component_parts'])

@@ -1,9 +1,9 @@
 from sqlalchemy import Column, Integer, String
 from sqlalchemy.orm import relationship
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
-class Module(Base, TimestampMixin, SoftDeleteMixin):
+class Module(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "modules"
 
     id = Column(Integer, primary_key=True, index=True)

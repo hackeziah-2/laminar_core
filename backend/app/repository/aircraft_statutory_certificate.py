@@ -7,6 +7,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.database import set_audit_fields
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 from app.models.aircraft_statutory_certificate import (
     AircraftStatutoryCertificate,
@@ -153,6 +154,8 @@ async def create_aircraft_statutory_certificate(
     session: AsyncSession,
     data: AircraftStatutoryCertificateCreate,
     upload_file: Optional[UploadFile] = None,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> AircraftStatutoryCertificateRead:
     """Create a new certificate, or update expiry, web link, and clear withhold if one exists for aircraft + type."""
     
@@ -182,11 +185,15 @@ async def create_aircraft_statutory_certificate(
             date_of_expiration=result.date_of_expiration,
             web_link=result.web_link,
         )
-        await create_aircraft_statutory_certificate_history(session, history_payload)
+        await create_aircraft_statutory_certificate_history(
+            session, history_payload, audit_account_id=audit_account_id
+        )
         result.date_of_expiration = data.date_of_expiration
         result.web_link = data.web_link
         result.is_withhold = False
         session.add(result)
+        if audit_account_id is not None:
+            await set_audit_fields(result, audit_account_id, is_create=False)
         try:
             await session.commit()
             await session.refresh(result)
@@ -203,6 +210,8 @@ async def create_aircraft_statutory_certificate(
     try:
         obj = AircraftStatutoryCertificate(**cert_data)
         session.add(obj)
+        if audit_account_id is not None:
+            await set_audit_fields(obj, audit_account_id, is_create=True)
         await session.commit()
         await session.refresh(obj)
         await session.refresh(obj, ["aircraft"])
@@ -217,6 +226,8 @@ async def update_aircraft_statutory_certificate(
     cert_id: int,
     data: AircraftStatutoryCertificateUpdate,
     upload_file: Optional[UploadFile] = None,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[AircraftStatutoryCertificateRead]:
     """Update a certificate; optional file upload replaces file_path."""
     result = await session.execute(
@@ -235,6 +246,8 @@ async def update_aircraft_statutory_certificate(
     for k, v in update_data.items():
         setattr(obj, k, v)
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["aircraft"])

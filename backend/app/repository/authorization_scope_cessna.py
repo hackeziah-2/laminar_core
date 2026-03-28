@@ -4,6 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import set_audit_fields
 from app.models.authorization_scope_cessna import AuthorizationScopeCessna
 from app.schemas.authorization_scope_cessna_schema import (
     AuthorizationScopeCessnaCreate,
@@ -15,6 +16,8 @@ from app.schemas.authorization_scope_cessna_schema import (
 async def create_authorization_scope_cessna(
     session: AsyncSession,
     data: AuthorizationScopeCessnaCreate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> AuthorizationScopeCessnaRead:
     result = await session.execute(
         select(AuthorizationScopeCessna).where(
@@ -29,6 +32,8 @@ async def create_authorization_scope_cessna(
         )
     obj = AuthorizationScopeCessna(**data.dict())
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=True)
     await session.commit()
     await session.refresh(obj)
     return AuthorizationScopeCessnaRead.from_orm(obj)
@@ -53,6 +58,8 @@ async def update_authorization_scope_cessna(
     session: AsyncSession,
     scope_id: int,
     data: AuthorizationScopeCessnaUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[AuthorizationScopeCessnaRead]:
     obj = await session.get(AuthorizationScopeCessna, scope_id)
     if not obj or obj.is_deleted:
@@ -74,6 +81,8 @@ async def update_authorization_scope_cessna(
     for k, v in update_data.items():
         setattr(obj, k, v)
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     return AuthorizationScopeCessnaRead.from_orm(obj)

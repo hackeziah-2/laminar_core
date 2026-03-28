@@ -5,6 +5,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.database import set_audit_fields
 from app.models.account import AccountInformation
 from app.models.personnel_compliance import PersonnelCompliance, PersonnelComplianceItemType
 from app.schemas.personnel_compliance_schema import (
@@ -215,10 +216,14 @@ async def get_personnel_compliance(
 async def create_personnel_compliance(
     session: AsyncSession,
     data: PersonnelComplianceCreate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> PersonnelComplianceRead:
     await validate_personnel_compliance_duplicate(session, data)
     obj = PersonnelCompliance(**data.dict())
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=True)
     await session.commit()
     await session.refresh(obj)
     result = await session.execute(
@@ -240,6 +245,8 @@ async def update_personnel_compliance(
     session: AsyncSession,
     compliance_id: int,
     data: PersonnelComplianceUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[PersonnelComplianceRead]:
     result = await session.execute(
         select(PersonnelCompliance)
@@ -263,6 +270,8 @@ async def update_personnel_compliance(
             continue
         setattr(obj, k, v)
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     await session.refresh(

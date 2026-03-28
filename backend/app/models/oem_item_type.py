@@ -1,10 +1,10 @@
 from sqlalchemy import Column, Integer, Text
 from sqlalchemy.orm import relationship
 
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
-class OemItemType(Base, TimestampMixin, SoftDeleteMixin):
+class OemItemType(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "oem_item_types"
 
     id = Column(Integer, primary_key=True, index=True)

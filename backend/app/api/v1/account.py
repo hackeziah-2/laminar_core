@@ -26,7 +26,9 @@ from app.repository.account import (
     soft_delete_account_information,
     get_all_account_informations_list,
 )
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
 
 router = APIRouter(
     prefix="/api/v1/account-information",
@@ -131,10 +133,15 @@ async def api_get(
 )
 async def api_create(
     payload: account_schema.AccountInformationCreate,
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new Account Information entry."""
-    return await create_account_information(session, payload)
+    return await create_account_information(
+        session,
+        payload,
+        audit_account_id=current_account.id,
+    )
 
 
 @router.put(
@@ -145,12 +152,14 @@ async def api_update(
     account_id: int,
     account_in: account_schema.AccountInformationUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update an Account Information entry."""
     updated = await update_account_information(
         session=session,
         account_id=account_id,
         account_in=account_in,
+        audit_account_id=current_account.id,
     )
 
     if not updated:

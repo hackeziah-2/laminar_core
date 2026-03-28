@@ -18,7 +18,9 @@ from app.repository.authorization_scope_others import (
     soft_delete_authorization_scope_others,
     get_all_authorization_scope_others_list,
 )
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
 
 router = APIRouter(
     prefix="/api/v1/authorization-scope-others",
@@ -82,9 +84,12 @@ async def api_get(
 async def api_create(
     payload: AuthorizationScopeOthersCreate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new Authorization Scope (Others)."""
-    return await create_authorization_scope_others(session, payload)
+    return await create_authorization_scope_others(
+        session, payload, audit_account_id=current_account.id
+    )
 
 
 @router.put("/{scope_id}", response_model=AuthorizationScopeOthersRead)
@@ -92,9 +97,15 @@ async def api_update(
     scope_id: int,
     payload: AuthorizationScopeOthersUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update an Authorization Scope (Others)."""
-    updated = await update_authorization_scope_others(session, scope_id, payload)
+    updated = await update_authorization_scope_others(
+        session,
+        scope_id,
+        payload,
+        audit_account_id=current_account.id,
+    )
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

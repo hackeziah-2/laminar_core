@@ -3,6 +3,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import set_audit_fields
 from app.models.organizational_approval_history import OrganizationalApprovalHistory
 from app.schemas.organizational_approval_history_schema import (
     OrganizationalApprovalHistoryCreate,
@@ -67,6 +68,8 @@ async def get_organizational_approval_history(
 async def create_organizational_approval_history(
     session: AsyncSession,
     data: OrganizationalApprovalHistoryCreate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> OrganizationalApprovalHistoryRead:
     payload = data.dict()
     if payload.get("oa_history") is None:
@@ -84,6 +87,8 @@ async def create_organizational_approval_history(
             payload["oa_history"] = approval_id
     obj = OrganizationalApprovalHistory(**payload)
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=True)
     await session.commit()
     await session.refresh(obj)
     return OrganizationalApprovalHistoryRead.from_orm(obj)

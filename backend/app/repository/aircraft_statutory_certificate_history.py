@@ -3,6 +3,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import set_audit_fields
 from app.models.aircraft_statutory_certificate import CategoryTypeEnum
 from app.models.aircraft_statutory_certificate_history import AircraftStatutoryCertificateHistory
 from app.schemas.aircraft_statutory_certificate_history_schema import (
@@ -74,6 +75,8 @@ async def get_aircraft_statutory_certificate_history(
 async def create_aircraft_statutory_certificate_history(
     session: AsyncSession,
     data: AircraftStatutoryCertificateHistoryCreate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> AircraftStatutoryCertificateHistoryRead:
     payload = data.dict()
     # asc_history = aircraft_statutory_certificates.id
@@ -87,6 +90,8 @@ async def create_aircraft_statutory_certificate_history(
             payload["asc_history"] = cert.id
     obj = AircraftStatutoryCertificateHistory(**payload)
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=True)
     await session.commit()
     await session.refresh(obj)
     return AircraftStatutoryCertificateHistoryRead.from_orm(obj)

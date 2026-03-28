@@ -1,10 +1,10 @@
 from sqlalchemy import Boolean, Column, Integer, String, Date, ForeignKey, Text
 from sqlalchemy.orm import relationship
 
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
-class OrganizationalApproval(Base, TimestampMixin, SoftDeleteMixin):
+class OrganizationalApproval(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "organizational_approvals"
 
     id = Column(Integer, primary_key=True, index=True)

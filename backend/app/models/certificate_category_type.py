@@ -1,10 +1,10 @@
 from sqlalchemy import Column, Integer, Text
 from sqlalchemy.orm import relationship
 
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
-class CertificateCategoryType(Base, TimestampMixin, SoftDeleteMixin):
+class CertificateCategoryType(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "certificate_category_types"
 
     id = Column(Integer, primary_key=True, index=True)

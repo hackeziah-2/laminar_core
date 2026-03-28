@@ -4,7 +4,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
 from app.repository.organizational_approval_history import (
     list_organizational_approvals_history,
     get_organizational_approval_history,
@@ -95,5 +97,8 @@ async def api_get(
 async def api_create(
     body: OrganizationalApprovalHistoryCreate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
-    return await create_organizational_approval_history(session, body)
+    return await create_organizational_approval_history(
+        session, body, audit_account_id=current_account.id
+    )

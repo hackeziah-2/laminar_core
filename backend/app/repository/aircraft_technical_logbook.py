@@ -7,6 +7,7 @@ from sqlalchemy.sql import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.database import set_audit_fields
 from app.models.aircraft_logbook_entries import AircraftLogbookEntry
 from app.schemas.aircraft_technical_logbook import (
     AircraftLogbookEntryCreate,
@@ -16,9 +17,11 @@ from app.schemas.aircraft_technical_logbook import (
 
 
 async def create_logbook_entry(
-    session:AsyncSession,
-    data:AircraftLogbookEntryCreate
-    ) ->AircraftLogbookEntryRead:
+    session: AsyncSession,
+    data: AircraftLogbookEntryCreate,
+    *,
+    audit_account_id: Optional[int] = None,
+) -> AircraftLogbookEntryRead:
 
     # Check duplicate sequence_no first
     result = await session.execute(
@@ -37,6 +40,8 @@ async def create_logbook_entry(
     # Create + persist
     entry = AircraftLogbookEntry(**data.dict())
     session.add(entry)
+    if audit_account_id is not None:
+        await set_audit_fields(entry, audit_account_id, is_create=True)
 
     await session.commit()
     await session.refresh(entry)
@@ -53,13 +58,21 @@ async def get_logbook_entry(session: AsyncSession, id: int):
     return result.scalar_one_or_none()
 
 
-async def update_logbook_entry(session: AsyncSession, logbook_entry_id: int, logbook_entry_in: AircraftLogbookEntryUpdate) -> Optional[AircraftLogbookEntryRead]:
+async def update_logbook_entry(
+    session: AsyncSession,
+    logbook_entry_id: int,
+    logbook_entry_in: AircraftLogbookEntryUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
+) -> Optional[AircraftLogbookEntryRead]:
     obj = await session.get(AircraftLogbookEntry, logbook_entry_id)
     if not obj:
         return None
     for k, v in logbook_entry_in.dict(exclude_unset=True).items():
         setattr(obj, k, v)
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     return obj
