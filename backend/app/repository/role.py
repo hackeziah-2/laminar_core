@@ -55,7 +55,10 @@ async def create_role(
             role_id=role.id,
             module_id=module.id,
             can_read=perm.read,
-            can_write=perm.write,
+            can_write=perm.create or perm.update or perm.delete,
+            can_create=perm.create,
+            can_update=perm.update,
+            can_delete=perm.delete,
             can_approve=perm.approve,
         )
         session.add(rp)
@@ -154,16 +157,28 @@ async def update_role(
             if rp:
                 rp.is_deleted = False
                 rp.can_read = perm.get("read", False)
-                rp.can_write = perm.get("write", False)
+                c = perm.get("create", False)
+                u = perm.get("update", False)
+                d = perm.get("delete", False)
+                rp.can_create = c
+                rp.can_update = u
+                rp.can_delete = d
+                rp.can_write = c or u or d
                 rp.can_approve = perm.get("approve", False)
                 session.add(rp)
             else:
+                c = perm.get("create", False)
+                u = perm.get("update", False)
+                d = perm.get("delete", False)
                 session.add(
                     RolePermission(
                         role_id=role_id,
                         module_id=module.id,
                         can_read=perm.get("read", False),
-                        can_write=perm.get("write", False),
+                        can_write=c or u or d,
+                        can_create=c,
+                        can_update=u,
+                        can_delete=d,
                         can_approve=perm.get("approve", False),
                     )
                 )

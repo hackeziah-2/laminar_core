@@ -91,7 +91,9 @@ def _role_permissions_list(role) -> List[RolePermissionItem]:
             RolePermissionItem(
                 module=module.name,
                 read=getattr(rp, "can_read", False),
-                write=getattr(rp, "can_write", False),
+                create=getattr(rp, "can_create", False),
+                update=getattr(rp, "can_update", False),
+                delete=getattr(rp, "can_delete", False),
                 approve=getattr(rp, "can_approve", False),
             )
         )
@@ -103,7 +105,7 @@ async def api_get_role_permissions(
     role_id: int,
     session: AsyncSession = Depends(get_session),
 ):
-    """Get permissions array for a role (module, read, write, approve)."""
+    """Get permissions array for a role (module, read, create, update, delete, approve)."""
     role = await get_role_with_permissions(session, role_id)
     if not role:
         raise HTTPException(
@@ -142,7 +144,7 @@ async def api_create(
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
 ):
-    """Create a new Role. Optionally include permissions (module, read, write, approve) per module."""
+    """Create a new Role. Optionally include permissions (module, read, create, update, delete, approve) per module."""
     role = await create_role(
         session, payload, audit_account_id=current_account.id
     )

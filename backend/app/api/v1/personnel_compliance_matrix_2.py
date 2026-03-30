@@ -4,7 +4,10 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import require_permission
 from app.database import get_session
+from app.models.account import AccountInformation
+from app.models.personnel_compliance import PERSONNEL_COMPLIANCE_MODULE_NAME
 from app.repository.personnel_compliance_matrix_2 import (
     list_personnel_compliance_matrix_2_paged,
 )
@@ -44,6 +47,9 @@ async def api_matrix_2_paged(
         description="Filter by account designation (position).",
     ),
     session: AsyncSession = Depends(get_session),
+    _: AccountInformation = Depends(
+        require_permission(PERSONNEL_COMPLIANCE_MODULE_NAME, "can_read")
+    ),
 ):
     offset = (page - 1) * limit
     rows, total, compliance_by_account = await list_personnel_compliance_matrix_2_paged(

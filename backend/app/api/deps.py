@@ -51,8 +51,8 @@ async def get_current_active_account(
 def require_permission(module_name: str, action: str):
     """
     Dependency factory: require account to have permission on module.
-    action: 'can_read', 'can_write', 'can_approve'
-    Use: Depends(require_permission("account-information", "can_write"))
+    action: 'can_read', 'can_write', 'can_create', 'can_update', 'can_delete', 'can_approve'
+    Use: Depends(require_permission("account-information", "can_update"))
     """
     from sqlalchemy import select
 

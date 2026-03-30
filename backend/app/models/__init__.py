@@ -34,5 +34,9 @@ from .authorization_scope_cessna import AuthorizationScopeCessna
 from .authorization_scope_baron import AuthorizationScopeBaron
 from .authorization_scope_others import AuthorizationScopeOthers
 from .personnel_authorization import PersonnelAuthorization
-from .personnel_compliance import PersonnelCompliance, PersonnelComplianceItemType
+from .personnel_compliance import (
+    PERSONNEL_COMPLIANCE_MODULE_NAME,
+    PersonnelCompliance,
+    PersonnelComplianceItemType,
+)
 

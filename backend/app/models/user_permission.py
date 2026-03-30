@@ -17,6 +17,9 @@ class UserPermission(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
 
     can_read = Column(Boolean, default=False)
     can_write = Column(Boolean, default=False)
+    can_create = Column(Boolean, default=False)
+    can_update = Column(Boolean, default=False)
+    can_delete = Column(Boolean, default=False)
     can_approve = Column(Boolean, default=False)
 
     account_information = relationship(

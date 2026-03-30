@@ -1,14 +1,28 @@
 from datetime import datetime
-from typing import Optional, List
-from pydantic import BaseModel, Field
+from typing import Optional, List, Any
+from pydantic import BaseModel, Field, root_validator
 
 
 class RolePermissionItem(BaseModel):
-    """Permission for a single module (read/write/approve)."""
+    """Permission for a single module (read, create, update, delete; optional approve)."""
     module: str = Field(..., description="Module name (e.g. Dashboard, General Information)")
-    read: bool = False
-    write: bool = False
-    approve: bool = False
+    read: bool = Field(False, description="View / list / get")
+    create: bool = Field(False, description="Create new records")
+    update: bool = Field(False, description="Update existing records")
+    delete: bool = Field(False, description="Delete records")
+    approve: bool = Field(False, description="Approval workflows where applicable")
+
+    @root_validator(pre=True)
+    def _legacy_write_flag(cls, values: Any) -> Any:
+        if not isinstance(values, dict):
+            return values
+        write = values.get("write", None)
+        has_cud = any(k in values for k in ("create", "update", "delete"))
+        if write is not None and not has_cud:
+            bv = bool(write)
+            values = {**values, "create": bv, "update": bv, "delete": bv}
+        values.pop("write", None)
+        return values
 
 
 class RoleBase(BaseModel):
@@ -21,7 +35,7 @@ class RoleCreate(RoleBase):
     """Schema for creating Role."""
     permissions: Optional[List[RolePermissionItem]] = Field(
         default_factory=list,
-        description="Optional permissions per module (read, write, approve).",
+        description="Optional permissions per module (read, create, update, delete, approve).",
     )
 
 
@@ -31,7 +45,7 @@ class RoleUpdate(BaseModel):
     description: Optional[str] = None
     permissions: Optional[List[RolePermissionItem]] = Field(
         None,
-        description="Optional: replace role permissions (module, read, write, approve).",
+        description="Optional: replace role permissions (module, read, create, update, delete, approve).",
     )
 
 
