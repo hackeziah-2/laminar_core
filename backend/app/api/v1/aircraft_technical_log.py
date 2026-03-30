@@ -29,9 +29,14 @@ from app.repository.aircraft_technical_log import (
     get_previous_atl,
 )
 from app.api.deps import get_current_active_account
+from app.core.atl_paged_rbac import (
+    allowed_work_statuses_for_atl_paged_list,
+    atl_paged_list_skips_work_status_rbac,
+)
 from app.database import get_session
 from app.models.account import AccountInformation
 from app.models.aircraft_techinical_log import WorkStatus
+from app.models.role import Role
 
 
 def _sanitize_filename(name: str) -> str:
@@ -176,20 +181,32 @@ async def api_list_paged(
         description=(
             "Filter by work status (e.g. work_status=APPROVED). "
             "Values: FOR_REVIEW, REJECTED_MAINTENANCE, APPROVED, AWAITING_ATTACHMENT, "
-            "REJECTED_QUALITY, PENDING, COMPLETED. Omit for no filter."
+            "REJECTED_QUALITY, PENDING, COMPLETED. Omit for no filter. "
+            "Non-Admin: restricted to statuses allowed for your role (intersection). "
+            "Admin: all statuses; optional work_status still narrows the list when provided."
         ),
     ),
     sort: Optional[str] = Query(
         "",
         description="Example: -created_at,sequence_no"
     ),
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Get paginated list of Aircraft Technical Log entries with auto_* computed fields.
     Previous values are from the last ATL by sequence_no (same aircraft).
     Auto fields: airframe/engine/propeller run time, AFTT, TSN, TSO, TBO (2 decimal places).
-    Optional query filter: work_status (e.g. APPROVED).
+    RBAC: work_status visibility by role; Admin sees all ATL rows. Unknown or unmapped roles see no rows.
+    Optional work_status query param further narrows results (within RBAC when applicable).
     """
+    role_name = None
+    if current_account.role_id:
+        role = await session.get(Role, current_account.role_id)
+        if role and not role.is_deleted:
+            role_name = role.name
+    skip_work_status_rbac = atl_paged_list_skips_work_status_rbac(role_name)
+    allowed_statuses = allowed_work_statuses_for_atl_paged_list(role_name)
+
     offset = (page - 1) * limit
     items, total = await list_aircraft_technical_logs(
         session=session,
@@ -199,6 +216,8 @@ async def api_list_paged(
         aircraft_fk=aircraft_fk,
         work_status=work_status,
         sort=sort,
+        allowed_work_statuses=allowed_statuses,
+        skip_work_status_rbac=skip_work_status_rbac,
     )
     pages = ceil(total / limit) if total else 0
 

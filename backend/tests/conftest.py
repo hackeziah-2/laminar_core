@@ -86,6 +86,37 @@ def client() -> TestClient:
 
 
 @pytest.fixture(scope="function")
+def client_with_atl_auth(client: TestClient):
+    """JWT not required: stubs get_current_active_account with Maintenance Manager (sees FOR_REVIEW/APPROVED on ATL paged)."""
+    import asyncio
+
+    from app.api.deps import get_current_active_account
+    from app.models.role import Role
+
+    async def _seed_maintenance_manager_role() -> int:
+        async with TestSessionLocal() as session:
+            r = Role(name="Maintenance Manager", description="ATL RBAC test")
+            session.add(r)
+            await session.commit()
+            await session.refresh(r)
+            return r.id
+
+    mm_role_id = asyncio.run(_seed_maintenance_manager_role())
+
+    class _Stub:
+        id = 999
+        role_id = mm_role_id
+        status = True
+
+    async def _override_account():
+        return _Stub()
+
+    app.dependency_overrides[get_current_active_account] = _override_account
+    yield client
+    app.dependency_overrides.pop(get_current_active_account, None)
+
+
+@pytest.fixture(scope="function")
 def test_aircraft_data():
     """Sample aircraft data for testing."""
     return {

@@ -1,8 +1,8 @@
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Sequence
 from datetime import date, time
 
 from fastapi import HTTPException
-from sqlalchemy import select, or_, cast, String, Integer, func
+from sqlalchemy import select, or_, cast, String, Integer, func, false
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 
@@ -85,7 +85,7 @@ async def create_aircraft_technical_log(
     else:
         log_data['nature_of_flight'] = None  # ensure NULL when empty/omitted
 
-    # work_status: apply from payload or leave unset so DB default (FOR_REVIEW) applies
+    # work_status: explicit FOR_REVIEW when omitted (matches intended lifecycle; avoids NULL so RBAC/list filters apply)
     ws = log_data.get('work_status')
     if ws is not None:
         if isinstance(ws, str):
@@ -93,7 +93,7 @@ async def create_aircraft_technical_log(
         else:
             log_data['work_status'] = ws
     else:
-        log_data.pop('work_status', None)  # use DB default
+        log_data['work_status'] = WorkStatus.FOR_REVIEW
 
     # Get latest ATL for this aircraft (for hobbs/tach and for gap detection)
     latest_stmt = (
@@ -380,8 +380,15 @@ async def list_aircraft_technical_logs(
     aircraft_fk: Optional[int] = None,
     work_status: Optional[WorkStatus] = None,
     sort: Optional[str] = "",
+    allowed_work_statuses: Sequence[WorkStatus] = (),
+    skip_work_status_rbac: bool = False,
 ) -> Tuple[List[AircraftTechnicalLog], int]:
-    """List Aircraft Technical Log entries with pagination."""
+    """List Aircraft Technical Log entries with pagination.
+    allowed_work_statuses: RBAC filter; only rows whose work_status is in this set are returned.
+    If empty, no rows are returned (unless skip_work_status_rbac). Optional work_status query filter
+    is intersected with RBAC when RBAC applies. When skip_work_status_rbac is True (Admin), no
+    work_status RBAC filter; optional work_status query still applies if set.
+    """
     stmt = (
         select(AircraftTechnicalLog)
         .options(
@@ -395,8 +402,18 @@ async def list_aircraft_technical_logs(
     if aircraft_fk:
         stmt = stmt.where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
 
-    if work_status is not None:
-        stmt = stmt.where(AircraftTechnicalLog.work_status == work_status)
+    if skip_work_status_rbac:
+        if work_status is not None:
+            stmt = stmt.where(AircraftTechnicalLog.work_status == work_status)
+    elif not allowed_work_statuses:
+        stmt = stmt.where(false())
+    elif work_status is not None:
+        if work_status not in allowed_work_statuses:
+            stmt = stmt.where(false())
+        else:
+            stmt = stmt.where(AircraftTechnicalLog.work_status == work_status)
+    else:
+        stmt = stmt.where(AircraftTechnicalLog.work_status.in_(list(allowed_work_statuses)))
 
     # Search functionality; sequence_no stored as number only, so strip ATL- from search for that field
     if search:
@@ -470,9 +487,23 @@ async def list_aircraft_technical_logs(
             AircraftTechnicalLog.aircraft_fk == aircraft_fk
         )
 
-    if work_status is not None:
+    if skip_work_status_rbac:
+        if work_status is not None:
+            count_stmt = count_stmt.where(
+                AircraftTechnicalLog.work_status == work_status
+            )
+    elif not allowed_work_statuses:
+        count_stmt = count_stmt.where(false())
+    elif work_status is not None:
+        if work_status not in allowed_work_statuses:
+            count_stmt = count_stmt.where(false())
+        else:
+            count_stmt = count_stmt.where(
+                AircraftTechnicalLog.work_status == work_status
+            )
+    else:
         count_stmt = count_stmt.where(
-            AircraftTechnicalLog.work_status == work_status
+            AircraftTechnicalLog.work_status.in_(list(allowed_work_statuses))
         )
 
     if search:
