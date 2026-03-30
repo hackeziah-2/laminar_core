@@ -1,6 +1,6 @@
 """Authentication API using AccountInformation."""
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
@@ -13,7 +13,6 @@ from app.core.security import create_access_token, _truncate_password
 from app.models.account import AccountInformation
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -94,6 +93,7 @@ async def register(
 
 
 @router.get("/me", response_model=AccountMe)
+@router.get("/me/", response_model=AccountMe)
 async def me(
     account: AccountInformation = Depends(get_current_account),
 ):

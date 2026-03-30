@@ -1,7 +1,7 @@
 """Schemas for authentication API."""
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, root_validator
 
 
 class Token(BaseModel):
@@ -29,6 +29,7 @@ class AccountMe(BaseModel):
     first_name: str
     last_name: str
     middle_name: Optional[str] = None
+    full_name: str = ""
     role_id: Optional[int] = None
     status: bool
     last_login: Optional[datetime] = None
@@ -36,3 +37,10 @@ class AccountMe(BaseModel):
 
     class Config:
         orm_mode = True
+
+    @root_validator
+    def set_full_name(cls, values):
+        fn = (values.get("first_name") or "") or ""
+        ln = (values.get("last_name") or "") or ""
+        values["full_name"] = f"{fn} {ln}".strip()
+        return values

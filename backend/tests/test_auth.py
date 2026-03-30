@@ -6,9 +6,11 @@ from fastapi.testclient import TestClient
 def test_register_user(client: TestClient):
     """Test user registration."""
     user_data = {
+        "first_name": "Test",
+        "last_name": "User",
+        "username": "test_register_user",
         "email": "test@example.com",
         "password": "testpassword123",
-        "full_name": "Test User"
     }
     response = client.post("/api/v1/auth/register", json=user_data)
     # Should succeed (201) or fail if user exists (400)
@@ -19,9 +21,11 @@ def test_login_user(client: TestClient):
     """Test user login/token generation."""
     # First register a user
     user_data = {
+        "first_name": "Login",
+        "last_name": "User",
+        "username": "login_user_1",
         "email": "login@example.com",
         "password": "testpassword123",
-        "full_name": "Login User"
     }
     client.post("/api/v1/auth/register", json=user_data)
 
@@ -35,3 +39,36 @@ def test_login_user(client: TestClient):
     assert response.status_code in [200, 401]
     if response.status_code == 200:
         assert "access_token" in response.json()
+
+
+def test_me_requires_valid_token(client: TestClient):
+    """GET /api/v1/auth/me returns 401 without Bearer token."""
+    r = client.get("/api/v1/auth/me")
+    assert r.status_code == 401
+
+
+def test_me_returns_profile_with_full_name(client: TestClient):
+    """GET /api/v1/auth/me returns account and full_name when authorized."""
+    user_data = {
+        "first_name": "Jane",
+        "last_name": "Pilot",
+        "username": "me_endpoint_user",
+        "email": "me@example.com",
+        "password": "testpassword123",
+    }
+    reg = client.post("/api/v1/auth/register", json=user_data)
+    assert reg.status_code == 201, reg.text
+    tok = client.post(
+        "/api/v1/auth/token",
+        data={"username": "me_endpoint_user", "password": "testpassword123"},
+    )
+    assert tok.status_code == 200
+    access = tok.json()["access_token"]
+    r = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {access}"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["username"] == "me_endpoint_user"
+    assert body["full_name"] == "Jane Pilot"

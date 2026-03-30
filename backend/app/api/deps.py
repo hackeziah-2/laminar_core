@@ -22,12 +22,19 @@ async def get_current_account(
             detail="Invalid authentication credentials",
         )
     account_id = payload.get("sub")
-    if not account_id:
+    if account_id is None or account_id == "":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token payload",
         )
-    account = await get_account_by_id(session, int(account_id))
+    try:
+        account_pk = int(account_id)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+        )
+    account = await get_account_by_id(session, account_pk)
     if not account:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
