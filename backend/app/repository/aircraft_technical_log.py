@@ -378,6 +378,7 @@ async def list_aircraft_technical_logs(
     offset: int = 0,
     search: Optional[str] = None,
     aircraft_fk: Optional[int] = None,
+    work_status: Optional[WorkStatus] = None,
     sort: Optional[str] = "",
 ) -> Tuple[List[AircraftTechnicalLog], int]:
     """List Aircraft Technical Log entries with pagination."""
@@ -393,6 +394,9 @@ async def list_aircraft_technical_logs(
     # Filter by aircraft
     if aircraft_fk:
         stmt = stmt.where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
+
+    if work_status is not None:
+        stmt = stmt.where(AircraftTechnicalLog.work_status == work_status)
 
     # Search functionality; sequence_no stored as number only, so strip ATL- from search for that field
     if search:
@@ -464,6 +468,11 @@ async def list_aircraft_technical_logs(
     if aircraft_fk:
         count_stmt = count_stmt.where(
             AircraftTechnicalLog.aircraft_fk == aircraft_fk
+        )
+
+    if work_status is not None:
+        count_stmt = count_stmt.where(
+            AircraftTechnicalLog.work_status == work_status
         )
 
     if search:

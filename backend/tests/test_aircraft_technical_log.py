@@ -57,6 +57,38 @@ def test_list_aircraft_technical_logs_with_search(
     assert data["total"] >= 1
 
 
+def test_list_aircraft_technical_logs_filter_work_status(
+    client: TestClient,
+    test_aircraft_technical_log_data: dict,
+):
+    """Paged list filters by work_status (e.g. APPROVED)."""
+    create_response = client.post(
+        "/api/v1/aircraft-technical-log/",
+        json=test_aircraft_technical_log_data,
+    )
+    assert create_response.status_code == 201
+    log_id = create_response.json()["id"]
+
+    approved = client.get(
+        "/api/v1/aircraft-technical-log/paged?work_status=APPROVED&limit=10&page=1"
+    )
+    assert approved.status_code == 200
+    approved_ids = {item["id"] for item in approved.json()["items"]}
+    assert log_id not in approved_ids
+
+    client.put(
+        f"/api/v1/aircraft-technical-log/{log_id}",
+        json={"work_status": "APPROVED"},
+    )
+
+    approved2 = client.get(
+        "/api/v1/aircraft-technical-log/paged?work_status=APPROVED&limit=10&page=1"
+    )
+    assert approved2.status_code == 200
+    approved_ids2 = {item["id"] for item in approved2.json()["items"]}
+    assert log_id in approved_ids2
+
+
 def test_update_aircraft_technical_log(
     client: TestClient,
     test_aircraft_technical_log_data: dict
