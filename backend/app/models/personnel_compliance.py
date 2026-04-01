@@ -7,7 +7,7 @@ from sqlalchemy.orm import relationship
 from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 # `modules.name` for RBAC; role/user permissions use read, create, update, delete (+ approve when applicable).
-PERSONNEL_COMPLIANCE_MODULE_NAME = "Personnel Compliance"
+PERSONNEL_COMPLIANCE_MODULE_NAME = "Regulatory Compliance"
 
 
 class PersonnelComplianceItemType(str, enum.Enum):

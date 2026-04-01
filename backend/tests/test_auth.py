@@ -17,6 +17,34 @@ def test_register_user(client: TestClient):
     assert response.status_code in [201, 400], response.text
 
 
+def test_register_bulk_users(client: TestClient):
+    """POST /auth/register accepts a JSON array and returns created accounts."""
+    batch = [
+        {
+            "first_name": "Bulk",
+            "last_name": "One",
+            "username": "bulk_register_one",
+            "email": "bulk1@example.com",
+            "password": "testpassword123",
+        },
+        {
+            "first_name": "Bulk",
+            "last_name": "Two",
+            "username": "bulk_register_two",
+            "email": "bulk2@example.com",
+            "password": "testpassword123",
+        },
+    ]
+    response = client.post("/api/v1/auth/register", json=batch)
+    assert response.status_code in [201, 400], response.text
+    if response.status_code == 201:
+        body = response.json()
+        assert isinstance(body, list)
+        assert len(body) == 2
+        usernames = {row["username"] for row in body}
+        assert usernames == {"bulk_register_one", "bulk_register_two"}
+
+
 def test_login_user(client: TestClient):
     """Test user login/token generation."""
     # First register a user
@@ -72,3 +100,6 @@ def test_me_returns_profile_with_full_name(client: TestClient):
     body = r.json()
     assert body["username"] == "me_endpoint_user"
     assert body["full_name"] == "Jane Pilot"
+    assert body["email"] == "me@example.com"
+    assert "role" in body
+    assert "designation" in body

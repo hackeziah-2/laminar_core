@@ -21,6 +21,7 @@ async def create_account_information(
     data: AccountInformationCreate,
     *,
     audit_account_id: Optional[int] = None,
+    commit: bool = True,
 ) -> AccountInformationRead:
     """Create a new Account Information entry."""
     # Check for duplicate username (excluding soft-deleted)
@@ -86,7 +87,8 @@ async def create_account_information(
         else:
             await session.flush()
             await set_audit_fields(account, account.id, is_create=True)
-        await session.commit()
+        if commit:
+            await session.commit()
         await session.refresh(account)
     except Exception as e:
         await session.rollback()
