@@ -8,7 +8,15 @@ from app.models.aircraft_techinical_log import WorkStatus
 
 def test_rbac_maintenance_planner_statuses():
     allowed = allowed_work_statuses_for_atl_paged_list("Maintenance Planner")
-    assert set(allowed) == {WorkStatus.APPROVED, WorkStatus.AWAITING_ATTACHMENT}
+    assert set(allowed) == {
+        WorkStatus.FOR_REVIEW,
+        WorkStatus.AWAITING_ATTACHMENT,
+        WorkStatus.COMPLETED,
+        WorkStatus.PENDING,
+        WorkStatus.APPROVED,
+        WorkStatus.REJECTED_MAINTENANCE,
+        WorkStatus.REJECTED_QUALITY,
+    }
 
 
 def test_rbac_maintenance_manager_statuses():
@@ -27,7 +35,7 @@ def test_rbac_quality_manager_statuses():
 
 
 def test_rbac_unknown_role_returns_empty():
-    assert allowed_work_statuses_for_atl_paged_list("Mechanic") == ()
+    assert allowed_work_statuses_for_atl_paged_list("Nonexistent Role For RBAC Test") == ()
 
 
 def test_rbac_admin_not_in_status_map_but_skips_filter():

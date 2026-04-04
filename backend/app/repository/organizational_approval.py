@@ -187,61 +187,139 @@ async def get_existing_organizational_approval(
     return result.scalar_one_or_none()
 
 
+# async def create_organizational_approval(
+#     session: AsyncSession,
+#     data: OrganizationalApprovalCreate,
+#     *,
+#     audit_account_id: Optional[int] = None,
+# ) -> OrganizationalApprovalRead:
+#     """Create organizational approval, or snapshot prior state to history and update if one exists for certificate + number."""
+#     try:
+#         async with session.begin():
+#             if await organizational_approval_duplicate_exists(
+#                 session,
+#                 data.certificate_fk,
+#                 data.date_of_expiration,
+#                 data.number,
+#             ):
+#                 raise HTTPException(
+#                     status_code=status.HTTP_409_CONFLICT,
+#                     detail="Entry already exists",
+#                 )
+#             existing = await get_existing_organizational_approval(
+#                 session, data.certificate_fk, data.number
+#             )
+#             if existing:
+#                 snapshot = OrganizationalApprovalHistory(
+#                     certificate_fk=existing.certificate_fk,
+#                     oa_history=existing.id,
+#                     number=existing.number,
+#                     date_of_expiration=existing.date_of_expiration,
+#                     web_link=existing.web_link,
+#                 )
+#                 session.add(snapshot)
+#                 existing.date_of_expiration = data.date_of_expiration
+#                 existing.web_link = data.web_link
+#                 existing.is_withhold = False
+#                 session.add(existing)
+#                 obj = existing
+#                 if audit_account_id is not None:
+#                     await set_audit_fields(snapshot, audit_account_id, is_create=True)
+#                     await set_audit_fields(existing, audit_account_id, is_create=False)
+#             else:
+#                 obj = OrganizationalApproval(**data.dict())
+#                 session.add(obj)
+#                 if audit_account_id is not None:
+#                     await set_audit_fields(obj, audit_account_id, is_create=True)
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         await session.rollback()
+#         raise HTTPException(
+#             status_code=400,
+#             detail=f"Failed to create organizational approval: {str(e)}",
+#         )
+#     await session.refresh(obj)
+#     await session.refresh(obj, ["certificate"])
+#     return OrganizationalApprovalRead.from_orm(obj)
 async def create_organizational_approval(
     session: AsyncSession,
     data: OrganizationalApprovalCreate,
     *,
     audit_account_id: Optional[int] = None,
 ) -> OrganizationalApprovalRead:
-    """Create organizational approval, or snapshot prior state to history and update if one exists for certificate + number."""
+    """Create or update organizational approval with history snapshot.
+
+    Do not use session.begin() here: the same AsyncSession is often injected
+    multiple times per request (e.g. auth dependency runs queries first), and
+    SQLAlchemy autobegin already has an active transaction — nested begin()
+    raises "A transaction is already begun on this Session".
+    """
     try:
-        async with session.begin():
-            if await organizational_approval_duplicate_exists(
-                session,
-                data.certificate_fk,
-                data.date_of_expiration,
-                data.number,
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Entry already exists",
-                )
-            existing = await get_existing_organizational_approval(
-                session, data.certificate_fk, data.number
+        # 🔒 Check duplicate
+        if await organizational_approval_duplicate_exists(
+            session,
+            data.certificate_fk,
+            data.date_of_expiration,
+            data.number,
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Entry already exists",
             )
-            if existing:
-                snapshot = OrganizationalApprovalHistory(
-                    certificate_fk=existing.certificate_fk,
-                    oa_history=existing.id,
-                    number=existing.number,
-                    date_of_expiration=existing.date_of_expiration,
-                    web_link=existing.web_link,
-                )
-                session.add(snapshot)
-                existing.date_of_expiration = data.date_of_expiration
-                existing.web_link = data.web_link
-                existing.is_withhold = False
-                session.add(existing)
-                obj = existing
-                if audit_account_id is not None:
-                    await set_audit_fields(snapshot, audit_account_id, is_create=True)
-                    await set_audit_fields(existing, audit_account_id, is_create=False)
-            else:
-                obj = OrganizationalApproval(**data.dict())
-                session.add(obj)
-                if audit_account_id is not None:
-                    await set_audit_fields(obj, audit_account_id, is_create=True)
+
+        # 🔍 Check existing (same certificate + number)
+        existing = await get_existing_organizational_approval(
+            session, data.certificate_fk, data.number
+        )
+
+        if existing:
+            # 📝 Create history snapshot
+            snapshot = OrganizationalApprovalHistory(
+                certificate_fk=existing.certificate_fk,
+                oa_history=existing.id,
+                number=existing.number,
+                date_of_expiration=existing.date_of_expiration,
+                web_link=existing.web_link,
+            )
+            session.add(snapshot)
+
+            # 🔄 Update existing
+            existing.date_of_expiration = data.date_of_expiration
+            existing.web_link = data.web_link
+            existing.is_withhold = False
+
+            obj = existing
+
+            # 🧾 Audit
+            if audit_account_id:
+                await set_audit_fields(snapshot, audit_account_id, is_create=True)
+                await set_audit_fields(existing, audit_account_id, is_create=False)
+
+        else:
+            # ➕ Create new
+            obj = OrganizationalApproval(**data.model_dump())
+            session.add(obj)
+
+            if audit_account_id:
+                await set_audit_fields(obj, audit_account_id, is_create=True)
+
+        await session.commit()
+        await session.refresh(obj)
+        await session.refresh(obj, attribute_names=["certificate"])
+
+        return OrganizationalApprovalRead.from_orm(obj)
+
     except HTTPException:
+        await session.rollback()
         raise
+
     except Exception as e:
         await session.rollback()
         raise HTTPException(
             status_code=400,
             detail=f"Failed to create organizational approval: {str(e)}",
         )
-    await session.refresh(obj)
-    await session.refresh(obj, ["certificate"])
-    return OrganizationalApprovalRead.from_orm(obj)
 
 
 async def update_organizational_approval(

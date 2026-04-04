@@ -1,8 +1,8 @@
-from typing import Optional, List, Tuple, Sequence
+from typing import Optional, List, Tuple
 from datetime import date, time
 
 from fastapi import HTTPException
-from sqlalchemy import select, or_, cast, String, Integer, func, false
+from sqlalchemy import select, or_, cast, String, Integer, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 
@@ -14,6 +14,8 @@ from app.models.aircraft_techinical_log import (
     WorkStatus,
 )
 from app.models.aircraft import Aircraft
+from app.models.account import AccountInformation
+from app.core.atl_paged_rbac import atl_rbac_filter
 from app.schemas.aircraft_technical_log_schema import (
     AircraftTechnicalLogCreate,
     AircraftTechnicalLogUpdate,
@@ -372,6 +374,7 @@ async def list_atl_paged(
     return items, total
 
 
+@atl_rbac_filter()
 async def list_aircraft_technical_logs(
     session: AsyncSession,
     limit: int = 0,
@@ -380,14 +383,10 @@ async def list_aircraft_technical_logs(
     aircraft_fk: Optional[int] = None,
     work_status: Optional[WorkStatus] = None,
     sort: Optional[str] = "",
-    allowed_work_statuses: Sequence[WorkStatus] = (),
-    skip_work_status_rbac: bool = False,
+    current_account: Optional[AccountInformation] = None,
 ) -> Tuple[List[AircraftTechnicalLog], int]:
     """List Aircraft Technical Log entries with pagination.
-    allowed_work_statuses: RBAC filter; only rows whose work_status is in this set are returned.
-    If empty, no rows are returned (unless skip_work_status_rbac). Optional work_status query filter
-    is intersected with RBAC when RBAC applies. When skip_work_status_rbac is True (Admin), no
-    work_status RBAC filter; optional work_status query still applies if set.
+    work_status RBAC is applied in ``atl_rbac_filter`` from ``current_account``'s role.
     """
     stmt = (
         select(AircraftTechnicalLog)
@@ -401,19 +400,6 @@ async def list_aircraft_technical_logs(
     # Filter by aircraft
     if aircraft_fk:
         stmt = stmt.where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
-
-    if skip_work_status_rbac:
-        if work_status is not None:
-            stmt = stmt.where(AircraftTechnicalLog.work_status == work_status)
-    elif not allowed_work_statuses:
-        stmt = stmt.where(false())
-    elif work_status is not None:
-        if work_status not in allowed_work_statuses:
-            stmt = stmt.where(false())
-        else:
-            stmt = stmt.where(AircraftTechnicalLog.work_status == work_status)
-    else:
-        stmt = stmt.where(AircraftTechnicalLog.work_status.in_(list(allowed_work_statuses)))
 
     # Search functionality; sequence_no stored as number only, so strip ATL- from search for that field
     if search:
@@ -487,25 +473,6 @@ async def list_aircraft_technical_logs(
             AircraftTechnicalLog.aircraft_fk == aircraft_fk
         )
 
-    if skip_work_status_rbac:
-        if work_status is not None:
-            count_stmt = count_stmt.where(
-                AircraftTechnicalLog.work_status == work_status
-            )
-    elif not allowed_work_statuses:
-        count_stmt = count_stmt.where(false())
-    elif work_status is not None:
-        if work_status not in allowed_work_statuses:
-            count_stmt = count_stmt.where(false())
-        else:
-            count_stmt = count_stmt.where(
-                AircraftTechnicalLog.work_status == work_status
-            )
-    else:
-        count_stmt = count_stmt.where(
-            AircraftTechnicalLog.work_status.in_(list(allowed_work_statuses))
-        )
-
     if search:
         q = f"%{search}%"
         q_seq = f"%{_sequence_no_digits_only(search)}%"
@@ -524,15 +491,7 @@ async def list_aircraft_technical_logs(
             )
         )
 
-    total = (await session.execute(count_stmt)).scalar()
-
-    # Pagination
-    stmt = stmt.limit(limit).offset(offset)
-
-    result = await session.execute(stmt)
-    items = result.scalars().all()
-
-    return items, total
+    return stmt, count_stmt
 
 
 async def get_latest_aircraft_technical_log(

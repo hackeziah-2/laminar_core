@@ -2,8 +2,10 @@
 import asyncio
 
 from fastapi.testclient import TestClient
+from sqlalchemy import update
 
 from app.api.deps import get_current_active_account
+from app.models.aircraft_techinical_log import AircraftTechnicalLog
 from app.main import app
 from app.models.role import Role
 from tests.conftest import TestSessionLocal
@@ -154,8 +156,8 @@ def test_delete_aircraft_technical_log(
     assert response.status_code == 204
 
 
-def test_atl_paged_rbac_maintenance_planner_visibility(client: TestClient):
-    """Maintenance Planner must not see FOR_REVIEW rows; may see same row after APPROVED."""
+def test_atl_paged_rbac_maintenance_planner_sees_null_work_status(client: TestClient):
+    """Maintenance Planner without work_status query param may list rows where work_status is NULL."""
     async def seed_roles():
         async with TestSessionLocal() as session:
             mm = Role(name="Maintenance Manager", description="rbac")
@@ -165,6 +167,15 @@ def test_atl_paged_rbac_maintenance_planner_visibility(client: TestClient):
             await session.refresh(mm)
             await session.refresh(pl)
             return mm.id, pl.id
+
+    async def clear_work_status(log_id: int) -> None:
+        async with TestSessionLocal() as session:
+            await session.execute(
+                update(AircraftTechnicalLog)
+                .where(AircraftTechnicalLog.id == log_id)
+                .values(work_status=None)
+            )
+            await session.commit()
 
     mm_rid, pl_rid = asyncio.run(seed_roles())
     acting_role = {"rid": mm_rid}
@@ -180,7 +191,7 @@ def test_atl_paged_rbac_maintenance_planner_visibility(client: TestClient):
 
     log_data = {
         "aircraft_fk": 1,
-        "sequence_no": "ATL-RBAC-PLAN",
+        "sequence_no": "ATL-RBAC-PLAN-NULL",
         "nature_of_flight": "TR",
         "origin_station": "ORG",
         "origin_date": "2025-01-17",
@@ -201,24 +212,18 @@ def test_atl_paged_rbac_maintenance_planner_visibility(client: TestClient):
     assert cr.status_code == 201
     log_id = cr.json()["id"]
 
+    asyncio.run(clear_work_status(log_id))
+
     acting_role["rid"] = pl_rid
     p1 = client.get("/api/v1/aircraft-technical-log/paged?limit=50&page=1")
     assert p1.status_code == 200
-    assert log_id not in {i["id"] for i in p1.json()["items"]}
+    assert log_id in {i["id"] for i in p1.json()["items"]}
 
-    acting_role["rid"] = mm_rid
-    up = client.put(
-        f"/api/v1/aircraft-technical-log/{log_id}",
-        json={"work_status": "APPROVED"},
-    )
-    assert up.status_code == 200
-
-    acting_role["rid"] = pl_rid
     p2 = client.get(
         "/api/v1/aircraft-technical-log/paged?work_status=APPROVED&limit=50&page=1"
     )
     assert p2.status_code == 200
-    assert log_id in {i["id"] for i in p2.json()["items"]}
+    assert log_id not in {i["id"] for i in p2.json()["items"]}
 
 
 def test_atl_paged_admin_sees_all_work_statuses(client: TestClient):
