@@ -77,6 +77,7 @@ async def create_aircraft_statutory_certificate_history(
     data: AircraftStatutoryCertificateHistoryCreate,
     *,
     audit_account_id: Optional[int] = None,
+    commit: bool = True,
 ) -> AircraftStatutoryCertificateHistoryRead:
     payload = data.dict()
     # asc_history = aircraft_statutory_certificates.id
@@ -92,6 +93,10 @@ async def create_aircraft_statutory_certificate_history(
     session.add(obj)
     if audit_account_id is not None:
         await set_audit_fields(obj, audit_account_id, is_create=True)
-    await session.commit()
-    await session.refresh(obj)
+    if commit:
+        await session.commit()
+        await session.refresh(obj)
+    else:
+        await session.flush()
+        await session.refresh(obj)
     return AircraftStatutoryCertificateHistoryRead.from_orm(obj)

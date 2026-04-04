@@ -298,9 +298,16 @@ async def create_organizational_approval(
 
         else:
             # ➕ Create new
-            obj = OrganizationalApproval(**data.model_dump())
-            session.add(obj)
+            
+            payload = data.model_dump() if hasattr(data, "model_dump") else data.dict()
 
+            obj = OrganizationalApproval(
+                certificate_fk=payload["certificate_fk"],
+                number=payload["number"],
+                date_of_expiration=payload["date_of_expiration"],
+                web_link=payload.get("web_link"),
+            )
+            session.add(obj)
             if audit_account_id:
                 await set_audit_fields(obj, audit_account_id, is_create=True)
 

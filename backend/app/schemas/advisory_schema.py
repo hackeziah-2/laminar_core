@@ -78,11 +78,15 @@ class AdvisoryDetailResponse(BaseModel):
 
 
 class AdvisoryUpdateExpiryBody(BaseModel):
-    """Request body for PUT /advisory/{id}/{expiry}/."""
+    """Request body for PUT /advisory/{id}/{expiry}/ (renewal advisory)."""
 
     regulatory_compliance: RegulatoryComplianceSource = Field(
         ...,
-        description="Source of the advisory: aircraft-statutory-certificates, organizational-approvals, oem-technical-publication, or personnel-compliance",
+        description=(
+            "Required: source table for this advisory row. Drives the update target and, for "
+            "organizational-approvals and aircraft-statutory-certificates, appends a pre-update "
+            "snapshot to the matching history table."
+        ),
     )
     category_type: Optional[str] = Field(
         None,

@@ -70,6 +70,7 @@ async def create_organizational_approval_history(
     data: OrganizationalApprovalHistoryCreate,
     *,
     audit_account_id: Optional[int] = None,
+    commit: bool = True,
 ) -> OrganizationalApprovalHistoryRead:
     payload = data.dict()
     if payload.get("oa_history") is None:
@@ -89,6 +90,10 @@ async def create_organizational_approval_history(
     session.add(obj)
     if audit_account_id is not None:
         await set_audit_fields(obj, audit_account_id, is_create=True)
-    await session.commit()
-    await session.refresh(obj)
+    if commit:
+        await session.commit()
+        await session.refresh(obj)
+    else:
+        await session.flush()
+        await session.refresh(obj)
     return OrganizationalApprovalHistoryRead.from_orm(obj)

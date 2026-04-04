@@ -31,6 +31,12 @@ from app.models.oem_technical_publication import (
 from app.models.organizational_approval import OrganizationalApproval
 from app.models.personnel_compliance import PersonnelCompliance, PersonnelComplianceItemType
 from app.schemas.advisory_schema import AdvisoryItem, RegulatoryComplianceSource
+from app.schemas.aircraft_statutory_certificate_history_schema import (
+    AircraftStatutoryCertificateHistoryCreate,
+)
+from app.schemas.organizational_approval_history_schema import (
+    OrganizationalApprovalHistoryCreate,
+)
 
 
 def _personnel_compliance_item_label(item_type: PersonnelComplianceItemType) -> str:
@@ -339,8 +345,16 @@ async def update_advisory_expiry(
     web_link: Optional[str] = None,
     *,
     audit_account_id: Optional[int] = None,
-) -> None:
+) -> Tuple[
+    Optional[OrganizationalApprovalHistoryCreate],
+    Optional[AircraftStatutoryCertificateHistoryCreate],
+]:
     """Update expiry for an advisory item by id and regulatory_compliance.
+
+    Does not commit; caller should commit after optional history inserts.
+
+    For aircraft-statutory-certificates and organizational-approvals, returns a history
+    snapshot of the row state **before** the update (for renewal advisory history).
 
     For aircraft-statutory-certificates, organizational-approvals, oem-technical-publication:
       set date_of_expiration = expiry; if web_link is not None, set web_link (empty clears).
@@ -350,6 +364,9 @@ async def update_advisory_expiry(
     Raises:
         ValueError: If advisory item not found or invalid regulatory_compliance.
     """
+    history_oa: Optional[OrganizationalApprovalHistoryCreate] = None
+    history_asc: Optional[AircraftStatutoryCertificateHistoryCreate] = None
+
     if regulatory_compliance == "personnel-compliance":
         stmt = select(PersonnelCompliance).where(
             PersonnelCompliance.id == id,
@@ -369,6 +386,13 @@ async def update_advisory_expiry(
         instance = result.scalars().one_or_none()
         if not instance:
             raise ValueError("Advisory item not found")
+        history_asc = AircraftStatutoryCertificateHistoryCreate(
+            aircraft_fk=instance.aircraft_fk,
+            asc_history=instance.id,
+            category_type=instance.category_type,
+            date_of_expiration=instance.date_of_expiration,
+            web_link=instance.web_link,
+        )
         instance.date_of_expiration = expiry
         if web_link is not None:
             instance.web_link = _normalize_advisory_web_link(web_link)
@@ -381,6 +405,13 @@ async def update_advisory_expiry(
         instance = result.scalars().one_or_none()
         if not instance:
             raise ValueError("Advisory item not found")
+        history_oa = OrganizationalApprovalHistoryCreate(
+            certificate_fk=instance.certificate_fk,
+            oa_history=instance.id,
+            number=instance.number,
+            date_of_expiration=instance.date_of_expiration,
+            web_link=instance.web_link,
+        )
         instance.date_of_expiration = expiry
         if web_link is not None:
             instance.web_link = _normalize_advisory_web_link(web_link)
@@ -400,7 +431,7 @@ async def update_advisory_expiry(
         raise ValueError("Invalid regulatory_compliance")
     if audit_account_id is not None:
         await set_audit_fields(instance, audit_account_id, is_create=False)
-    await session.commit()
+    return history_oa, history_asc
 
 
 async def update_advisory_withhold(
