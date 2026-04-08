@@ -1,10 +1,13 @@
-from sqlalchemy import Column, String, LargeBinary, DateTime
-from sqlalchemy.sql import func
-from sqlalchemy.dialects.postgresql import UUID
 import uuid
 
+from sqlalchemy import Column, String, LargeBinary, DateTime
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.sql import func
 
-class File(Base):
+from app.database import Base, AuditMixin
+
+
+class File(Base, AuditMixin):
     __tablename__ = "files"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

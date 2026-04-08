@@ -28,7 +28,10 @@ from app.repository.aircraft_technical_log import (
     soft_delete_aircraft_technical_log,
     get_previous_atl,
 )
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
+from app.models.aircraft_techinical_log import WorkStatus
 
 
 def _sanitize_filename(name: str) -> str:
@@ -168,15 +171,28 @@ async def api_list_paged(
     page: int = Query(1, ge=1),
     search: Optional[str] = None,
     aircraft_fk: Optional[int] = Query(None, description="Filter by aircraft ID"),
+    work_status: Optional[WorkStatus] = Query(
+        None,
+        description=(
+            "Filter by work status (e.g. work_status=APPROVED). "
+            "Values: FOR_REVIEW, REJECTED_MAINTENANCE, APPROVED, AWAITING_ATTACHMENT, "
+            "REJECTED_QUALITY, PENDING, COMPLETED. Omit for no filter. "
+            "Non-Admin: restricted to statuses allowed for your role (intersection). "
+            "Admin: all statuses; optional work_status still narrows the list when provided."
+        ),
+    ),
     sort: Optional[str] = Query(
         "",
         description="Example: -created_at,sequence_no"
     ),
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Get paginated list of Aircraft Technical Log entries with auto_* computed fields.
     Previous values are from the last ATL by sequence_no (same aircraft).
     Auto fields: airframe/engine/propeller run time, AFTT, TSN, TSO, TBO (2 decimal places).
+    RBAC: work_status visibility by role; Admin sees all ATL rows. Unknown or unmapped roles see no rows.
+    Optional work_status query param further narrows results (within RBAC when applicable).
     """
     offset = (page - 1) * limit
     items, total = await list_aircraft_technical_logs(
@@ -185,7 +201,9 @@ async def api_list_paged(
         offset=offset,
         search=search,
         aircraft_fk=aircraft_fk,
+        work_status=work_status,
         sort=sort,
+        current_account=current_account,
     )
     pages = ceil(total / limit) if total else 0
 
@@ -271,10 +289,13 @@ async def api_get(
 )
 async def api_create(
     payload: aircraft_technical_log_schema.AircraftTechnicalLogCreate,
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new Aircraft Technical Log entry."""
-    return await create_aircraft_technical_log(session, payload)
+    return await create_aircraft_technical_log(
+        session, payload, audit_account_id=current_account.id
+    )
 
 
 async def _parse_update_payload(request: Request) -> aircraft_technical_log_schema.AircraftTechnicalLogUpdate:
@@ -334,6 +355,7 @@ async def api_update(
     log_id: int,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update an Aircraft Technical Log entry. Accepts application/json body or multipart/form-data with 'data' or 'json_data' (JSON string). For multipart, optional form fields 'white_atl' and 'dfp' are file uploads; saved under uploads/white_atl/ and uploads/dfp/. Download via GET /api/v1/white_atl/download?name=<filename> and /api/v1/dfp/download?name=<filename>."""
     log_in = await _parse_update_payload(request)
@@ -341,6 +363,7 @@ async def api_update(
         session=session,
         log_id=log_id,
         log_in=log_in,
+        audit_account_id=current_account.id,
     )
 
     if not updated:

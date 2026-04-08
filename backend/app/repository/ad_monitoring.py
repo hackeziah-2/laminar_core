@@ -6,6 +6,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.database import set_audit_fields
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 from app.models.ad_monitoring import ADMonitoring, WorkOrderADMonitoring
 
@@ -128,7 +129,11 @@ async def list_ad_monitoring(
 
 
 async def create_ad_monitoring(
-    session: AsyncSession, data: ADMonitoringCreate, upload_file: UploadFile = None
+    session: AsyncSession,
+    data: ADMonitoringCreate,
+    upload_file: UploadFile = None,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> ADMonitoringRead:
     """Create ADMonitoring with optional file upload."""
     ad_data = data.dict()
@@ -140,6 +145,8 @@ async def create_ad_monitoring(
     obj = ADMonitoring(**ad_data)
     try:
         session.add(obj)
+        if audit_account_id is not None:
+            await set_audit_fields(obj, audit_account_id, is_create=True)
         await session.commit()
         await session.refresh(obj)
         await session.refresh(obj, ["aircraft", "ad_works"])
@@ -150,7 +157,12 @@ async def create_ad_monitoring(
 
 
 async def update_ad_monitoring(
-    session: AsyncSession, ad_id: int, data: ADMonitoringUpdate, upload_file: UploadFile = None
+    session: AsyncSession,
+    ad_id: int,
+    data: ADMonitoringUpdate,
+    upload_file: UploadFile = None,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[ADMonitoringRead]:
     """Update ADMonitoring with optional file upload."""
     result = await session.execute(
@@ -175,6 +187,8 @@ async def update_ad_monitoring(
         setattr(obj, k, v)
     try:
         session.add(obj)
+        if audit_account_id is not None:
+            await set_audit_fields(obj, audit_account_id, is_create=False)
         await session.commit()
         await session.refresh(obj)
         await session.refresh(obj, ["aircraft", "ad_works"])
@@ -312,11 +326,16 @@ async def list_work_order_ad_monitoring(
 
 
 async def create_work_order_ad_monitoring(
-    session: AsyncSession, data: WorkOrderADMonitoringCreate
+    session: AsyncSession,
+    data: WorkOrderADMonitoringCreate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> WorkOrderADMonitoringRead:
     """Create WorkOrderADMonitoring."""
     obj = WorkOrderADMonitoring(**data.dict())
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=True)
     await session.commit()
     # Re-fetch with relationship loaded to avoid lazy load in from_orm (async session)
     result = await session.execute(
@@ -330,7 +349,11 @@ async def create_work_order_ad_monitoring(
 
 
 async def update_work_order_ad_monitoring(
-    session: AsyncSession, work_order_id: int, data: WorkOrderADMonitoringUpdate
+    session: AsyncSession,
+    work_order_id: int,
+    data: WorkOrderADMonitoringUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[WorkOrderADMonitoringRead]:
     """Update WorkOrderADMonitoring by ID."""
     result = await session.execute(
@@ -344,6 +367,8 @@ async def update_work_order_ad_monitoring(
     for k, v in data.dict(exclude_unset=True).items():
         setattr(obj, k, v)
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     # Re-fetch with relationship loaded to avoid lazy load in from_orm (async session)
     result = await session.execute(

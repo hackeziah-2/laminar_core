@@ -28,7 +28,9 @@ from app.repository.role import (
     soft_delete_role,
     get_all_roles_list,
 )
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
 
 router = APIRouter(
     prefix="/api/v1/roles",
@@ -89,7 +91,9 @@ def _role_permissions_list(role) -> List[RolePermissionItem]:
             RolePermissionItem(
                 module=module.name,
                 read=getattr(rp, "can_read", False),
-                write=getattr(rp, "can_write", False),
+                create=getattr(rp, "can_create", False),
+                update=getattr(rp, "can_update", False),
+                delete=getattr(rp, "can_delete", False),
                 approve=getattr(rp, "can_approve", False),
             )
         )
@@ -101,7 +105,7 @@ async def api_get_role_permissions(
     role_id: int,
     session: AsyncSession = Depends(get_session),
 ):
-    """Get permissions array for a role (module, read, write, approve)."""
+    """Get permissions array for a role (module, read, create, update, delete, approve)."""
     role = await get_role_with_permissions(session, role_id)
     if not role:
         raise HTTPException(
@@ -137,10 +141,13 @@ async def api_get(
 )
 async def api_create(
     payload: RoleCreate,
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
-    """Create a new Role. Optionally include permissions (module, read, write, approve) per module."""
-    role = await create_role(session, payload)
+    """Create a new Role. Optionally include permissions (module, read, create, update, delete, approve) per module."""
+    role = await create_role(
+        session, payload, audit_account_id=current_account.id
+    )
     role_with_perms = await get_role_with_permissions(session, role.id)
     base = RoleRead.from_orm(role_with_perms)
     return RoleReadWithPermissions(
@@ -154,12 +161,14 @@ async def api_update(
     role_id: int,
     role_in: RoleUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update a Role. Optionally include permissions to replace existing ones."""
     updated = await update_role(
         session=session,
         role_id=role_id,
         role_in=role_in,
+        audit_account_id=current_account.id,
     )
     if not updated:
         raise HTTPException(

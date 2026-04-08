@@ -4,6 +4,7 @@ from sqlalchemy import select, func, func, case, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.database import set_audit_fields
 from app.models.aircraft import Aircraft
 from app.models.fleet_daily_update import FleetDailyUpdate, FleetDailyUpdateStatusEnum
 from app.schemas.fleet_daily_update_schema import (
@@ -26,6 +27,8 @@ def _status_from_str(value: Optional[str]) -> Optional[str]:
 async def create_fleet_daily_update(
     session: AsyncSession,
     data: FleetDailyUpdateCreate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> FleetDailyUpdate:
     """Create a new Fleet Daily Update entry. aircraft_fk must be unique (one-to-one). Returns ORM."""
     payload = data.dict(exclude_unset=True)
@@ -47,6 +50,8 @@ async def create_fleet_daily_update(
 
     obj = FleetDailyUpdate(**payload)
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=True)
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["aircraft"])
@@ -149,6 +154,8 @@ async def update_fleet_daily_update(
     session: AsyncSession,
     update_id: int,
     data: FleetDailyUpdateUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[FleetDailyUpdate]:
     """Update a Fleet Daily Update entry. Returns ORM with aircraft loaded."""
     result = await session.execute(
@@ -171,6 +178,8 @@ async def update_fleet_daily_update(
             setattr(obj, k, v)
 
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["aircraft"])

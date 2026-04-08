@@ -4,6 +4,7 @@ from sqlalchemy import select, func, or_, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.database import set_audit_fields
 from app.models.cpcp_monitoring import CPCPMonitoring
 from app.models.aircraft_techinical_log import AircraftTechnicalLog
 from app.schemas.cpcp_monitoring_schema import (
@@ -16,10 +17,14 @@ from app.schemas.cpcp_monitoring_schema import (
 async def create_cpcp_monitoring(
     session: AsyncSession,
     data: CPCPMonitoringCreate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> CPCPMonitoringRead:
     """Create a new CPCP Monitoring entry."""
     obj = CPCPMonitoring(**data.dict())
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=True)
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["atl"])
@@ -124,6 +129,8 @@ async def update_cpcp_monitoring(
     session: AsyncSession,
     entry_id: int,
     data: CPCPMonitoringUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[CPCPMonitoringRead]:
     """Update a CPCP Monitoring entry."""
     result = await session.execute(
@@ -141,6 +148,8 @@ async def update_cpcp_monitoring(
         setattr(obj, k, v)
 
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["atl"])

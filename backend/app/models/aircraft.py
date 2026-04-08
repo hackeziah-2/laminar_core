@@ -4,7 +4,7 @@ from sqlalchemy import Column, Integer, String, Text, Float, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import ENUM as PGEnum
 from sqlalchemy.orm import relationship
 
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
 class StatusEnum(str, enum.Enum):
@@ -12,7 +12,7 @@ class StatusEnum(str, enum.Enum):
     INACTIVE = "Inactive"
     MAINTENANCE = "Maintenance"
 
-class Aircraft(Base, TimestampMixin, SoftDeleteMixin):
+class Aircraft(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "aircrafts"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -71,7 +71,7 @@ class Aircraft(Base, TimestampMixin, SoftDeleteMixin):
     def __repr__(self):
         return f"<Aircraft(reg='{self.registration}', model='{self.model}')>"
 
-class Airframe(Base, TimestampMixin, SoftDeleteMixin):
+class Airframe(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "airframe"
     id = Column(Integer, primary_key=True, index=True)
     model = Column(String(144), nullable=False, index=True)
@@ -79,7 +79,7 @@ class Airframe(Base, TimestampMixin, SoftDeleteMixin):
     arc = Column(String(144), nullable=False, index=True)
     report_description = Column(Text)
 
-class Engine(Base, TimestampMixin, SoftDeleteMixin):
+class Engine(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "engine"
     id = Column(Integer, primary_key=True, index=True)
     model = Column(String(144), nullable=False, index=True)
@@ -88,7 +88,7 @@ class Engine(Base, TimestampMixin, SoftDeleteMixin):
     report_description = Column(Text)
 
 
-class Propeller(Base, TimestampMixin, SoftDeleteMixin):
+class Propeller(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "propeller"
     id = Column(Integer, primary_key=True, index=True)
     model = Column(String(144), nullable=False, index=True)
@@ -97,7 +97,7 @@ class Propeller(Base, TimestampMixin, SoftDeleteMixin):
     report_description = Column(Text)
 
 
-class AirframeTable(Base, TimestampMixin, SoftDeleteMixin):
+class AirframeTable(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "airframe_tables"
     id = Column(Integer, primary_key=True, index=True)
     model = Column(String(144), nullable=False, index=True)

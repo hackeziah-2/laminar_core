@@ -3,7 +3,7 @@ from sqlalchemy import Column, Integer, String, Text, Date, Boolean, ForeignKey
 from sqlalchemy.dialects.postgresql import ENUM as PGEnum
 from sqlalchemy.orm import relationship
 
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
 class DocumentStatusEnum(str, enum.Enum):
@@ -13,7 +13,7 @@ class DocumentStatusEnum(str, enum.Enum):
     INACTIVE = "Inactive"
 
 
-class DocumentOnBoard(Base, TimestampMixin, SoftDeleteMixin):
+class DocumentOnBoard(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "documents_on_board"
 
     document_id = Column(Integer, primary_key=True, index=True)

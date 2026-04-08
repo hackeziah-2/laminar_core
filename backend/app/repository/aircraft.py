@@ -26,6 +26,7 @@ from app.models.tcc_maintenance import TCCMaintenance
 from app.models.document_on_board import DocumentOnBoard
 from app.models.cpcp_monitoring import CPCPMonitoring
 from app.schemas.aircraft_schema import AircraftCreate, AircraftOut, AircraftUpdate
+from app.database import set_audit_fields
 from typing import List, Optional, Tuple, Union
 
 def _normalize_status(status: Optional[Union[str, object]]) -> Optional[str]:
@@ -141,13 +142,21 @@ async def list_aircraft(
     return items, total_count
 
 
-async def update_aircraft(session: AsyncSession, aircraft_id: int, aircraft_in: AircraftUpdate) -> Optional[Aircraft]:
+async def update_aircraft(
+    session: AsyncSession,
+    aircraft_id: int,
+    aircraft_in: AircraftUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
+) -> Optional[Aircraft]:
     obj = await session.get(Aircraft, aircraft_id)
     if not obj:
         return None
     for k, v in aircraft_in.dict(exclude_unset=True).items():
         setattr(obj, k, v)
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     return obj
@@ -157,6 +166,8 @@ async def create_aircraft_with_file(
     data: AircraftCreate,
     engine_file: UploadFile = None,
     propeller_file: UploadFile = None,
+    *,
+    audit_account_id: Optional[int] = None,
 ):  
     engine_path = None
     if engine_file:
@@ -212,6 +223,10 @@ async def create_aircraft_with_file(
     )
     session.add(fleet_daily_update)
 
+    if audit_account_id is not None:
+        await set_audit_fields(aircraft, audit_account_id, is_create=True)
+        await set_audit_fields(fleet_daily_update, audit_account_id, is_create=True)
+
     await session.commit()
     await session.refresh(aircraft)
     return AircraftOut.from_orm(aircraft)
@@ -222,6 +237,8 @@ async def update_aircraft_with_file(
     data: AircraftUpdate,
     engine_file: UploadFile = None,
     propeller_file: UploadFile = None,
+    *,
+    audit_account_id: Optional[int] = None,
 ):
     result = await session.execute(
         select(Aircraft).where(Aircraft.id == aircraft_id)
@@ -271,7 +288,8 @@ async def update_aircraft_with_file(
     # --- Apply updates ---
     for key, value in update_data.items():
         setattr(aircraft, key, value)
-    print("newsss")
+    if audit_account_id is not None:
+        await set_audit_fields(aircraft, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(aircraft)
 

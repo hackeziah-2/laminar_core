@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from fastapi import HTTPException, UploadFile
 
+from app.database import set_audit_fields
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 
 ensure_uploads_dir()
@@ -269,6 +270,8 @@ async def create_document_on_board(
     session: AsyncSession,
     data: DocumentOnBoardCreate,
     upload_file: UploadFile = None,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> DocumentOnBoardRead:
     """Create a new DocumentOnBoard entry. file_path and web_link are optional."""
     document_data = data.dict()
@@ -305,6 +308,8 @@ async def create_document_on_board(
     try:
         document = DocumentOnBoard(**document_data)
         session.add(document)
+        if audit_account_id is not None:
+            await set_audit_fields(document, audit_account_id, is_create=True)
         await session.commit()
         await session.refresh(document)
         await session.refresh(document, ["aircraft"])
@@ -321,6 +326,8 @@ async def update_document_on_board(
     document_id: int,
     document_in: DocumentOnBoardUpdate,
     upload_file: UploadFile = None,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[DocumentOnBoardRead]:
     """Update a DocumentOnBoard entry."""
     result = await session.execute(
@@ -363,6 +370,8 @@ async def update_document_on_board(
 
     try:
         session.add(obj)
+        if audit_account_id is not None:
+            await set_audit_fields(obj, audit_account_id, is_create=False)
         await session.commit()
         await session.refresh(obj)
         await session.refresh(obj, ["aircraft"])

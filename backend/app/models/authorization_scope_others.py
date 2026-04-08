@@ -1,10 +1,10 @@
 from sqlalchemy import Column, Integer, Text
 from sqlalchemy.orm import relationship
 
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
-class AuthorizationScopeOthers(Base, TimestampMixin, SoftDeleteMixin):
+class AuthorizationScopeOthers(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "authorization_scope_others"
 
     id = Column(Integer, primary_key=True, index=True)

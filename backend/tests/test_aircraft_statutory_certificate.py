@@ -172,3 +172,93 @@ def test_create_invalid_category(client: TestClient, aircraft_id: int):
         files={},
     )
     assert response.status_code == 422
+
+
+def test_create_duplicate_updates_existing_and_appends_history(
+    client: TestClient, certificate_payload: dict, aircraft_id: int
+):
+    """POST with same aircraft_fk and category_type updates the row and records prior state in history."""
+    first = client.post(
+        "/api/v1/aircraft-statutory-certificates/",
+        data={"json_data": json.dumps(certificate_payload)},
+        files={},
+    )
+    assert first.status_code == 201
+    cert_id = first.json()["id"]
+
+    hold_resp = client.put(
+        f"/api/v1/aircraft-statutory-certificates/{cert_id}",
+        data={"json_data": json.dumps({"is_withhold": True})},
+        files={},
+    )
+    assert hold_resp.status_code == 200
+    assert hold_resp.json()["is_withhold"] is True
+
+    updated_payload = {
+        **certificate_payload,
+        "date_of_expiration": "2028-01-01",
+        "web_link": "https://example.com/renewed",
+    }
+    second = client.post(
+        "/api/v1/aircraft-statutory-certificates/",
+        data={"json_data": json.dumps(updated_payload)},
+        files={},
+    )
+    assert second.status_code == 201
+    body = second.json()
+    assert body["id"] == cert_id
+    assert body["date_of_expiration"] == "2028-01-01"
+    assert body["web_link"] == "https://example.com/renewed"
+    assert body["is_withhold"] is False
+
+    hist = client.get(
+        f"/api/v1/aircraft-statutory-certificates-history/paged?limit=10&page=1"
+        f"&aircraft_fk={aircraft_id}&category_type=COA"
+    )
+    assert hist.status_code == 200
+    hist_data = hist.json()
+    assert hist_data["total"] >= 1
+    snap = next(
+        (
+            h
+            for h in hist_data["items"]
+            if h["date_of_expiration"] == certificate_payload["date_of_expiration"]
+            and h["web_link"] == certificate_payload["web_link"]
+        ),
+        None,
+    )
+    assert snap is not None
+    assert snap.get("asc_history") == cert_id
+
+
+def test_create_same_aircraft_category_second_post_upserts_single_row(
+    client: TestClient, certificate_payload: dict
+):
+    """Same aircraft and category_type: second POST updates the existing certificate (one row)."""
+    first = client.post(
+        "/api/v1/aircraft-statutory-certificates/",
+        data={"json_data": json.dumps(certificate_payload)},
+        files={},
+    )
+    assert first.status_code == 201
+    first_id = first.json()["id"]
+
+    other = {**certificate_payload, "date_of_expiration": "2027-01-15"}
+    second = client.post(
+        "/api/v1/aircraft-statutory-certificates/",
+        data={"json_data": json.dumps(other)},
+        files={},
+    )
+    assert second.status_code == 201
+    assert second.json()["id"] == first_id
+    assert second.json()["date_of_expiration"] == "2027-01-15"
+
+    listed = client.get("/api/v1/aircraft-statutory-certificates/paged?limit=100&page=1")
+    assert listed.status_code == 200
+    same_type = [
+        i
+        for i in listed.json()["items"]
+        if i["aircraft_fk"] == certificate_payload["aircraft_fk"]
+        and i["category_type"] == certificate_payload["category_type"]
+    ]
+    assert len(same_type) == 1

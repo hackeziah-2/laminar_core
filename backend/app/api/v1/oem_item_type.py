@@ -18,7 +18,9 @@ from app.repository.oem_item_type import (
     soft_delete_oem_item_type,
     get_all_oem_item_types_list,
 )
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
 
 router = APIRouter(
     prefix="/api/v1/oem-item-types",
@@ -79,9 +81,12 @@ async def api_get(
 async def api_create(
     payload: OemItemTypeCreate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new OEM item type."""
-    return await create_oem_item_type(session, payload)
+    return await create_oem_item_type(
+        session, payload, audit_account_id=current_account.id
+    )
 
 
 @router.put("/{item_type_id}", response_model=OemItemTypeRead)
@@ -89,9 +94,15 @@ async def api_update(
     item_type_id: int,
     payload: OemItemTypeUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update an OEM item type."""
-    updated = await update_oem_item_type(session, item_type_id, payload)
+    updated = await update_oem_item_type(
+        session,
+        item_type_id,
+        payload,
+        audit_account_id=current_account.id,
+    )
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OEM item type not found")
     return updated

@@ -1,5 +1,5 @@
 from math import ceil
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from pydantic import ValidationError
@@ -19,7 +19,9 @@ from app.repository.organizational_approval import (
     update_organizational_approval,
     soft_delete_organizational_approval,
 )
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
 
 router = APIRouter(
     prefix="/api/v1/organizational-approvals",
@@ -37,17 +39,29 @@ async def api_list_paged(
         "",
         description="Sort: certificate_category_types__name, certification, date_of_expiration, -date_of_expiration, created_at, etc.",
     ),
+    sort_by: Optional[str] = Query(
+        None,
+        description="Sort column when not using sort. E.g. date_of_expiration, id, certification.",
+    ),
+    order: Literal["asc", "desc"] = Query(
+        "asc",
+        description="Direction for sort_by (ignored when sort is non-empty).",
+    ),
     session: AsyncSession = Depends(get_session),
 ):
     """List organizational approvals with pagination. Sort by certificate_category_types__name (category name), date_of_expiration; search on number and web_link."""
     offset = (page - 1) * limit
+    effective_sort = (sort or "").strip()
+    if not effective_sort and sort_by and sort_by.strip():
+        col = sort_by.strip()
+        effective_sort = f"-{col}" if order == "desc" else col
     items, total = await list_organizational_approvals(
         session=session,
         limit=limit,
         offset=offset,
         certificate_fk=certificate_fk,
         search=search,
-        sort=sort,
+        sort=effective_sort,
     )
     pages = ceil(total / limit) if total else 0
     return {
@@ -78,10 +92,15 @@ async def api_get(
 async def api_create(
     body: OrganizationalApprovalCreateRequestBody,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create an organizational approval. Send JSON body: { \"json_data\": { certificate_fk, number?, date_of_expiration?, web_link? } }."""
     try:
-        return await create_organizational_approval(session, body.json_data)
+        return await create_organizational_approval(
+            session,
+            body.json_data,
+            audit_account_id=current_account.id,
+        )
     except ValidationError as e:
         raise HTTPException(
             status_code=422,
@@ -97,6 +116,7 @@ async def _api_update_impl(
     approval_id: int,
     body: OrganizationalApprovalUpdateRequestBody,
     session: AsyncSession,
+    audit_account_id: int,
 ):
     """Shared update logic for PUT and PATCH."""
     try:
@@ -104,6 +124,7 @@ async def _api_update_impl(
             session=session,
             approval_id=approval_id,
             data=body.json_data,
+            audit_account_id=audit_account_id,
         )
         if not updated:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organizational approval not found")
@@ -124,9 +145,12 @@ async def api_update(
     approval_id: int,
     body: OrganizationalApprovalUpdateRequestBody,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update an organizational approval. Send JSON body: { \"json_data\": { certificate_fk?, number?, date_of_expiration?, web_link? } }."""
-    return await _api_update_impl(approval_id, body, session)
+    return await _api_update_impl(
+        approval_id, body, session, current_account.id
+    )
 
 
 @router.patch("/{approval_id}", response_model=OrganizationalApprovalRead)
@@ -134,9 +158,12 @@ async def api_patch(
     approval_id: int,
     body: OrganizationalApprovalUpdateRequestBody,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update an organizational approval (partial). Send JSON body: { \"json_data\": { ... } }."""
-    return await _api_update_impl(approval_id, body, session)
+    return await _api_update_impl(
+        approval_id, body, session, current_account.id
+    )
 
 
 @router.delete("/{approval_id}", status_code=status.HTTP_204_NO_CONTENT)

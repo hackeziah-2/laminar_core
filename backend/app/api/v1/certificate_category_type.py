@@ -18,7 +18,9 @@ from app.repository.certificate_category_type import (
     soft_delete_certificate_category_type,
     get_all_certificate_category_types_list,
 )
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
 
 router = APIRouter(
     prefix="/api/v1/certificate-category-types",
@@ -79,9 +81,12 @@ async def api_get(
 async def api_create(
     payload: CertificateCategoryTypeCreate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new certificate category type."""
-    return await create_certificate_category_type(session, payload)
+    return await create_certificate_category_type(
+        session, payload, audit_account_id=current_account.id
+    )
 
 
 @router.put("/{category_id}", response_model=CertificateCategoryTypeRead)
@@ -89,9 +94,12 @@ async def api_update(
     category_id: int,
     payload: CertificateCategoryTypeUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update a certificate category type."""
-    updated = await update_certificate_category_type(session, category_id, payload)
+    updated = await update_certificate_category_type(
+        session, category_id, payload, audit_account_id=current_account.id
+    )
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Certificate category type not found")
     return updated

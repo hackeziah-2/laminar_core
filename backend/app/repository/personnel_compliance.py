@@ -1,9 +1,11 @@
 from typing import List, Optional, Tuple
 
-from sqlalchemy import func, or_, select
+from fastapi import HTTPException, status
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.database import set_audit_fields
 from app.models.account import AccountInformation
 from app.models.personnel_compliance import PersonnelCompliance, PersonnelComplianceItemType
 from app.schemas.personnel_compliance_schema import (
@@ -11,6 +13,29 @@ from app.schemas.personnel_compliance_schema import (
     PersonnelComplianceUpdate,
     PersonnelComplianceRead,
 )
+
+
+async def validate_personnel_compliance_duplicate(
+    session: AsyncSession,
+    data: PersonnelComplianceCreate,
+) -> None:
+    item_type = data.item_type.name
+    result = await session.execute(
+        select(PersonnelCompliance.id).where(
+            and_(
+                PersonnelCompliance.account_information_id == data.account_information_id,
+                PersonnelCompliance.item_type == data.item_type,
+                PersonnelCompliance.is_withhold == False,
+                PersonnelCompliance.is_deleted == False,
+            )
+        ).limit(1)
+    )
+
+    if result.scalar():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f'Entry Already Exists "{item_type}"'
+        )
 
 
 async def list_personnel_compliances(
@@ -191,9 +216,14 @@ async def get_personnel_compliance(
 async def create_personnel_compliance(
     session: AsyncSession,
     data: PersonnelComplianceCreate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> PersonnelComplianceRead:
+    await validate_personnel_compliance_duplicate(session, data)
     obj = PersonnelCompliance(**data.dict())
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=True)
     await session.commit()
     await session.refresh(obj)
     result = await session.execute(
@@ -215,6 +245,8 @@ async def update_personnel_compliance(
     session: AsyncSession,
     compliance_id: int,
     data: PersonnelComplianceUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[PersonnelComplianceRead]:
     result = await session.execute(
         select(PersonnelCompliance)
@@ -238,6 +270,8 @@ async def update_personnel_compliance(
             continue
         setattr(obj, k, v)
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     await session.refresh(

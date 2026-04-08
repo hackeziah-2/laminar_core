@@ -42,7 +42,9 @@ from app.repository.logbooks import (
     update_propeller_logbook,
     soft_delete_propeller_logbook,
 )
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
 
 router = APIRouter(
     prefix="/api/v1/logbooks",
@@ -167,7 +169,8 @@ async def api_get_engine_logbook(
 async def api_create_engine_logbook(
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new Engine Logbook entry."""
     try:
@@ -178,7 +181,12 @@ async def api_create_engine_logbook(
         raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
-    return await create_engine_logbook(session, payload, upload_file)
+    return await create_engine_logbook(
+        session,
+        payload,
+        upload_file,
+        audit_account_id=current_account.id,
+    )
 
 
 @router.put(
@@ -194,6 +202,7 @@ async def api_update_engine_logbook(
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update an Engine Logbook entry."""
     try:
@@ -210,6 +219,7 @@ async def api_update_engine_logbook(
         logbook_id=logbook_id,
         logbook_in=logbook_in,
         upload_file=upload_file,
+        audit_account_id=current_account.id,
     )
 
     if not updated:
@@ -309,7 +319,8 @@ async def api_get_airframe_logbook(
 async def api_create_airframe_logbook(
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new Airframe Logbook entry."""
     try:
@@ -320,7 +331,12 @@ async def api_create_airframe_logbook(
         raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
-    return await create_airframe_logbook(session, payload, upload_file)
+    return await create_airframe_logbook(
+        session,
+        payload,
+        upload_file,
+        audit_account_id=current_account.id,
+    )
 
 
 @router.put(
@@ -332,6 +348,7 @@ async def api_update_airframe_logbook(
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update an Airframe Logbook entry."""
     try:
@@ -348,6 +365,7 @@ async def api_update_airframe_logbook(
         logbook_id=logbook_id,
         logbook_in=logbook_in,
         upload_file=upload_file,
+        audit_account_id=current_account.id,
     )
 
     if not updated:
@@ -442,7 +460,8 @@ async def api_get_avionics_logbook(
 async def api_create_avionics_logbook(
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new Avionics Logbook entry."""
     try:
@@ -453,7 +472,12 @@ async def api_create_avionics_logbook(
         raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
-    return await create_avionics_logbook(session, payload, upload_file)
+    return await create_avionics_logbook(
+        session,
+        payload,
+        upload_file,
+        audit_account_id=current_account.id,
+    )
 
 
 @router.put(
@@ -465,6 +489,7 @@ async def api_update_avionics_logbook(
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update an Avionics Logbook entry."""
     try:
@@ -481,6 +506,7 @@ async def api_update_avionics_logbook(
         logbook_id=logbook_id,
         logbook_in=logbook_in,
         upload_file=upload_file,
+        audit_account_id=current_account.id,
     )
 
     if not updated:
@@ -572,7 +598,8 @@ async def api_get_propeller_logbook(
 async def api_create_propeller_logbook(
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new Propeller Logbook entry."""
     try:
@@ -582,7 +609,12 @@ async def api_create_propeller_logbook(
         raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
-    return await create_propeller_logbook(session, payload, upload_file)
+    return await create_propeller_logbook(
+        session,
+        payload,
+        upload_file,
+        audit_account_id=current_account.id,
+    )
 
 
 @router.put(
@@ -594,6 +626,7 @@ async def api_update_propeller_logbook(
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update a Propeller Logbook entry."""
     try:
@@ -609,6 +642,7 @@ async def api_update_propeller_logbook(
         logbook_id=logbook_id,
         logbook_in=logbook_in,
         upload_file=upload_file,
+        audit_account_id=current_account.id,
     )
 
     if not updated:

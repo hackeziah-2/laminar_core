@@ -7,6 +7,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.database import set_audit_fields
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 from app.models.aircraft_statutory_certificate import (
     AircraftStatutoryCertificate,
@@ -16,6 +17,12 @@ from app.schemas.aircraft_statutory_certificate_schema import (
     AircraftStatutoryCertificateCreate,
     AircraftStatutoryCertificateUpdate,
     AircraftStatutoryCertificateRead,
+)
+from app.schemas.aircraft_statutory_certificate_history_schema import (
+    AircraftStatutoryCertificateHistoryCreate,
+)
+from app.repository.aircraft_statutory_certificate_history import (
+    create_aircraft_statutory_certificate_history,
 )
 
 UPLOAD_SUBDIR = "statutory_certificates"
@@ -126,12 +133,76 @@ async def get_aircraft_statutory_certificate_by_aircraft(
     return result.scalar_one_or_none()
 
 
+async def get_existing_record(
+    session: AsyncSession,
+    aircraft_registry: int,
+    certificate_type: CategoryTypeEnum,
+) -> Optional[AircraftStatutoryCertificate]:
+    """One non-deleted certificate for this aircraft (registry / PK) and category type."""
+    result = await session.execute(
+        select(AircraftStatutoryCertificate)
+        .options(selectinload(AircraftStatutoryCertificate.aircraft))
+        .where(AircraftStatutoryCertificate.aircraft_fk == aircraft_registry)
+        .where(AircraftStatutoryCertificate.category_type == certificate_type)
+        .where(AircraftStatutoryCertificate.is_deleted == False)
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def create_aircraft_statutory_certificate(
     session: AsyncSession,
     data: AircraftStatutoryCertificateCreate,
     upload_file: Optional[UploadFile] = None,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> AircraftStatutoryCertificateRead:
-    """Create a new certificate with optional file upload."""
+    """Create a new certificate, or update expiry, web link, and clear withhold if one exists for aircraft + type."""
+    
+    cert_data = data.dict()
+    duplicate_stmt = (
+        select(AircraftStatutoryCertificate)
+        .where(AircraftStatutoryCertificate.aircraft_fk == data.aircraft_fk)
+        .where(AircraftStatutoryCertificate.category_type == data.category_type)
+        .where(AircraftStatutoryCertificate.is_deleted == False)
+    )
+    if data.date_of_expiration is None:
+        duplicate_stmt = duplicate_stmt.where(AircraftStatutoryCertificate.date_of_expiration.is_(None))
+    else:
+        duplicate_stmt = duplicate_stmt.where(
+            AircraftStatutoryCertificate.date_of_expiration == data.date_of_expiration
+        )
+    duplicate_result = await session.execute(duplicate_stmt.limit(1))
+    if duplicate_result.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Entry already Exists")
+        
+    result = await get_existing_record(session, data.aircraft_fk, data.category_type)
+    if result:
+        history_payload = AircraftStatutoryCertificateHistoryCreate(
+            aircraft_fk=result.aircraft_fk,
+            asc_history=result.id,
+            category_type=result.category_type,
+            date_of_expiration=result.date_of_expiration,
+            web_link=result.web_link,
+        )
+        await create_aircraft_statutory_certificate_history(
+            session, history_payload, audit_account_id=audit_account_id
+        )
+        result.date_of_expiration = data.date_of_expiration
+        result.web_link = data.web_link
+        result.is_withhold = False
+        session.add(result)
+        if audit_account_id is not None:
+            await set_audit_fields(result, audit_account_id, is_create=False)
+        try:
+            await session.commit()
+            await session.refresh(result)
+            await session.refresh(result, ["aircraft"])
+        except Exception as e:
+            await session.rollback()
+            raise HTTPException(status_code=400, detail=f"Failed to update certificate: {str(e)}")
+        return AircraftStatutoryCertificateRead.from_orm(result)
+
     cert_data = data.dict()
     file_path = await _save_certificate_upload(upload_file)
     if file_path:
@@ -139,6 +210,8 @@ async def create_aircraft_statutory_certificate(
     try:
         obj = AircraftStatutoryCertificate(**cert_data)
         session.add(obj)
+        if audit_account_id is not None:
+            await set_audit_fields(obj, audit_account_id, is_create=True)
         await session.commit()
         await session.refresh(obj)
         await session.refresh(obj, ["aircraft"])
@@ -153,6 +226,8 @@ async def update_aircraft_statutory_certificate(
     cert_id: int,
     data: AircraftStatutoryCertificateUpdate,
     upload_file: Optional[UploadFile] = None,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[AircraftStatutoryCertificateRead]:
     """Update a certificate; optional file upload replaces file_path."""
     result = await session.execute(
@@ -171,6 +246,8 @@ async def update_aircraft_statutory_certificate(
     for k, v in update_data.items():
         setattr(obj, k, v)
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["aircraft"])

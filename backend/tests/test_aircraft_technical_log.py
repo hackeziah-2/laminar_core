@@ -1,11 +1,25 @@
 """Unit tests for Aircraft Technical Log endpoints."""
-import pytest
+import asyncio
+
 from fastapi.testclient import TestClient
+from sqlalchemy import update
+
+from app.api.deps import get_current_active_account
+from app.models.aircraft_techinical_log import AircraftTechnicalLog
+from app.main import app
+from app.models.role import Role
+from tests.conftest import TestSessionLocal
 
 
-def test_list_aircraft_technical_logs_empty(client: TestClient):
-    """Test listing ATL logs when database is empty."""
+def test_atl_paged_requires_authentication(client: TestClient):
+    """GET /paged requires a valid session (JWT) or dependency override."""
     response = client.get("/api/v1/aircraft-technical-log/paged?limit=10&page=1")
+    assert response.status_code == 401
+
+
+def test_list_aircraft_technical_logs_empty(client_with_atl_auth: TestClient):
+    """Test listing ATL logs when database is empty."""
+    response = client_with_atl_auth.get("/api/v1/aircraft-technical-log/paged?limit=10&page=1")
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 0
@@ -15,11 +29,11 @@ def test_list_aircraft_technical_logs_empty(client: TestClient):
 
 
 def test_create_aircraft_technical_log(
-    client: TestClient,
+    client_with_atl_auth: TestClient,
     test_aircraft_technical_log_data: dict
 ):
     """Test creating a new aircraft technical log."""
-    response = client.post(
+    response = client_with_atl_auth.post(
         "/api/v1/aircraft-technical-log/",
         json=test_aircraft_technical_log_data
     )
@@ -38,18 +52,30 @@ def test_get_aircraft_technical_log_not_found(client: TestClient):
 
 
 def test_list_aircraft_technical_logs_with_search(
-    client: TestClient,
-    test_aircraft_technical_log_data: dict
+    client_with_atl_auth: TestClient,
+    test_aircraft_technical_log_data: dict,
+    test_aircraft_data: dict,
 ):
     """Test listing ATL logs with search filter."""
-    # Create ATL log
-    client.post(
-        "/api/v1/aircraft-technical-log/",
-        json=test_aircraft_technical_log_data
+    import json
+
+    # Paged search joins aircraft; need a real aircraft row for the log's FK.
+    ar = client_with_atl_auth.post(
+        "/api/v1/aircraft/",
+        data={"json_data": json.dumps(test_aircraft_data)},
+        files={},
     )
+    assert ar.status_code == 200, ar.text
+    aircraft_id = ar.json()["id"]
+    payload = {**test_aircraft_technical_log_data, "aircraft_fk": aircraft_id}
+    cr = client_with_atl_auth.post(
+        "/api/v1/aircraft-technical-log/",
+        json=payload,
+    )
+    assert cr.status_code == 201
 
     # Search for it (stored as 001; search accepts 001 or ATL-001)
-    response = client.get(
+    response = client_with_atl_auth.get(
         "/api/v1/aircraft-technical-log/paged?search=001&limit=10&page=1"
     )
     assert response.status_code == 200
@@ -57,21 +83,54 @@ def test_list_aircraft_technical_logs_with_search(
     assert data["total"] >= 1
 
 
+def test_list_aircraft_technical_logs_filter_work_status(
+    client_with_atl_auth: TestClient,
+    test_aircraft_technical_log_data: dict,
+):
+    """Paged list filters by work_status (e.g. APPROVED)."""
+    create_response = client_with_atl_auth.post(
+        "/api/v1/aircraft-technical-log/",
+        json=test_aircraft_technical_log_data,
+    )
+    assert create_response.status_code == 201
+    log_id = create_response.json()["id"]
+
+    approved = client_with_atl_auth.get(
+        "/api/v1/aircraft-technical-log/paged?work_status=APPROVED&limit=10&page=1"
+    )
+    assert approved.status_code == 200
+    approved_ids = {item["id"] for item in approved.json()["items"]}
+    assert log_id not in approved_ids
+
+    client_with_atl_auth.put(
+        f"/api/v1/aircraft-technical-log/{log_id}",
+        json={"work_status": "APPROVED"},
+    )
+
+    approved2 = client_with_atl_auth.get(
+        "/api/v1/aircraft-technical-log/paged?work_status=APPROVED&limit=10&page=1"
+    )
+    assert approved2.status_code == 200
+    approved_ids2 = {item["id"] for item in approved2.json()["items"]}
+    assert log_id in approved_ids2
+
+
 def test_update_aircraft_technical_log(
-    client: TestClient,
+    client_with_atl_auth: TestClient,
     test_aircraft_technical_log_data: dict
 ):
     """Test updating an aircraft technical log."""
     # Create ATL log
-    create_response = client.post(
+    create_response = client_with_atl_auth.post(
         "/api/v1/aircraft-technical-log/",
         json=test_aircraft_technical_log_data
     )
+    assert create_response.status_code == 201
     log_id = create_response.json()["id"]
 
     # Update it
     update_data = {"remarks": "Updated remarks for testing"}
-    response = client.put(
+    response = client_with_atl_auth.put(
         f"/api/v1/aircraft-technical-log/{log_id}",
         json=update_data
     )
@@ -80,17 +139,142 @@ def test_update_aircraft_technical_log(
 
 
 def test_delete_aircraft_technical_log(
-    client: TestClient,
+    client_with_atl_auth: TestClient,
     test_aircraft_technical_log_data: dict
 ):
     """Test soft deleting an ATL log."""
     # Create ATL log
-    create_response = client.post(
+    create_response = client_with_atl_auth.post(
         "/api/v1/aircraft-technical-log/",
         json=test_aircraft_technical_log_data
     )
+    assert create_response.status_code == 201
     log_id = create_response.json()["id"]
 
     # Delete it
-    response = client.delete(f"/api/v1/aircraft-technical-log/{log_id}")
+    response = client_with_atl_auth.delete(f"/api/v1/aircraft-technical-log/{log_id}")
     assert response.status_code == 204
+
+
+def test_atl_paged_rbac_maintenance_planner_sees_null_work_status(client: TestClient):
+    """Maintenance Planner without work_status query param may list rows where work_status is NULL."""
+    async def seed_roles():
+        async with TestSessionLocal() as session:
+            mm = Role(name="Maintenance Manager", description="rbac")
+            pl = Role(name="Maintenance Planner", description="rbac")
+            session.add_all([mm, pl])
+            await session.commit()
+            await session.refresh(mm)
+            await session.refresh(pl)
+            return mm.id, pl.id
+
+    async def clear_work_status(log_id: int) -> None:
+        async with TestSessionLocal() as session:
+            await session.execute(
+                update(AircraftTechnicalLog)
+                .where(AircraftTechnicalLog.id == log_id)
+                .values(work_status=None)
+            )
+            await session.commit()
+
+    mm_rid, pl_rid = asyncio.run(seed_roles())
+    acting_role = {"rid": mm_rid}
+
+    async def override_account():
+        acc = type("Acc", (), {})()
+        acc.id = 8801
+        acc.status = True
+        acc.role_id = acting_role["rid"]
+        return acc
+
+    app.dependency_overrides[get_current_active_account] = override_account
+
+    log_data = {
+        "aircraft_fk": 1,
+        "sequence_no": "ATL-RBAC-PLAN-NULL",
+        "nature_of_flight": "TR",
+        "origin_station": "ORG",
+        "origin_date": "2025-01-17",
+        "origin_time": "10:00:00",
+        "destination_station": "DST",
+        "destination_date": "2025-01-17",
+        "destination_time": "12:00:00",
+        "number_of_landings": 1,
+        "hobbs_meter_start": 1.0,
+        "hobbs_meter_end": 2.0,
+        "hobbs_meter_total": 1.0,
+        "tachometer_start": 1.0,
+        "tachometer_end": 2.0,
+        "tachometer_total": 1.0,
+        "component_parts": [],
+    }
+    cr = client.post("/api/v1/aircraft-technical-log/", json=log_data)
+    assert cr.status_code == 201
+    log_id = cr.json()["id"]
+
+    asyncio.run(clear_work_status(log_id))
+
+    acting_role["rid"] = pl_rid
+    p1 = client.get("/api/v1/aircraft-technical-log/paged?limit=50&page=1")
+    assert p1.status_code == 200
+    assert log_id in {i["id"] for i in p1.json()["items"]}
+
+    p2 = client.get(
+        "/api/v1/aircraft-technical-log/paged?work_status=APPROVED&limit=50&page=1"
+    )
+    assert p2.status_code == 200
+    assert log_id not in {i["id"] for i in p2.json()["items"]}
+
+
+def test_atl_paged_admin_sees_all_work_statuses(client: TestClient):
+    """Admin lists ATL rows regardless of work_status (e.g. FOR_REVIEW)."""
+    async def seed_roles():
+        async with TestSessionLocal() as session:
+            adm = Role(name="Admin", description="rbac")
+            mm = Role(name="Maintenance Manager", description="rbac")
+            session.add_all([adm, mm])
+            await session.commit()
+            await session.refresh(adm)
+            await session.refresh(mm)
+            return adm.id, mm.id
+
+    adm_rid, mm_rid = asyncio.run(seed_roles())
+    acting_role = {"rid": mm_rid}
+
+    async def override_account():
+        acc = type("Acc", (), {})()
+        acc.id = 8802
+        acc.status = True
+        acc.role_id = acting_role["rid"]
+        return acc
+
+    app.dependency_overrides[get_current_active_account] = override_account
+
+    log_data = {
+        "aircraft_fk": 1,
+        "sequence_no": "ATL-RBAC-ADM",
+        "nature_of_flight": "TR",
+        "origin_station": "ORG",
+        "origin_date": "2025-01-17",
+        "origin_time": "10:00:00",
+        "destination_station": "DST",
+        "destination_date": "2025-01-17",
+        "destination_time": "12:00:00",
+        "number_of_landings": 1,
+        "hobbs_meter_start": 1.0,
+        "hobbs_meter_end": 2.0,
+        "hobbs_meter_total": 1.0,
+        "tachometer_start": 1.0,
+        "tachometer_end": 2.0,
+        "tachometer_total": 1.0,
+        "component_parts": [],
+    }
+    cr = client.post("/api/v1/aircraft-technical-log/", json=log_data)
+    assert cr.status_code == 201
+    log_id = cr.json()["id"]
+    assert cr.json().get("work_status") in (None, "FOR_REVIEW")
+
+    acting_role["rid"] = adm_rid
+    paged = client.get("/api/v1/aircraft-technical-log/paged?limit=50&page=1")
+    assert paged.status_code == 200
+    assert log_id in {i["id"] for i in paged.json()["items"]}

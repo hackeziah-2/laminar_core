@@ -17,6 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.inspection import inspect as sa_inspect
 
+from app.database import set_audit_fields
 from app.models.fleet_daily_update import FleetDailyUpdate, FleetDailyUpdateStatusEnum
 from app.models.aircraft import Aircraft
 
@@ -63,6 +64,8 @@ async def import_excel_generic(
     column_mapping: Optional[Dict[str, str]] = None,
     integrity_error_messages: Optional[Dict[str, str]] = None,
     inject_fields: Optional[Dict[str, Any]] = None,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Dict:
 
     fn = (file.filename or "").lower()
@@ -173,9 +176,14 @@ async def import_excel_generic(
 
                     if hasattr(existing, "is_deleted") and existing.is_deleted:
                         existing.is_deleted = False
-                    
+
+                    if audit_account_id is not None:
+                        await set_audit_fields(
+                            existing, audit_account_id, is_create=False
+                        )
+
                     if model.__name__ == "Aircraft":
-                        aircraft_registrations.append(obj.registration)
+                        aircraft_registrations.append(existing.registration)
 
 
                 else:
@@ -188,6 +196,8 @@ async def import_excel_generic(
                     payload = {k: data[k] for k in model_columns if k in data}
                     obj = model(**payload)
                     session.add(obj)
+                    if audit_account_id is not None:
+                        await set_audit_fields(obj, audit_account_id, is_create=True)
 
                     if model.__name__ == "Aircraft":
                         aircraft_registrations.append(obj.registration)
@@ -199,7 +209,6 @@ async def import_excel_generic(
             return {"status": "failed", "inserted": inserted, "updated": updated, "errors": errors}
 
         await session.commit()
-        print(aircraft_registrations, "aircraft_registrations")
         # ---------- POST-COMMIT HOOK (Aircraft only) ----------
         if model.__name__ == "Aircraft" and aircraft_registrations:
             result = await session.execute(
@@ -217,11 +226,20 @@ async def import_excel_generic(
                 if fd_row:
                     fd_row.is_deleted = False
                     fd_row.status = FleetDailyUpdateStatusEnum.RUNNING.value
+                    if audit_account_id is not None:
+                        await set_audit_fields(
+                            fd_row, audit_account_id, is_create=False
+                        )
                 else:
-                    session.add(FleetDailyUpdate(
+                    fd_new = FleetDailyUpdate(
                         aircraft_fk=aircraft.id,
                         status=FleetDailyUpdateStatusEnum.RUNNING.value,
-                    ))
+                    )
+                    session.add(fd_new)
+                    if audit_account_id is not None:
+                        await set_audit_fields(
+                            fd_new, audit_account_id, is_create=True
+                        )
 
             await session.commit()
 

@@ -7,7 +7,10 @@ from app.models.personnel_compliance import PersonnelComplianceItemType
 from app.schemas.personnel_compliance_schema import PersonnelComplianceRead
 
 
-def test_personnel_compliance_paged_includes_nonempty_account_full_name(client: TestClient):
+def test_personnel_compliance_paged_includes_nonempty_account_full_name(
+    client_with_regulatory_compliance_auth: TestClient,
+):
+    client = client_with_regulatory_compliance_auth
     account_data = {
         "first_name": "Jane",
         "last_name": "Pilot",
@@ -49,6 +52,34 @@ def test_personnel_compliance_paged_includes_nonempty_account_full_name(client: 
     assert fn is not None
     assert str(fn).strip() != ""
     assert fn == "Pilot, Jane"
+
+
+def test_personnel_compliance_create_rejects_duplicate_account_and_item_type(
+    client_with_regulatory_compliance_auth: TestClient,
+):
+    client = client_with_regulatory_compliance_auth
+    account_data = {
+        "first_name": "Dup",
+        "last_name": "User",
+        "username": "dupuser_pc",
+        "password": "securepassword123",
+        "status": True,
+    }
+    r = client.post("/api/v1/account-information/", json=account_data)
+    assert r.status_code == 201, r.text
+    account_id = r.json()["id"]
+
+    compliance_payload = {
+        "account_information_id": account_id,
+        "item_type": PersonnelComplianceItemType.HF_TRAINING.value,
+        "is_withhold": False,
+    }
+    r1 = client.post("/api/v1/personnel-compliance/", json=compliance_payload)
+    assert r1.status_code == 201, r1.text
+
+    r2 = client.post("/api/v1/personnel-compliance/", json=compliance_payload)
+    assert r2.status_code == 409, r2.text
+    assert r2.json()["detail"] == 'Entry Already Exists "HF_TRAINING"'
 
 
 def test_personnel_compliance_read_from_orm_full_name_from_first_last():

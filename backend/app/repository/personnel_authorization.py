@@ -4,6 +4,7 @@ from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.database import set_audit_fields
 from app.models.personnel_authorization import PersonnelAuthorization
 from app.models.account import AccountInformation
 from app.schemas.personnel_authorization_schema import (
@@ -129,9 +130,13 @@ async def get_personnel_authorization(
 async def create_personnel_authorization(
     session: AsyncSession,
     data: PersonnelAuthorizationCreate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> PersonnelAuthorizationRead:
     obj = PersonnelAuthorization(**data.dict())
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=True)
     await session.commit()
     await session.refresh(obj)
     await session.refresh(
@@ -150,6 +155,8 @@ async def update_personnel_authorization(
     session: AsyncSession,
     auth_id: int,
     data: PersonnelAuthorizationUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[PersonnelAuthorizationRead]:
     result = await session.execute(
         select(PersonnelAuthorization)
@@ -169,6 +176,8 @@ async def update_personnel_authorization(
     for k, v in update_data.items():
         setattr(obj, k, v)
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     await session.refresh(

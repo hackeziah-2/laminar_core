@@ -30,6 +30,8 @@ from app.repository.aircraft import (
 )
 from app.repository.aircraft_technical_log import search_atl_by_sequence_no
 from app.database import get_session
+from app.api.deps import get_current_active_account
+from app.models.account import AccountInformation
 from app.upload_config import UPLOAD_DIR
 from app.services.generate_report_excel import generate_excel
 from app.services.generate_report_pdf import generate_pdf_report
@@ -167,6 +169,7 @@ async def api_create_aircraft_with_file(
     engine_arc_file: UploadFile = File(None),
     propeller_arc_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     parsed = json.loads(json_data)
     aircraft_data = aircraft_schema.AircraftCreate(**parsed)
@@ -175,7 +178,8 @@ async def api_create_aircraft_with_file(
         session=session,
         data=aircraft_data,
         engine_file=engine_arc_file,
-        propeller_file=propeller_arc_file
+        propeller_file=propeller_arc_file,
+        audit_account_id=current_account.id,
     )
 
 @router.put("/{aircraft_id}", response_model=aircraft_schema.AircraftOut)
@@ -185,6 +189,7 @@ async def api_update_aircraft_with_file(
     engine_arc_file: UploadFile = File(None),
     propeller_arc_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):  
     parsed = json.loads(json_data)
     aircraft_data = aircraft_schema.AircraftUpdate(**parsed)
@@ -194,6 +199,7 @@ async def api_update_aircraft_with_file(
         data=aircraft_data,
         engine_file=engine_arc_file,
         propeller_file=propeller_arc_file,
+        audit_account_id=current_account.id,
     )
 
 

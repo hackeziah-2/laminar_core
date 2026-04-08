@@ -1,6 +1,67 @@
 [
-    {  
+    {
         "name": "Admin",
-        "description": "Admin"
+        "description": "Full access to all listed application modules.",
+        "permissions": [
+            { "module": "Dashboard", "read": true, "create": true, "update": true, "delete": true },
+            { "module": "Daily Update", "read": true, "create": true, "update": true, "delete": true },
+            { "module": "General Information", "read": true, "create": true, "update": true, "delete": true },
+            { "module": "Logbook", "read": true, "create": true, "update": true, "delete": true },
+            { "module": "Maintenance", "read": true, "create": true, "update": true, "delete": true },
+            { "module": "Operation", "read": true, "create": true, "update": true, "delete": true },
+            { "module": "Regulatory Compliance", "read": true, "create": true, "update": true, "delete": true },
+            { "module": "System Settings", "read": true, "create": true, "update": true, "delete": true }
+        ]
+    },
+    {
+        "name": "Mechanic",
+        "description": "Read-only access to General Information and Operation.",
+        "permissions": [
+            { "module": "General Information", "read": true, "create": false, "update": false, "delete": false },
+            { "module": "Operation", "read": true, "create": false, "update": false, "delete": false }
+        ]
+    },
+    {
+        "name": "Maintenance Planner",
+        "description": "Planning: dashboard read; create/update on core ops modules; read/update on Daily Update.",
+        "permissions": [
+            { "module": "Dashboard", "read": true, "create": false, "update": false, "delete": false },
+            { "module": "General Information", "read": true, "create": true, "update": true, "delete": false },
+            { "module": "Operation", "read": true, "create": true, "update": true, "delete": false },
+            { "module": "Daily Update", "read": true, "create": false, "update": true, "delete": false },
+            { "module": "Maintenance", "read": true, "create": true, "update": true, "delete": false },
+            { "module": "Logbook", "read": true, "create": true, "update": true, "delete": false }
+        ]
+    },
+    {
+        "name": "Maintenance Manager",
+        "description": "Same as planner with delete on applicable modules.",
+        "permissions": [
+            { "module": "Dashboard", "read": true, "create": false, "update": false, "delete": false },
+            { "module": "General Information", "read": true, "create": true, "update": true, "delete": true },
+            { "module": "Operation", "read": true, "create": true, "update": true, "delete": true },
+            { "module": "Daily Update", "read": true, "create": false, "update": true, "delete": true },
+            { "module": "Maintenance", "read": true, "create": true, "update": true, "delete": true },
+            { "module": "Logbook", "read": true, "create": true, "update": true, "delete": true }
+        ]
+    },
+    {
+        "name": "Technical Publication",
+        "description": "Regulatory compliance areas (read/create/update), General Information read, Operation update.",
+        "permissions": [
+            { "module": "Regulatory Compliance", "read": true, "create": true, "update": true, "delete": false },
+            { "module": "General Information", "read": true, "create": false, "update": false, "delete": false },
+            { "module": "Operation", "read": false, "create": false, "update": true, "delete": false }
+        ]
+    },
+    {
+        "name": "Quality Manager",
+        "description": "Dashboard read; full CRUD on regulatory scope; create/update on GI and Operation.",
+        "permissions": [
+            { "module": "Dashboard", "read": true, "create": false, "update": false, "delete": false },
+            { "module": "General Information", "read": true, "create": true, "update": true, "delete": false },
+            { "module": "Operation", "read": true, "create": true, "update": true, "delete": false },
+            { "module": "Regulatory Compliance", "read": true, "create": true, "update": true, "delete": true }
+        ]
     }
 ]

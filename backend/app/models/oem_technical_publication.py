@@ -4,7 +4,7 @@ from sqlalchemy import Boolean, Column, Integer, Date, String, ForeignKey
 from sqlalchemy.dialects.postgresql import ENUM as PGEnum
 from sqlalchemy.orm import relationship
 
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
 class OemTechnicalPublicationCategoryTypeEnum(str, enum.Enum):
@@ -14,7 +14,7 @@ class OemTechnicalPublicationCategoryTypeEnum(str, enum.Enum):
     LICENSE = "LICENSE"
 
 
-class OemTechnicalPublication(Base, TimestampMixin, SoftDeleteMixin):
+class OemTechnicalPublication(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "oem_technical_publications"
 
     id = Column(Integer, primary_key=True, index=True)

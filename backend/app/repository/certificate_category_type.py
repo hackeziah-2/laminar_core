@@ -4,6 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import set_audit_fields
 from app.models.certificate_category_type import CertificateCategoryType
 from app.schemas.certificate_category_type_schema import (
     CertificateCategoryTypeCreate,
@@ -15,6 +16,8 @@ from app.schemas.certificate_category_type_schema import (
 async def create_certificate_category_type(
     session: AsyncSession,
     data: CertificateCategoryTypeCreate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> CertificateCategoryTypeRead:
     """Create a new Certificate Category Type."""
     result = await session.execute(
@@ -30,6 +33,8 @@ async def create_certificate_category_type(
         )
     obj = CertificateCategoryType(**data.dict())
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=True)
     await session.commit()
     await session.refresh(obj)
     return CertificateCategoryTypeRead.from_orm(obj)
@@ -55,6 +60,8 @@ async def update_certificate_category_type(
     session: AsyncSession,
     category_id: int,
     data: CertificateCategoryTypeUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[CertificateCategoryTypeRead]:
     """Update a Certificate Category Type."""
     obj = await session.get(CertificateCategoryType, category_id)
@@ -77,6 +84,8 @@ async def update_certificate_category_type(
     for k, v in update_data.items():
         setattr(obj, k, v)
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     return CertificateCategoryTypeRead.from_orm(obj)

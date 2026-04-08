@@ -3,10 +3,10 @@ from datetime import date
 from sqlalchemy import Column, Integer, String, Text, Float, Date, ForeignKey
 from sqlalchemy.orm import relationship
 
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
-class CPCPMonitoring(Base, TimestampMixin, SoftDeleteMixin):
+class CPCPMonitoring(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     """CPCP (Continuing Program Compliance Program) Monitoring."""
 
     __tablename__ = "cpcp_monitoring"

@@ -3,6 +3,7 @@ from typing import Optional
 
 from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.account import AccountInformation
 from app.core.security import verify_password
@@ -15,6 +16,7 @@ async def get_account_by_id(
     """Get AccountInformation by ID (excludes soft-deleted)."""
     result = await session.execute(
         select(AccountInformation)
+        .options(selectinload(AccountInformation.role))
         .where(AccountInformation.id == account_id)
         .where(AccountInformation.is_deleted == False)
     )

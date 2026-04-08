@@ -5,9 +5,23 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_active_account
 from app.database import get_session
-from app.repository.advisory import list_advisory_items, update_advisory_expiry, update_advisory_withhold
+from app.models.account import AccountInformation
+from app.repository.advisory import (
+    get_advisory_detail,
+    list_advisory_items,
+    update_advisory_expiry,
+    update_advisory_withhold,
+)
+from app.repository.aircraft_statutory_certificate_history import (
+    create_aircraft_statutory_certificate_history,
+)
+from app.repository.organizational_approval_history import (
+    create_organizational_approval_history,
+)
 from app.schemas.advisory_schema import (
+    AdvisoryDetailResponse,
     AdvisoryFilterOption,
     AdvisoryFilterOptionsResponse,
     AdvisoryPagedResponse,
@@ -134,6 +148,39 @@ async def get_advisory_paged(
     )
 
 
+@router.get(
+    "/{id}",
+    response_model=AdvisoryDetailResponse,
+    summary="Get advisory expiry_date and web_link",
+)
+@router.get(
+    "/{id}/",
+    response_model=AdvisoryDetailResponse,
+    summary="Get advisory expiry_date and web_link",
+)
+async def get_advisory_by_id(
+    id: int,
+    regulatory_compliance: RegulatoryComplianceSource = Query(
+        ...,
+        description="Source table: aircraft-statutory-certificates, organizational-approvals, oem-technical-publication, or personnel-compliance",
+    ),
+    session: AsyncSession = Depends(get_session),
+):
+    """Return expiry_date and web_link for the source row (id + regulatory_compliance)."""
+    try:
+        expiry_date, web_link = await get_advisory_detail(
+            session=session,
+            regulatory_compliance=regulatory_compliance,
+            id=id,
+        )
+    except ValueError as e:
+        msg = str(e)
+        if "not found" in msg.lower():
+            raise HTTPException(status_code=404, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
+    return AdvisoryDetailResponse(expiry_date=expiry_date, web_link=web_link)
+
+
 @router.put(
     "/{id}/{expiry}/",
     status_code=200,
@@ -144,32 +191,56 @@ async def put_advisory_expiry(
     expiry: str,
     body: AdvisoryUpdateExpiryBody,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
-    """Update the expiry date for an advisory item by id.
+    """Renew advisory expiry: update source row and append regulatory history when applicable.
 
-    Body: regulatory_compliance (required).
+    Body: regulatory_compliance (required) selects the source table; optional web_link for statutory /
+    approval / OEM rows.
 
-    For aircraft-statutory-certificates, organizational-approvals, oem-technical-publication:
-      sets date_of_expiration = expiry.
-
-    For personnel-compliance: sets expiry_date on the personnel compliance record.
+    Organizational approvals and aircraft statutory certificates snapshot the prior row into their
+    history tables before applying the new expiry (same pattern as create-with-update flows).
     """
     try:
         expiry_date = datetime.strptime(expiry, "%Y-%m-%d").date()
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid expiry date; use YYYY-MM-DD")
+
     try:
-        await update_advisory_expiry(
+        history_oa, history_asc = await update_advisory_expiry(
             session=session,
             regulatory_compliance=body.regulatory_compliance,
             id=id,
             expiry=expiry_date,
+            web_link=body.web_link,
+            audit_account_id=current_account.id,
         )
+
+        if history_oa is not None:
+            await create_organizational_approval_history(
+                session,
+                history_oa,
+                audit_account_id=current_account.id,
+                commit=False,
+            )
+        if history_asc is not None:
+            await create_aircraft_statutory_certificate_history(
+                session,
+                history_asc,
+                audit_account_id=current_account.id,
+                commit=False,
+            )
+
+        await session.commit()
     except ValueError as e:
+        await session.rollback()
         msg = str(e)
         if "not found" in msg.lower():
             raise HTTPException(status_code=404, detail=msg)
         raise HTTPException(status_code=400, detail=msg)
+    except Exception:
+        await session.rollback()
+        raise
     return {"message": "Expiry updated"}
 
 
@@ -182,6 +253,7 @@ async def put_advisory_withhold(
     id: int,
     regulatory_compliance: RegulatoryComplianceSource,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Set is_withhold to True for an advisory item by id and regulatory_compliance.
 
@@ -194,6 +266,7 @@ async def put_advisory_withhold(
             session=session,
             regulatory_compliance=regulatory_compliance,
             id=id,
+            audit_account_id=current_account.id,
         )
     except ValueError as e:
         msg = str(e)
@@ -208,5 +281,7 @@ router_advisory.get("", response_model=AdvisoryPagedResponse)(get_advisory)
 router_advisory.get("/", response_model=AdvisoryPagedResponse)(get_advisory)
 router_advisory.get("/paged", response_model=AdvisoryPagedResponse)(get_advisory_paged)
 router_advisory.get("/paged/", response_model=AdvisoryPagedResponse)(get_advisory_paged)
+router_advisory.get("/{id}", response_model=AdvisoryDetailResponse)(get_advisory_by_id)
+router_advisory.get("/{id}/", response_model=AdvisoryDetailResponse)(get_advisory_by_id)
 router_advisory.put("/{id}/{expiry}/", status_code=200)(put_advisory_expiry)
 router_advisory.put("/withhold/{id}/{regulatory_compliance}", status_code=200)(put_advisory_withhold)

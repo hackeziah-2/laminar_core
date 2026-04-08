@@ -32,7 +32,9 @@ from app.repository.aircraft_technical_logbook import (
    get_logbook_entry,
    update_logbook_entry
 )
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
 
 from app.services.generate_report_excel import generate_excel
 from app.services.generate_report_pdf import generate_pdf_report
@@ -41,10 +43,13 @@ router = APIRouter(prefix="/api/v1/aircraft-technical-logbook", tags=["Aircraft-
 
 @router.post("", response_model = AircraftLogbookEntryCreate, status_code=201)
 async def create_aircraft_logbook(
-        payload: AircraftLogbookEntryCreate, 
-        session: AsyncSession = Depends(get_session)
+        payload: AircraftLogbookEntryCreate,
+        session: AsyncSession = Depends(get_session),
+        current_account: AccountInformation = Depends(get_current_active_account),
     ):
-    return await create_logbook_entry(session, payload)
+    return await create_logbook_entry(
+        session, payload, audit_account_id=current_account.id
+    )
 
 @router.get("/{logbook_id:int}", response_model=AircraftLogbookEntryRead)
 async def api_get_atl(logbook_id: int, session: AsyncSession = Depends(get_session)):
@@ -61,11 +66,13 @@ async def api_update_logbook_entry(
     logbook_entry_id: int,
     logbook_entry_in: AircraftLogbookEntryUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     updated = await update_logbook_entry(
         session=session,
         logbook_entry_id=logbook_entry_id,
         logbook_entry_in=logbook_entry_in,
+        audit_account_id=current_account.id,
     )
 
     if not updated:

@@ -6,6 +6,7 @@ from sqlalchemy import select, or_, cast, String, Integer, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 
+from app.database import set_audit_fields
 from app.models.aircraft_techinical_log import (
     AircraftTechnicalLog,
     ComponentPartsRecord,
@@ -13,6 +14,8 @@ from app.models.aircraft_techinical_log import (
     WorkStatus,
 )
 from app.models.aircraft import Aircraft
+from app.models.account import AccountInformation
+from app.core.atl_paged_rbac import atl_rbac_filter
 from app.schemas.aircraft_technical_log_schema import (
     AircraftTechnicalLogCreate,
     AircraftTechnicalLogUpdate,
@@ -50,7 +53,9 @@ def generate_range(start_id: str, end_id: str) -> list[str]:
 
 async def create_aircraft_technical_log(
     session: AsyncSession,
-    data: AircraftTechnicalLogCreate
+    data: AircraftTechnicalLogCreate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> AircraftTechnicalLogRead:
     """Create a new Aircraft Technical Log entry with optional gap-fill (skipped when first ATL for aircraft). Sequence numbers stored as number only (e.g. 001)."""
 
@@ -82,7 +87,7 @@ async def create_aircraft_technical_log(
     else:
         log_data['nature_of_flight'] = None  # ensure NULL when empty/omitted
 
-    # work_status: apply from payload or leave unset so DB default (FOR_REVIEW) applies
+    # work_status: explicit FOR_REVIEW when omitted (matches intended lifecycle; avoids NULL so RBAC/list filters apply)
     ws = log_data.get('work_status')
     if ws is not None:
         if isinstance(ws, str):
@@ -90,7 +95,7 @@ async def create_aircraft_technical_log(
         else:
             log_data['work_status'] = ws
     else:
-        log_data.pop('work_status', None)  # use DB default
+        log_data['work_status'] = WorkStatus.FOR_REVIEW
 
     # Get latest ATL for this aircraft (for hobbs/tach and for gap detection)
     latest_stmt = (
@@ -135,6 +140,8 @@ async def create_aircraft_technical_log(
                 gap_entry = AircraftTechnicalLog(sequence_no=seq_no, aircraft_fk=data.aircraft_fk)
                 session.add(gap_entry)
                 await session.flush()
+                if audit_account_id is not None:
+                    await set_audit_fields(gap_entry, audit_account_id, is_create=True)
 
     # Create component parts if provided
     if data.component_parts:
@@ -144,6 +151,11 @@ async def create_aircraft_technical_log(
                 **part_data.dict()
             )
             session.add(part)
+            if audit_account_id is not None:
+                await set_audit_fields(part, audit_account_id, is_create=True)
+
+    if audit_account_id is not None:
+        await set_audit_fields(entry, audit_account_id, is_create=True)
 
     await session.commit()
     await session.refresh(entry)
@@ -209,7 +221,9 @@ async def get_aircraft_technical_log(
 async def update_aircraft_technical_log(
     session: AsyncSession,
     log_id: int,
-    log_in: AircraftTechnicalLogUpdate
+    log_in: AircraftTechnicalLogUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[AircraftTechnicalLogRead]:
     """Update an Aircraft Technical Log entry."""
     obj = await session.get(AircraftTechnicalLog, log_id)
@@ -264,8 +278,12 @@ async def update_aircraft_technical_log(
                 **part_data.dict()
             )
             session.add(part)
+            if audit_account_id is not None:
+                await set_audit_fields(part, audit_account_id, is_create=True)
 
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ['aircraft', 'component_parts'])
@@ -356,15 +374,20 @@ async def list_atl_paged(
     return items, total
 
 
+@atl_rbac_filter()
 async def list_aircraft_technical_logs(
     session: AsyncSession,
     limit: int = 0,
     offset: int = 0,
     search: Optional[str] = None,
     aircraft_fk: Optional[int] = None,
+    work_status: Optional[WorkStatus] = None,
     sort: Optional[str] = "",
+    current_account: Optional[AccountInformation] = None,
 ) -> Tuple[List[AircraftTechnicalLog], int]:
-    """List Aircraft Technical Log entries with pagination."""
+    """List Aircraft Technical Log entries with pagination.
+    work_status RBAC is applied in ``atl_rbac_filter`` from ``current_account``'s role.
+    """
     stmt = (
         select(AircraftTechnicalLog)
         .options(
@@ -468,15 +491,7 @@ async def list_aircraft_technical_logs(
             )
         )
 
-    total = (await session.execute(count_stmt)).scalar()
-
-    # Pagination
-    stmt = stmt.limit(limit).offset(offset)
-
-    result = await session.execute(stmt)
-    items = result.scalars().all()
-
-    return items, total
+    return stmt, count_stmt
 
 
 async def get_latest_aircraft_technical_log(

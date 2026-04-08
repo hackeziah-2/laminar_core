@@ -4,6 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import set_audit_fields
 from app.models.authorization_scope_baron import AuthorizationScopeBaron
 from app.schemas.authorization_scope_baron_schema import (
     AuthorizationScopeBaronCreate,
@@ -15,6 +16,8 @@ from app.schemas.authorization_scope_baron_schema import (
 async def create_authorization_scope_baron(
     session: AsyncSession,
     data: AuthorizationScopeBaronCreate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> AuthorizationScopeBaronRead:
     result = await session.execute(
         select(AuthorizationScopeBaron).where(
@@ -29,6 +32,8 @@ async def create_authorization_scope_baron(
         )
     obj = AuthorizationScopeBaron(**data.dict())
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=True)
     await session.commit()
     await session.refresh(obj)
     return AuthorizationScopeBaronRead.from_orm(obj)
@@ -53,6 +58,8 @@ async def update_authorization_scope_baron(
     session: AsyncSession,
     scope_id: int,
     data: AuthorizationScopeBaronUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[AuthorizationScopeBaronRead]:
     obj = await session.get(AuthorizationScopeBaron, scope_id)
     if not obj or obj.is_deleted:
@@ -74,6 +81,8 @@ async def update_authorization_scope_baron(
     for k, v in update_data.items():
         setattr(obj, k, v)
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     return AuthorizationScopeBaronRead.from_orm(obj)

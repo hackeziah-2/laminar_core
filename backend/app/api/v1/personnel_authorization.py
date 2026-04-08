@@ -16,7 +16,9 @@ from app.repository.personnel_authorization import (
     update_personnel_authorization,
     soft_delete_personnel_authorization,
 )
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
 
 router = APIRouter(
     prefix="/api/v1/personnel-authorization",
@@ -85,9 +87,12 @@ async def api_list_paged(
 async def api_create(
     payload: PersonnelAuthorizationCreate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new Personnel Authorization. POST /api/v1/personnel-authorization or .../personnel-authorization/."""
-    return await create_personnel_authorization(session, payload)
+    return await create_personnel_authorization(
+        session, payload, audit_account_id=current_account.id
+    )
 
 
 # ---------- Read / Update / Delete by ID ----------
@@ -111,9 +116,15 @@ async def api_update(
     auth_id: int = Path(..., ge=1, description="Personnel authorization ID"),
     payload: PersonnelAuthorizationUpdate = Body(...),
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update a Personnel Authorization by ID."""
-    updated = await update_personnel_authorization(session, auth_id, payload)
+    updated = await update_personnel_authorization(
+        session,
+        auth_id,
+        payload,
+        audit_account_id=current_account.id,
+    )
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
