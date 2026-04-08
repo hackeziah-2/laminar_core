@@ -6,6 +6,11 @@ from app.core.security import decode_access_token
 from app.database import get_session
 from app.models.account import AccountInformation
 from app.repository.account_auth import get_account_by_id
+from sqlalchemy import select
+from app.models.module import Module
+from app.models.role_permission import RolePermission
+from app.models.user_permission import UserPermission
+
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -61,16 +66,12 @@ def require_permission(module_name: str, action: str):
     action: 'can_read', 'can_write', 'can_create', 'can_update', 'can_delete', 'can_approve'
     Use: Depends(require_permission("account-information", "can_update"))
     """
-    from sqlalchemy import select
-
     async def _check(
         account: AccountInformation = Depends(get_current_active_account),
         session: AsyncSession = Depends(get_session),
     ) -> AccountInformation:
         # Load role and user_permissions
-        from app.models.module import Module
-        from app.models.role_permission import RolePermission
-        from app.models.user_permission import UserPermission
+
 
         result = await session.execute(
             select(Module).where(Module.name == module_name, Module.is_deleted == False)

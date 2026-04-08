@@ -7,7 +7,10 @@ from app.models.personnel_compliance import PersonnelComplianceItemType
 from app.schemas.personnel_compliance_schema import PersonnelComplianceRead
 
 
-def test_personnel_compliance_paged_includes_nonempty_account_full_name(client: TestClient):
+def test_personnel_compliance_paged_includes_nonempty_account_full_name(
+    client_with_regulatory_compliance_auth: TestClient,
+):
+    client = client_with_regulatory_compliance_auth
     account_data = {
         "first_name": "Jane",
         "last_name": "Pilot",
@@ -51,7 +54,10 @@ def test_personnel_compliance_paged_includes_nonempty_account_full_name(client: 
     assert fn == "Pilot, Jane"
 
 
-def test_personnel_compliance_create_rejects_duplicate_account_and_item_type(client: TestClient):
+def test_personnel_compliance_create_rejects_duplicate_account_and_item_type(
+    client_with_regulatory_compliance_auth: TestClient,
+):
+    client = client_with_regulatory_compliance_auth
     account_data = {
         "first_name": "Dup",
         "last_name": "User",
@@ -73,7 +79,7 @@ def test_personnel_compliance_create_rejects_duplicate_account_and_item_type(cli
 
     r2 = client.post("/api/v1/personnel-compliance/", json=compliance_payload)
     assert r2.status_code == 409, r2.text
-    assert r2.json()["detail"] == "Entry Already Exists"
+    assert r2.json()["detail"] == 'Entry Already Exists "HF_TRAINING"'
 
 
 def test_personnel_compliance_read_from_orm_full_name_from_first_last():

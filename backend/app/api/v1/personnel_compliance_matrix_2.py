@@ -1,3 +1,5 @@
+import json
+import time
 from math import ceil
 from typing import Optional
 
@@ -22,6 +24,16 @@ router = APIRouter(
 )
 
 
+@router.get(
+    "",
+    response_model=PersonnelComplianceMatrix2PagedResponse,
+    summary="Personnel compliance matrix (grouped by account)",
+)
+@router.get(
+    "/",
+    response_model=PersonnelComplianceMatrix2PagedResponse,
+    summary="Personnel compliance matrix (grouped by account)",
+)
 @router.get(
     "/paged",
     response_model=PersonnelComplianceMatrix2PagedResponse,
@@ -52,6 +64,40 @@ async def api_matrix_2_paged(
     ),
 ):
     offset = (page - 1) * limit
+    # region agent log
+    try:
+        with open(
+            "/Users/kevinpaullamadrid/Desktop/Project/laminar_core/.cursor/debug-004053.log",
+            "a",
+            encoding="utf-8",
+        ) as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "sessionId": "004053",
+                        "timestamp": int(time.time() * 1000),
+                        "hypothesisId": "H3-H4",
+                        "location": "personnel_compliance_matrix_2.py:api_matrix_2_paged:entry",
+                        "message": "request query params",
+                        "data": {
+                            "limit": limit,
+                            "page": page,
+                            "offset": offset,
+                            "search": (search or "")[:120] if search else None,
+                            "sort": (sort or "")[:120] if sort else None,
+                            "designation": (account_information__designation or "")[:120]
+                            if account_information__designation
+                            else None,
+                        },
+                        "runId": "post-fix",
+                    },
+                    default=str,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # endregion
     rows, total, compliance_by_account = await list_personnel_compliance_matrix_2_paged(
         session=session,
         limit=limit,
@@ -63,11 +109,12 @@ async def api_matrix_2_paged(
     pages = ceil(total / limit) if total else 0
     return PersonnelComplianceMatrix2PagedResponse(
         items=[
-            PersonnelComplianceMatrix2Item.from_personnel_authorization(
-                r,
-                compliance_by_type=compliance_by_account.get(r.account_information_id),
+            PersonnelComplianceMatrix2Item.from_account_and_personnel_authorization(
+                acc,
+                pa,
+                compliance_by_type=compliance_by_account.get(acc.id),
             )
-            for r in rows
+            for acc, pa in rows
         ],
         total=total,
         page=page,

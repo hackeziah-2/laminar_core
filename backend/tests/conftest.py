@@ -117,6 +117,72 @@ def client_with_atl_auth(client: TestClient):
 
 
 @pytest.fixture(scope="function")
+def client_with_regulatory_compliance_auth(client: TestClient):
+    """
+    Bypass JWT for tests: seeds Module + RolePermission for Regulatory Compliance,
+    creates an auditor account (for audit FKs on created_by/updated_by), and stubs
+    get_current_active_account to that user.
+    """
+    import asyncio
+    import uuid
+
+    from app.api.deps import get_current_active_account
+    from app.core.security import get_password_hash
+    from app.models.account import AccountInformation
+    from app.models.module import Module
+    from app.models.personnel_compliance import PERSONNEL_COMPLIANCE_MODULE_NAME
+    from app.models.role import Role
+    from app.models.role_permission import RolePermission
+
+    async def _seed() -> tuple[int, int]:
+        async with TestSessionLocal() as session:
+            mod = Module(name=PERSONNEL_COMPLIANCE_MODULE_NAME)
+            session.add(mod)
+            await session.flush()
+            role = Role(name="RC Test Role", description="pytest regulatory compliance")
+            session.add(role)
+            await session.flush()
+            session.add(
+                RolePermission(
+                    role_id=role.id,
+                    module_id=mod.id,
+                    can_read=True,
+                    can_create=True,
+                    can_update=True,
+                    can_delete=True,
+                )
+            )
+            username = f"rc_audit_{uuid.uuid4().hex[:12]}"
+            auditor = AccountInformation(
+                first_name="Audit",
+                last_name="User",
+                username=username,
+                password=get_password_hash("pytestauditpass123"),
+                status=True,
+                role_id=role.id,
+            )
+            session.add(auditor)
+            await session.commit()
+            await session.refresh(auditor)
+            return auditor.id, role.id
+
+    auditor_id, role_id = asyncio.run(_seed())
+
+    class _Stub:
+        def __init__(self, account_id: int, rid: int) -> None:
+            self.id = account_id
+            self.role_id = rid
+            self.status = True
+
+    async def _override_account():
+        return _Stub(auditor_id, role_id)
+
+    app.dependency_overrides[get_current_active_account] = _override_account
+    yield client
+    app.dependency_overrides.pop(get_current_active_account, None)
+
+
+@pytest.fixture(scope="function")
 def test_aircraft_data():
     """Sample aircraft data for testing."""
     return {
