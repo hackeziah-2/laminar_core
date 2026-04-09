@@ -325,21 +325,29 @@ async def list_account_informations(
 async def get_all_account_informations_list(
     session: AsyncSession,
     designation: Optional[List[str]] = None,
-    search: Optional[str] = None
+    role: Optional[List[str]] = None,
+    search: Optional[str] = None,
 ) -> List[AccountInformation]:
     """Get all Account Information entries (for list endpoint - no pagination)."""
     stmt = (
         select(AccountInformation)
         .where(AccountInformation.is_deleted == False)
     )
-    
+
+    role_values = [r for r in (role or []) if r]
+    if role_values:
+        stmt = stmt.join(Role, AccountInformation.role_id == Role.id).where(
+            Role.is_deleted == False,
+            or_(*[Role.name.ilike(f"%{name}%") for name in role_values]),
+        )
+
     # Filter by designation(s) if provided - match ANY of the provided designations (OR logic)
     if designation:
         designation_filters = []
         for desig in designation:
             if desig:  # Skip empty strings
                 designation_filters.append(AccountInformation.designation.ilike(f"%{desig}%"))
-        
+
         if designation_filters:
             # Use OR to match any of the designations
             stmt = stmt.where(or_(*designation_filters))
