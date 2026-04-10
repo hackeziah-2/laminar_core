@@ -38,6 +38,58 @@ from app.schemas.logbook_schema import (
 
 
 # ========== Engine Logbook CRUD ==========
+# async def create_engine_logbook(
+#     session: AsyncSession,
+#     data: EngineLogbookCreate,
+#     upload_file: UploadFile = None,
+#     *,
+#     audit_account_id: Optional[int] = None,
+# ) -> EngineLogbookRead:
+#     """Create a new Engine Logbook entry (with optional component_parts)."""
+#     logbook_data = data.dict(exclude={"component_parts"})
+#     if upload_file:
+#         file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
+#         with open(file_path, "wb") as f:
+#             f.write(await upload_file.read())
+#         logbook_data["upload_file"] = file_path
+
+#     entry = EngineLogbook(**logbook_data)
+#     try:
+#         session.add(entry)
+#         await session.flush()
+#         for cr in data.component_parts or []:
+#             cr_dict = cr.dict()
+#             cr_dict.pop("id", None)
+#             rec = EngineComponentRecord(engine_log_fk=entry.id, **cr_dict)
+#             session.add(rec)
+#         await session.flush()
+#         if audit_account_id is not None:
+#             await set_audit_fields(entry, audit_account_id, is_create=True)
+#             result_recs = await session.execute(
+#                 select(EngineComponentRecord).where(
+#                     EngineComponentRecord.engine_log_fk == entry.id
+#                 )
+#             )
+#             for rec in result_recs.scalars().all():
+#                 await set_audit_fields(rec, audit_account_id, is_create=True)
+#         await session.commit()
+#         # Re-fetch with component_parts so response includes them
+#         result = await session.execute(
+#             select(EngineLogbook)
+#             .options(
+#                 selectinload(EngineLogbook.mechanic),
+#                 selectinload(EngineLogbook.engine_component_parts),
+#             )
+#             .where(EngineLogbook.id == entry.id)
+#             .where(EngineLogbook.is_deleted == False)
+#             .execution_options(populate_existing=True)
+#         )
+#         entry = result.scalar_one_or_none() or entry
+#     except Exception as e:
+#         await session.rollback()
+#         raise HTTPException(status_code=400, detail=f"Failed to create engine logbook: {str(e)}")
+#     return EngineLogbookRead.from_orm(entry)
+
 async def create_engine_logbook(
     session: AsyncSession,
     data: EngineLogbookCreate,
@@ -58,12 +110,19 @@ async def create_engine_logbook(
         session.add(entry)
         await session.flush()
         for cr in data.component_parts or []:
-            rec = EngineComponentRecord(**cr.dict())
-            entry.engine_component_parts.append(rec)
+            cr_dict = cr.dict()
+            cr_dict.pop("id", None)
+            rec = EngineComponentRecord(engine_log_fk=entry.id, **cr_dict)
+            session.add(rec)
         await session.flush()
         if audit_account_id is not None:
             await set_audit_fields(entry, audit_account_id, is_create=True)
-            for rec in entry.engine_component_parts:
+            result_recs = await session.execute(
+                select(EngineComponentRecord).where(
+                    EngineComponentRecord.engine_log_fk == entry.id
+                )
+            )
+            for rec in result_recs.scalars().all():
                 await set_audit_fields(rec, audit_account_id, is_create=True)
         await session.commit()
         # Re-fetch with component_parts so response includes them
@@ -75,13 +134,13 @@ async def create_engine_logbook(
             )
             .where(EngineLogbook.id == entry.id)
             .where(EngineLogbook.is_deleted == False)
+            .execution_options(populate_existing=True)
         )
         entry = result.scalar_one_or_none() or entry
     except Exception as e:
         await session.rollback()
         raise HTTPException(status_code=400, detail=f"Failed to create engine logbook: {str(e)}")
     return EngineLogbookRead.from_orm(entry)
-
 
 async def get_engine_logbook(
     session: AsyncSession,
@@ -203,13 +262,31 @@ async def update_engine_logbook(
         setattr(obj, k, v)
 
     if "component_parts" in logbook_in.dict(exclude_unset=True):
-        for existing in list(obj.engine_component_parts):
-            await session.delete(existing)
+        existing_parts_map = {p.id: p for p in obj.engine_component_parts}
+        received_ids = set()
+        
         for cr in (logbook_in.component_parts or []):
-            rec = EngineComponentRecord(engine_log_fk=obj.id, **cr.dict())
-            session.add(rec)
-            if audit_account_id is not None:
-                await set_audit_fields(rec, audit_account_id, is_create=True)
+            cr_dict = cr.dict()
+            cr_id = cr_dict.pop("id", None)
+            
+            if cr_id and cr_id in existing_parts_map:
+                rec = existing_parts_map[cr_id]
+                for k_field, v_field in cr_dict.items():
+                    setattr(rec, k_field, v_field)
+                if audit_account_id is not None:
+                    await set_audit_fields(rec, audit_account_id, is_create=False)
+                received_ids.add(cr_id)
+            else:
+                rec = EngineComponentRecord(engine_log_fk=obj.id, **cr_dict)
+                session.add(rec)
+                obj.engine_component_parts.append(rec)
+                if audit_account_id is not None:
+                    await set_audit_fields(rec, audit_account_id, is_create=True)
+                    
+        for missing_id in set(existing_parts_map.keys()) - received_ids:
+            old_part = existing_parts_map[missing_id]
+            obj.engine_component_parts.remove(old_part)
+            await session.delete(old_part)
 
     try:
         session.add(obj)
@@ -225,6 +302,7 @@ async def update_engine_logbook(
             )
             .where(EngineLogbook.id == obj.id)
             .where(EngineLogbook.is_deleted == False)
+            .execution_options(populate_existing=True)
         )
         obj = result.scalar_one_or_none() or obj
     except Exception as e:
@@ -268,7 +346,9 @@ async def create_airframe_logbook(
         session.add(entry)
         await session.flush()
         for cr in data.component_parts or []:
-            rec = AirframeComponentRecord(airframe_log_fk=entry.id, **cr.dict())
+            cr_dict = cr.dict()
+            cr_dict.pop("id", None)
+            rec = AirframeComponentRecord(airframe_log_fk=entry.id, **cr_dict)
             session.add(rec)
         await session.flush()
         if audit_account_id is not None:
@@ -290,6 +370,7 @@ async def create_airframe_logbook(
             )
             .where(AirframeLogbook.id == entry.id)
             .where(AirframeLogbook.is_deleted == False)
+            .execution_options(populate_existing=True)
         )
         entry = result.scalar_one_or_none() or entry
     except Exception as e:
@@ -418,13 +499,31 @@ async def update_airframe_logbook(
         setattr(obj, k, v)
 
     if "component_parts" in logbook_in.dict(exclude_unset=True):
-        for existing in list(obj.airframe_component_parts):
-            await session.delete(existing)
+        existing_parts_map = {p.id: p for p in obj.airframe_component_parts}
+        received_ids = set()
+        
         for cr in (logbook_in.component_parts or []):
-            rec = AirframeComponentRecord(airframe_log_fk=obj.id, **cr.dict())
-            session.add(rec)
-            if audit_account_id is not None:
-                await set_audit_fields(rec, audit_account_id, is_create=True)
+            cr_dict = cr.dict()
+            cr_id = cr_dict.pop("id", None)
+            
+            if cr_id and cr_id in existing_parts_map:
+                rec = existing_parts_map[cr_id]
+                for k_field, v_field in cr_dict.items():
+                    setattr(rec, k_field, v_field)
+                if audit_account_id is not None:
+                    await set_audit_fields(rec, audit_account_id, is_create=False)
+                received_ids.add(cr_id)
+            else:
+                rec = AirframeComponentRecord(airframe_log_fk=obj.id, **cr_dict)
+                session.add(rec)
+                obj.airframe_component_parts.append(rec)
+                if audit_account_id is not None:
+                    await set_audit_fields(rec, audit_account_id, is_create=True)
+                    
+        for missing_id in set(existing_parts_map.keys()) - received_ids:
+            old_part = existing_parts_map[missing_id]
+            obj.airframe_component_parts.remove(old_part)
+            await session.delete(old_part)
 
     try:
         session.add(obj)
@@ -440,6 +539,7 @@ async def update_airframe_logbook(
             )
             .where(AirframeLogbook.id == obj.id)
             .where(AirframeLogbook.is_deleted == False)
+            .execution_options(populate_existing=True)
         )
         obj = result.scalar_one_or_none() or obj
     except Exception as e:
@@ -483,12 +583,19 @@ async def create_avionics_logbook(
         session.add(entry)
         await session.flush()
         for cr in data.component_parts or []:
-            rec = AvionicsComponentRecord(**cr.dict())
-            entry.avionics_component_parts.append(rec)
+            cr_dict = cr.dict()
+            cr_dict.pop("id", None)
+            rec = AvionicsComponentRecord(avionics_log_fk=entry.id, **cr_dict)
+            session.add(rec)
         await session.flush()
         if audit_account_id is not None:
             await set_audit_fields(entry, audit_account_id, is_create=True)
-            for rec in entry.avionics_component_parts:
+            result_recs = await session.execute(
+                select(AvionicsComponentRecord).where(
+                    AvionicsComponentRecord.avionics_log_fk == entry.id
+                )
+            )
+            for rec in result_recs.scalars().all():
                 await set_audit_fields(rec, audit_account_id, is_create=True)
         await session.commit()
         # Re-fetch with component_parts so response includes them
@@ -500,6 +607,7 @@ async def create_avionics_logbook(
             )
             .where(AvionicsLogbook.id == entry.id)
             .where(AvionicsLogbook.is_deleted == False)
+            .execution_options(populate_existing=True)
         )
         entry = result.scalar_one_or_none() or entry
     except Exception as e:
@@ -634,13 +742,31 @@ async def update_avionics_logbook(
         setattr(obj, k, v)
 
     if "component_parts" in logbook_in.dict(exclude_unset=True):
-        for existing in list(obj.avionics_component_parts):
-            await session.delete(existing)
+        existing_parts_map = {p.id: p for p in obj.avionics_component_parts}
+        received_ids = set()
+        
         for cr in (logbook_in.component_parts or []):
-            rec = AvionicsComponentRecord(avionics_log_fk=obj.id, **cr.dict())
-            session.add(rec)
-            if audit_account_id is not None:
-                await set_audit_fields(rec, audit_account_id, is_create=True)
+            cr_dict = cr.dict()
+            cr_id = cr_dict.pop("id", None)
+            
+            if cr_id and cr_id in existing_parts_map:
+                rec = existing_parts_map[cr_id]
+                for k_field, v_field in cr_dict.items():
+                    setattr(rec, k_field, v_field)
+                if audit_account_id is not None:
+                    await set_audit_fields(rec, audit_account_id, is_create=False)
+                received_ids.add(cr_id)
+            else:
+                rec = AvionicsComponentRecord(avionics_log_fk=obj.id, **cr_dict)
+                session.add(rec)
+                obj.avionics_component_parts.append(rec)
+                if audit_account_id is not None:
+                    await set_audit_fields(rec, audit_account_id, is_create=True)
+                    
+        for missing_id in set(existing_parts_map.keys()) - received_ids:
+            old_part = existing_parts_map[missing_id]
+            obj.avionics_component_parts.remove(old_part)
+            await session.delete(old_part)
 
     try:
         session.add(obj)
@@ -656,6 +782,7 @@ async def update_avionics_logbook(
             )
             .where(AvionicsLogbook.id == obj.id)
             .where(AvionicsLogbook.is_deleted == False)
+            .execution_options(populate_existing=True)
         )
         obj = result.scalar_one_or_none() or obj
     except Exception as e:

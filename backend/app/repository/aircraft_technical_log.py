@@ -19,7 +19,6 @@ from app.core.atl_paged_rbac import atl_rbac_filter
 from app.schemas.aircraft_technical_log_schema import (
     AircraftTechnicalLogCreate,
     AircraftTechnicalLogUpdate,
-    AircraftTechnicalLogRead,
     ComponentPartsRecordCreate,
 )
 
@@ -56,7 +55,7 @@ async def create_aircraft_technical_log(
     data: AircraftTechnicalLogCreate,
     *,
     audit_account_id: Optional[int] = None,
-) -> AircraftTechnicalLogRead:
+) -> AircraftTechnicalLog:
     """Create a new Aircraft Technical Log entry with optional gap-fill (skipped when first ATL for aircraft). Sequence numbers stored as number only (e.g. 001)."""
 
     sequence_no = _sequence_no_digits_only(data.sequence_no)
@@ -161,7 +160,7 @@ async def create_aircraft_technical_log(
     await session.refresh(entry)
     await session.refresh(entry, ['aircraft', 'component_parts'])
 
-    return AircraftTechnicalLogRead.from_orm(entry)
+    return entry
 
 def _normalize_atl_search(search: str) -> str:
     """Normalize ATL sequence search: strip and optionally remove leading 'ATL-' so 'ATL-24451' or '24451' both match."""
@@ -201,7 +200,7 @@ async def search_atl_by_sequence_no(
 async def get_aircraft_technical_log(
     session: AsyncSession,
     id: int
-) -> Optional[AircraftTechnicalLogRead]:
+) -> Optional[AircraftTechnicalLog]:
     """Get an Aircraft Technical Log entry by ID."""
     result = await session.execute(
         select(AircraftTechnicalLog)
@@ -215,7 +214,7 @@ async def get_aircraft_technical_log(
     obj = result.scalar_one_or_none()
     if not obj:
         return None
-    return AircraftTechnicalLogRead.from_orm(obj)
+    return obj
 
 
 async def update_aircraft_technical_log(
@@ -224,7 +223,7 @@ async def update_aircraft_technical_log(
     log_in: AircraftTechnicalLogUpdate,
     *,
     audit_account_id: Optional[int] = None,
-) -> Optional[AircraftTechnicalLogRead]:
+) -> Optional[AircraftTechnicalLog]:
     """Update an Aircraft Technical Log entry."""
     obj = await session.get(AircraftTechnicalLog, log_id)
     if not obj or obj.is_deleted:
@@ -288,7 +287,7 @@ async def update_aircraft_technical_log(
     await session.refresh(obj)
     await session.refresh(obj, ['aircraft', 'component_parts'])
 
-    return AircraftTechnicalLogRead.from_orm(obj)
+    return obj
 
 
 async def get_previous_atl(
@@ -497,7 +496,7 @@ async def list_aircraft_technical_logs(
 async def get_latest_aircraft_technical_log(
     session: AsyncSession,
     aircraft_fk: Optional[int] = None
-) -> Optional[AircraftTechnicalLogRead]:
+) -> Optional[AircraftTechnicalLog]:
     """Get the latest Aircraft Technical Log entry by sequence_no."""
     stmt = (
         select(AircraftTechnicalLog)
@@ -523,8 +522,8 @@ async def get_latest_aircraft_technical_log(
     
     if not obj:
         return None
-    
-    return AircraftTechnicalLogRead.from_orm(obj)
+
+    return obj
 
 
 async def soft_delete_aircraft_technical_log(
