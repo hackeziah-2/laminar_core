@@ -21,7 +21,7 @@ class ComponentRecordBase(BaseModel):
 
 class ComponentRecordCreate(ComponentRecordBase):
     """Payload for creating a component record (nested in logbook create/update)."""
-    pass
+    id: Optional[int] = None
 
 
 # ---------- Mechanic Detail Schema (for nested mechanic info) ----------

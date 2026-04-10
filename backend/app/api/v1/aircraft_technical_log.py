@@ -2,7 +2,7 @@ import json
 import uuid
 from math import ceil
 from pathlib import Path
-from typing import List, Dict, Optional, Any
+from typing import List, Optional, Any
 
 from fastapi import (
     APIRouter,
@@ -18,6 +18,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 from app.schemas import aircraft_technical_log_schema
+from app.core.atl_derived_times import (
+    aircraft_technical_log_read_with_computed,
+    atl_paged_item_with_computed,
+)
 from app.repository.aircraft_technical_log import (
     list_aircraft_technical_logs,
     search_atl_by_sequence_no,
@@ -62,103 +66,6 @@ async def _save_atl_upload(form_file: Any, subdir: str) -> Optional[str]:
     return f"{subdir}/{unique_name}"
 
 
-def _float_or_zero(value: Any) -> float:
-    """Parse value to float; return 0.0 on error or None."""
-    if value is None:
-        return 0.0
-    if isinstance(value, (int, float)):
-        return float(value) if (value == value) else 0.0  # NaN check
-    if isinstance(value, str):
-        try:
-            return float(value.strip()) if value.strip() else 0.0
-        except ValueError:
-            return 0.0
-    return 0.0
-
-
-def compute_auto_fields(atl, prev_atl, aircraft) -> Dict[str, float]:
-    """Compute auto_* fields for one ATL row. Previous = last ATL by sequence_no (same aircraft).
-    Airframe Run time = tach_start - tach_end; AFTT = Previous AFTT + run_time.
-    Engine/Propeller run time = Airframe run time; TSN/TSO = Previous + run_time; TBO = life_limit - current TSO.
-    """
-    out = {
-        "auto_airframe_run_time": 0.0,
-        "auto_airframe_aftt": 0.0,
-        "auto_engine_run_time": 0.0,
-        "auto_run_time": 0.0,
-        "auto_engine_tsn": 0.0,
-        "auto_engine_tso": 0.0,
-        "auto_engine_tbo": 0.0,
-        "auto_propeller_run_time": 0.0,
-        "auto_propeller_tsn": 0.0,
-        "auto_propeller_tso": 0.0,
-        "auto_propeller_tbo": 0.0,
-    }
-    try:
-        tach_start = _float_or_zero(getattr(atl, "tachometer_start", None))
-        tach_end = _float_or_zero(getattr(atl, "tachometer_end", None))
-        # Airframe Run time = tach start - tach end (per spec)
-        out["auto_airframe_run_time"] = tach_start - tach_end
-    except Exception:
-        pass
-
-    try:
-        prev_aftt = _float_or_zero(getattr(prev_atl, "airframe_aftt", None)) if prev_atl else 0.0
-        out["auto_airframe_aftt"] = prev_aftt + out["auto_airframe_run_time"]
-    except Exception:
-        pass
-
-    try:
-        out["auto_engine_run_time"] = out["auto_airframe_run_time"]
-        out["auto_run_time"] = out["auto_airframe_run_time"]
-    except Exception:
-        pass
-
-    try:
-        prev_engine_tsn = _float_or_zero(getattr(prev_atl, "engine_tsn", None)) if prev_atl else 0.0
-        out["auto_engine_tsn"] = prev_engine_tsn + out["auto_engine_run_time"]
-    except Exception:
-        pass
-
-    try:
-        prev_engine_tso = _float_or_zero(getattr(prev_atl, "engine_tso", None)) if prev_atl else 0.0
-        out["auto_engine_tso"] = prev_engine_tso + out["auto_engine_run_time"]
-    except Exception:
-        pass
-
-    try:
-        life_engine = _float_or_zero(getattr(aircraft, "engine_life_time_limit", None)) if aircraft else _float_or_zero(getattr(atl, "life_time_limit_engine", None))
-        curr_tso = out["auto_engine_tso"]  # use computed current TSO
-        out["auto_engine_tbo"] = life_engine - curr_tso if life_engine else 0.0
-    except Exception:
-        pass
-
-    try:
-        out["auto_propeller_run_time"] = out["auto_airframe_run_time"]
-    except Exception:
-        pass
-
-    try:
-        prev_prop_tsn = _float_or_zero(getattr(prev_atl, "propeller_tsn", None)) if prev_atl else 0.0
-        out["auto_propeller_tsn"] = prev_prop_tsn + out["auto_propeller_run_time"]
-    except Exception:
-        pass
-
-    try:
-        prev_prop_tso = _float_or_zero(getattr(prev_atl, "propeller_tso", None)) if prev_atl else 0.0
-        out["auto_propeller_tso"] = prev_prop_tso + out["auto_propeller_run_time"]
-    except Exception:
-        pass
-
-    try:
-        life_prop = _float_or_zero(getattr(aircraft, "propeller_life_time_limit", None)) if aircraft else _float_or_zero(getattr(atl, "life_time_limit_propeller", None))
-        curr_tso = out["auto_propeller_tso"]
-        out["auto_propeller_tbo"] = life_prop - curr_tso if life_prop else 0.0
-    except Exception:
-        pass
-
-    return out
-
 router = APIRouter(
     prefix="/api/v1/aircraft-technical-log",
     tags=["aircraft-technical-log"]
@@ -189,8 +96,8 @@ async def api_list_paged(
     current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Get paginated list of Aircraft Technical Log entries with auto_* computed fields.
-    Previous values are from the last ATL by sequence_no (same aircraft).
-    Auto fields: airframe/engine/propeller run time, AFTT, TSN, TSO, TBO (2 decimal places).
+    Previous row = last ATL by sequence_no (same aircraft). Airframe run time from ATL or tach delta;
+    engine/propeller run time match airframe; TSN/TSO use previous ATL or aircraft baseline when zero.
     RBAC: work_status visibility by role; Admin sees all ATL rows. Unknown or unmapped roles see no rows.
     Optional work_status query param further narrows results (within RBAC when applicable).
     """
@@ -209,15 +116,9 @@ async def api_list_paged(
 
     result_items = []
     for item in items:
-        base = aircraft_technical_log_schema.AircraftTechnicalLogRead.from_orm(item)
         prev_atl = await get_previous_atl(session, item.aircraft_fk, item.sequence_no)
         aircraft_obj = getattr(item, "aircraft", None)
-        auto_fields = compute_auto_fields(item, prev_atl, aircraft_obj)
-        auto_fields = {k: round(v, 2) for k, v in auto_fields.items()}
-        paged_item = aircraft_technical_log_schema.ATLPagedItemWithAuto(
-            **base.dict(),
-            **auto_fields,
-        )
+        paged_item = atl_paged_item_with_computed(item, prev_atl, aircraft_obj)
         result_items.append(paged_item.dict())
 
     return {
@@ -261,7 +162,7 @@ async def api_get_latest(
             status_code=404,
             detail="No Aircraft Technical Log entries found"
         )
-    return obj
+    return await aircraft_technical_log_read_with_computed(session, obj)
 
 
 @router.get(
@@ -279,7 +180,7 @@ async def api_get(
             status_code=404,
             detail="Aircraft Technical Log not found"
         )
-    return obj
+    return await aircraft_technical_log_read_with_computed(session, obj)
 
 
 @router.post(
@@ -293,9 +194,10 @@ async def api_create(
     current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new Aircraft Technical Log entry."""
-    return await create_aircraft_technical_log(
+    entry = await create_aircraft_technical_log(
         session, payload, audit_account_id=current_account.id
     )
+    return await aircraft_technical_log_read_with_computed(session, entry)
 
 
 async def _parse_update_payload(request: Request) -> aircraft_technical_log_schema.AircraftTechnicalLogUpdate:
@@ -372,7 +274,7 @@ async def api_update(
             detail="Aircraft Technical Log not found"
         )
 
-    return updated
+    return await aircraft_technical_log_read_with_computed(session, updated)
 
 
 @router.delete(

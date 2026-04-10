@@ -56,19 +56,30 @@ async def api_get_by_auth_stamp(
 
 @router.get("/account-informations-list", response_model=List[AccountInformationListItem])
 async def api_account_informations_list(
-    designation: Optional[List[str]] = Query(None, description="Filter by designation(s) - can provide multiple values (case-insensitive partial match). Example: ?designation=pilot&designation=Maintenance+Engineer"),
-    search: Optional[str] = Query(None, description="Search across first name, last name, middle name, license number, and username"),
-    session: AsyncSession = Depends(get_session)
+    role: Optional[List[str]] = Query(
+        None,
+        description="Filter by role name(s) from linked Role (case-insensitive partial match). Example: ?role=Pilot",
+    ),
+    designation: Optional[List[str]] = Query(
+        None,
+        description="Filter by designation(s) on the account (case-insensitive partial match). Example: ?designation=Captain",
+    ),
+    search: Optional[str] = Query(
+        None,
+        description="Search across first name, last name, middle name, license number, and username",
+    ),
+    session: AsyncSession = Depends(get_session),
 ):
     """Get all Account Information entries with fullname and license_no.
-    
-    Optionally filter by designation(s) and/or search across name fields and license number.
-    Multiple designations can be provided: ?designation=pilot&designation=Maintenance+Engineer
+
+    Optional filters: role (Role.name), designation (account field), and search across names/username/license.
+    Role and designation both apply when set (AND). Multiple values for the same filter use OR.
     """
     items = await get_all_account_informations_list(
-        session, 
+        session,
+        role=role,
         designation=designation,
-        search=search
+        search=search,
     )
     
     # Convert to list items with fullname using the schema method
