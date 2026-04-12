@@ -135,6 +135,66 @@ def test_update_engine_logbook(client: TestClient, aircraft_id: int):
     assert data["engine_tsn"] == update_data["engine_tsn"]
 
 
+def test_engine_logbook_component_parts_create_and_update(client: TestClient, aircraft_id: int):
+    """Engine logbook should insert and replace component parts from API payloads."""
+    create_data = {
+        "aircraft_fk": aircraft_id,
+        "date": "2026-01-27",
+        "sequence_no": "ENG-COMP-001",
+        "componentParts": [
+            {
+                "qty": 1,
+                "unit": "EA",
+                "nomenclature": "Spark Plug",
+                "removedPartNo": "OLD-1",
+                "removedSerialNo": "OLD-SN-1",
+                "installedPartNo": "NEW-1",
+                "installedSerialNo": "NEW-SN-1",
+                "ataChapter": "72",
+            }
+        ],
+    }
+    create_response = _post_logbook(client, "/api/v1/logbooks/engine", create_data)
+    assert create_response.status_code == 201, create_response.text
+    created = create_response.json()
+    assert len(created["component_parts"]) == 1
+    part_id = created["component_parts"][0]["id"]
+
+    update_data = {
+        "componentParts": [
+            {
+                "id": part_id,
+                "qty": 2,
+                "unit": "EA",
+                "nomenclature": "Spark Plug Updated",
+                "removedPartNo": "OLD-1",
+                "removedSerialNo": "OLD-SN-1",
+                "installedPartNo": "NEW-2",
+                "installedSerialNo": "NEW-SN-2",
+                "ataChapter": "72",
+            },
+            {
+                "qty": 1,
+                "unit": "EA",
+                "nomenclature": "Ignition Harness",
+                "removedPartNo": "OLD-2",
+                "removedSerialNo": "OLD-SN-2",
+                "installedPartNo": "NEW-3",
+                "installedSerialNo": "NEW-SN-3",
+                "ataChapter": "74",
+            },
+        ]
+    }
+    update_response = _put_logbook(client, f"/api/v1/logbooks/engine/{created['id']}", update_data)
+    assert update_response.status_code == 200, update_response.text
+    updated = update_response.json()
+    assert len(updated["component_parts"]) == 2
+    assert {part["nomenclature"] for part in updated["component_parts"]} == {
+        "Spark Plug Updated",
+        "Ignition Harness",
+    }
+
+
 def test_delete_engine_logbook(client: TestClient, aircraft_id: int):
     """Test soft deleting an engine logbook entry."""
     logbook_data = {
@@ -213,6 +273,54 @@ def test_update_airframe_logbook(client: TestClient, aircraft_id: int):
     assert data["description"] == update_data["description"]
 
 
+def test_airframe_logbook_component_parts_create_and_update(client: TestClient, aircraft_id: int):
+    """Airframe logbook should insert and replace component parts from API payloads."""
+    create_data = {
+        "aircraft_fk": aircraft_id,
+        "date": "2026-01-27",
+        "sequence_no": "AF-COMP-001",
+        "componentParts": [
+            {
+                "qty": 4,
+                "unit": "EA",
+                "nomenclature": "Seat Rail",
+                "removedPartNo": "AF-OLD-1",
+                "removedSerialNo": "AF-OLD-SN-1",
+                "installedPartNo": "AF-NEW-1",
+                "installedSerialNo": "AF-NEW-SN-1",
+                "ataChapter": "25",
+            }
+        ],
+    }
+    create_response = _post_logbook(client, "/api/v1/logbooks/airframe", create_data)
+    assert create_response.status_code == 201, create_response.text
+    created = create_response.json()
+    assert len(created["component_parts"]) == 1
+    part_id = created["component_parts"][0]["id"]
+
+    update_data = {
+        "componentParts": [
+            {
+                "id": part_id,
+                "qty": 5,
+                "unit": "EA",
+                "nomenclature": "Seat Rail Updated",
+                "removedPartNo": "AF-OLD-1",
+                "removedSerialNo": "AF-OLD-SN-1",
+                "installedPartNo": "AF-NEW-2",
+                "installedSerialNo": "AF-NEW-SN-2",
+                "ataChapter": "25",
+            }
+        ]
+    }
+    update_response = _put_logbook(client, f"/api/v1/logbooks/airframe/{created['id']}", update_data)
+    assert update_response.status_code == 200, update_response.text
+    updated = update_response.json()
+    assert len(updated["component_parts"]) == 1
+    assert updated["component_parts"][0]["nomenclature"] == "Seat Rail Updated"
+    assert updated["component_parts"][0]["qty"] == 5
+
+
 def test_delete_airframe_logbook(client: TestClient, aircraft_id: int):
     """Test soft deleting an airframe logbook entry."""
     logbook_data = {
@@ -248,6 +356,18 @@ def test_create_avionics_logbook(client: TestClient, aircraft_id: int):
         "serial_no": "SN-67890",
         "description": "Avionics maintenance",
         "signature": "Bob Johnson",
+        "componentParts": [
+            {
+                "qty": 1,
+                "unit": "EA",
+                "nomenclature": "GPS Tray",
+                "removedPartNo": "AV-OLD-1",
+                "removedSerialNo": "AV-OLD-SN-1",
+                "installedPartNo": "AV-NEW-1",
+                "installedSerialNo": "AV-NEW-SN-1",
+                "ataChapter": "34",
+            }
+        ],
     }
     response = _post_logbook(client, "/api/v1/logbooks/avionics", logbook_data)
     assert response.status_code == 201
@@ -255,6 +375,8 @@ def test_create_avionics_logbook(client: TestClient, aircraft_id: int):
     assert data["sequence_no"] == logbook_data["sequence_no"]
     assert data["component"] == logbook_data["component"]
     assert data["part_no"] == logbook_data["part_no"]
+    assert len(data["component_parts"]) == 1
+    assert data["component_parts"][0]["nomenclature"] == "GPS Tray"
 
 
 def test_get_avionics_logbook(client: TestClient, aircraft_id: int):
@@ -263,6 +385,18 @@ def test_get_avionics_logbook(client: TestClient, aircraft_id: int):
         "aircraft_fk": aircraft_id,
         "date": "2026-01-27",
         "sequence_no": "AV-002",
+        "componentParts": [
+            {
+                "qty": 1,
+                "unit": "EA",
+                "nomenclature": "Antenna",
+                "removedPartNo": "AV-OLD-2",
+                "removedSerialNo": "AV-OLD-SN-2",
+                "installedPartNo": "AV-NEW-2",
+                "installedSerialNo": "AV-NEW-SN-2",
+                "ataChapter": "34",
+            }
+        ],
     }
     create_response = _post_logbook(client, "/api/v1/logbooks/avionics", logbook_data)
     logbook_id = create_response.json()["id"]
@@ -271,6 +405,8 @@ def test_get_avionics_logbook(client: TestClient, aircraft_id: int):
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == logbook_id
+    assert len(data["component_parts"]) == 1
+    assert data["component_parts"][0]["nomenclature"] == "Antenna"
 
 
 def test_update_avionics_logbook(client: TestClient, aircraft_id: int):
@@ -279,15 +415,108 @@ def test_update_avionics_logbook(client: TestClient, aircraft_id: int):
         "aircraft_fk": aircraft_id,
         "date": "2026-01-27",
         "sequence_no": "AV-003",
+        "componentParts": [
+            {
+                "qty": 1,
+                "unit": "EA",
+                "nomenclature": "Display Unit",
+                "removedPartNo": "AV-OLD-3",
+                "removedSerialNo": "AV-OLD-SN-3",
+                "installedPartNo": "AV-NEW-3",
+                "installedSerialNo": "AV-NEW-SN-3",
+                "ataChapter": "31",
+            }
+        ],
     }
     create_response = _post_logbook(client, "/api/v1/logbooks/avionics", logbook_data)
     logbook_id = create_response.json()["id"]
+    part_id = create_response.json()["component_parts"][0]["id"]
 
-    update_data = {"component": "Updated Component", "part_no": "PN-99999"}
+    update_data = {
+        "component": "Updated Component",
+        "part_no": "PN-99999",
+        "componentParts": [
+            {
+                "id": part_id,
+                "qty": 2,
+                "unit": "EA",
+                "nomenclature": "Display Unit Updated",
+                "removedPartNo": "AV-OLD-3",
+                "removedSerialNo": "AV-OLD-SN-3",
+                "installedPartNo": "AV-NEW-4",
+                "installedSerialNo": "AV-NEW-SN-4",
+                "ataChapter": "31",
+            }
+        ],
+    }
     response = _put_logbook(client, f"/api/v1/logbooks/avionics/{logbook_id}", update_data)
     assert response.status_code == 200
     data = response.json()
     assert data["component"] == update_data["component"]
+    assert len(data["component_parts"]) == 1
+    assert data["component_parts"][0]["nomenclature"] == "Display Unit Updated"
+    assert data["component_parts"][0]["qty"] == 2
+
+
+def test_avionics_logbook_component_parts_create_and_update(client: TestClient, aircraft_id: int):
+    """Avionics logbook should insert and replace component parts from API payloads."""
+    create_data = {
+        "aircraft_fk": aircraft_id,
+        "date": "2026-01-27",
+        "sequence_no": "AV-COMP-001",
+        "component": "GPS Unit",
+        "componentParts": [
+            {
+                "qty": 1,
+                "unit": "EA",
+                "nomenclature": "GPS Tray",
+                "removedPartNo": "AV-OLD-1",
+                "removedSerialNo": "AV-OLD-SN-1",
+                "installedPartNo": "AV-NEW-1",
+                "installedSerialNo": "AV-NEW-SN-1",
+                "ataChapter": "34",
+            }
+        ],
+    }
+    create_response = _post_logbook(client, "/api/v1/logbooks/avionics", create_data)
+    assert create_response.status_code == 201, create_response.text
+    created = create_response.json()
+    assert len(created["component_parts"]) == 1
+    part_id = created["component_parts"][0]["id"]
+
+    update_data = {
+        "componentParts": [
+            {
+                "id": part_id,
+                "qty": 2,
+                "unit": "EA",
+                "nomenclature": "GPS Tray Updated",
+                "removedPartNo": "AV-OLD-1",
+                "removedSerialNo": "AV-OLD-SN-1",
+                "installedPartNo": "AV-NEW-2",
+                "installedSerialNo": "AV-NEW-SN-2",
+                "ataChapter": "34",
+            },
+            {
+                "qty": 1,
+                "unit": "EA",
+                "nomenclature": "Antenna",
+                "removedPartNo": "AV-OLD-2",
+                "removedSerialNo": "AV-OLD-SN-2",
+                "installedPartNo": "AV-NEW-3",
+                "installedSerialNo": "AV-NEW-SN-3",
+                "ataChapter": "34",
+            },
+        ]
+    }
+    update_response = _put_logbook(client, f"/api/v1/logbooks/avionics/{created['id']}", update_data)
+    assert update_response.status_code == 200, update_response.text
+    updated = update_response.json()
+    assert len(updated["component_parts"]) == 2
+    assert {part["nomenclature"] for part in updated["component_parts"]} == {
+        "GPS Tray Updated",
+        "Antenna",
+    }
 
 
 def test_delete_avionics_logbook(client: TestClient, aircraft_id: int):

@@ -1,11 +1,13 @@
 import os
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Type
 from math import ceil
 
 from fastapi import HTTPException, UploadFile
 from sqlalchemy import select, func, or_, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.attributes import NO_VALUE
+from sqlalchemy import inspect
 
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 
@@ -35,6 +37,58 @@ from app.schemas.logbook_schema import (
     PropellerLogbookUpdate,
     PropellerLogbookRead,
 )
+
+
+def _component_record_payload(component_record) -> dict:
+    """Convert nested component record payloads into ORM-ready field names."""
+    payload = component_record.dict(by_alias=False)
+    payload.pop("id", None)
+    return payload
+
+
+async def _sync_component_parts(
+    session: AsyncSession,
+    obj,
+    *,
+    parts,
+    relationship_attr: str,
+    foreign_key_field: str,
+    model_cls: Type,
+    audit_account_id: Optional[int],
+) -> None:
+    """Replace/update child component records for a logbook entry."""
+    relationship_state = inspect(obj).attrs[relationship_attr]
+    relationship_loaded = relationship_state.loaded_value is not NO_VALUE
+    existing_parts = list(relationship_state.loaded_value or []) if relationship_loaded else []
+    existing_parts_map = {part.id: part for part in existing_parts}
+    received_ids = set()
+
+    for component_record in parts or []:
+        payload = _component_record_payload(component_record)
+        part_id = component_record.id
+
+        if part_id and part_id in existing_parts_map:
+            rec = existing_parts_map[part_id]
+            for field_name, field_value in payload.items():
+                setattr(rec, field_name, field_value)
+            if audit_account_id is not None:
+                await set_audit_fields(rec, audit_account_id, is_create=False)
+            received_ids.add(part_id)
+            continue
+
+        payload[foreign_key_field] = obj.id
+        rec = model_cls(**payload)
+        if relationship_loaded:
+            getattr(obj, relationship_attr).append(rec)
+        else:
+            session.add(rec)
+        if audit_account_id is not None:
+            await set_audit_fields(rec, audit_account_id, is_create=True)
+
+    for missing_id in set(existing_parts_map.keys()) - received_ids:
+        old_part = existing_parts_map[missing_id]
+        getattr(obj, relationship_attr).remove(old_part)
+        await session.delete(old_part)
 
 
 # ========== Engine Logbook CRUD ==========
@@ -109,21 +163,18 @@ async def create_engine_logbook(
     try:
         session.add(entry)
         await session.flush()
-        for cr in data.component_parts or []:
-            cr_dict = cr.dict()
-            cr_dict.pop("id", None)
-            rec = EngineComponentRecord(engine_log_fk=entry.id, **cr_dict)
-            session.add(rec)
+        await _sync_component_parts(
+            session,
+            entry,
+            parts=data.component_parts,
+            relationship_attr="engine_component_parts",
+            foreign_key_field="engine_log_fk",
+            model_cls=EngineComponentRecord,
+            audit_account_id=audit_account_id,
+        )
         await session.flush()
         if audit_account_id is not None:
             await set_audit_fields(entry, audit_account_id, is_create=True)
-            result_recs = await session.execute(
-                select(EngineComponentRecord).where(
-                    EngineComponentRecord.engine_log_fk == entry.id
-                )
-            )
-            for rec in result_recs.scalars().all():
-                await set_audit_fields(rec, audit_account_id, is_create=True)
         await session.commit()
         # Re-fetch with component_parts so response includes them
         result = await session.execute(
@@ -262,31 +313,15 @@ async def update_engine_logbook(
         setattr(obj, k, v)
 
     if "component_parts" in logbook_in.dict(exclude_unset=True):
-        existing_parts_map = {p.id: p for p in obj.engine_component_parts}
-        received_ids = set()
-        
-        for cr in (logbook_in.component_parts or []):
-            cr_dict = cr.dict()
-            cr_id = cr_dict.pop("id", None)
-            
-            if cr_id and cr_id in existing_parts_map:
-                rec = existing_parts_map[cr_id]
-                for k_field, v_field in cr_dict.items():
-                    setattr(rec, k_field, v_field)
-                if audit_account_id is not None:
-                    await set_audit_fields(rec, audit_account_id, is_create=False)
-                received_ids.add(cr_id)
-            else:
-                rec = EngineComponentRecord(engine_log_fk=obj.id, **cr_dict)
-                session.add(rec)
-                obj.engine_component_parts.append(rec)
-                if audit_account_id is not None:
-                    await set_audit_fields(rec, audit_account_id, is_create=True)
-                    
-        for missing_id in set(existing_parts_map.keys()) - received_ids:
-            old_part = existing_parts_map[missing_id]
-            obj.engine_component_parts.remove(old_part)
-            await session.delete(old_part)
+        await _sync_component_parts(
+            session,
+            obj,
+            parts=logbook_in.component_parts,
+            relationship_attr="engine_component_parts",
+            foreign_key_field="engine_log_fk",
+            model_cls=EngineComponentRecord,
+            audit_account_id=audit_account_id,
+        )
 
     try:
         session.add(obj)
@@ -345,21 +380,18 @@ async def create_airframe_logbook(
     try:
         session.add(entry)
         await session.flush()
-        for cr in data.component_parts or []:
-            cr_dict = cr.dict()
-            cr_dict.pop("id", None)
-            rec = AirframeComponentRecord(airframe_log_fk=entry.id, **cr_dict)
-            session.add(rec)
+        await _sync_component_parts(
+            session,
+            entry,
+            parts=data.component_parts,
+            relationship_attr="airframe_component_parts",
+            foreign_key_field="airframe_log_fk",
+            model_cls=AirframeComponentRecord,
+            audit_account_id=audit_account_id,
+        )
         await session.flush()
         if audit_account_id is not None:
             await set_audit_fields(entry, audit_account_id, is_create=True)
-            result_recs = await session.execute(
-                select(AirframeComponentRecord).where(
-                    AirframeComponentRecord.airframe_log_fk == entry.id
-                )
-            )
-            for rec in result_recs.scalars().all():
-                await set_audit_fields(rec, audit_account_id, is_create=True)
         await session.commit()
         # Re-fetch with component_parts so response includes them
         result = await session.execute(
@@ -499,31 +531,15 @@ async def update_airframe_logbook(
         setattr(obj, k, v)
 
     if "component_parts" in logbook_in.dict(exclude_unset=True):
-        existing_parts_map = {p.id: p for p in obj.airframe_component_parts}
-        received_ids = set()
-        
-        for cr in (logbook_in.component_parts or []):
-            cr_dict = cr.dict()
-            cr_id = cr_dict.pop("id", None)
-            
-            if cr_id and cr_id in existing_parts_map:
-                rec = existing_parts_map[cr_id]
-                for k_field, v_field in cr_dict.items():
-                    setattr(rec, k_field, v_field)
-                if audit_account_id is not None:
-                    await set_audit_fields(rec, audit_account_id, is_create=False)
-                received_ids.add(cr_id)
-            else:
-                rec = AirframeComponentRecord(airframe_log_fk=obj.id, **cr_dict)
-                session.add(rec)
-                obj.airframe_component_parts.append(rec)
-                if audit_account_id is not None:
-                    await set_audit_fields(rec, audit_account_id, is_create=True)
-                    
-        for missing_id in set(existing_parts_map.keys()) - received_ids:
-            old_part = existing_parts_map[missing_id]
-            obj.airframe_component_parts.remove(old_part)
-            await session.delete(old_part)
+        await _sync_component_parts(
+            session,
+            obj,
+            parts=logbook_in.component_parts,
+            relationship_attr="airframe_component_parts",
+            foreign_key_field="airframe_log_fk",
+            model_cls=AirframeComponentRecord,
+            audit_account_id=audit_account_id,
+        )
 
     try:
         session.add(obj)
@@ -582,21 +598,18 @@ async def create_avionics_logbook(
     try:
         session.add(entry)
         await session.flush()
-        for cr in data.component_parts or []:
-            cr_dict = cr.dict()
-            cr_dict.pop("id", None)
-            rec = AvionicsComponentRecord(avionics_log_fk=entry.id, **cr_dict)
-            session.add(rec)
+        await _sync_component_parts(
+            session,
+            entry,
+            parts=data.component_parts,
+            relationship_attr="avionics_component_parts",
+            foreign_key_field="avionics_log_fk",
+            model_cls=AvionicsComponentRecord,
+            audit_account_id=audit_account_id,
+        )
         await session.flush()
         if audit_account_id is not None:
             await set_audit_fields(entry, audit_account_id, is_create=True)
-            result_recs = await session.execute(
-                select(AvionicsComponentRecord).where(
-                    AvionicsComponentRecord.avionics_log_fk == entry.id
-                )
-            )
-            for rec in result_recs.scalars().all():
-                await set_audit_fields(rec, audit_account_id, is_create=True)
         await session.commit()
         # Re-fetch with component_parts so response includes them
         result = await session.execute(
@@ -742,31 +755,15 @@ async def update_avionics_logbook(
         setattr(obj, k, v)
 
     if "component_parts" in logbook_in.dict(exclude_unset=True):
-        existing_parts_map = {p.id: p for p in obj.avionics_component_parts}
-        received_ids = set()
-        
-        for cr in (logbook_in.component_parts or []):
-            cr_dict = cr.dict()
-            cr_id = cr_dict.pop("id", None)
-            
-            if cr_id and cr_id in existing_parts_map:
-                rec = existing_parts_map[cr_id]
-                for k_field, v_field in cr_dict.items():
-                    setattr(rec, k_field, v_field)
-                if audit_account_id is not None:
-                    await set_audit_fields(rec, audit_account_id, is_create=False)
-                received_ids.add(cr_id)
-            else:
-                rec = AvionicsComponentRecord(avionics_log_fk=obj.id, **cr_dict)
-                session.add(rec)
-                obj.avionics_component_parts.append(rec)
-                if audit_account_id is not None:
-                    await set_audit_fields(rec, audit_account_id, is_create=True)
-                    
-        for missing_id in set(existing_parts_map.keys()) - received_ids:
-            old_part = existing_parts_map[missing_id]
-            obj.avionics_component_parts.remove(old_part)
-            await session.delete(old_part)
+        await _sync_component_parts(
+            session,
+            obj,
+            parts=logbook_in.component_parts,
+            relationship_attr="avionics_component_parts",
+            foreign_key_field="avionics_log_fk",
+            model_cls=AvionicsComponentRecord,
+            audit_account_id=audit_account_id,
+        )
 
     try:
         session.add(obj)
