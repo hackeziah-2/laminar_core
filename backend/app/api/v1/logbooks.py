@@ -63,6 +63,30 @@ def clean_parsed_data(parsed: dict) -> dict:
     return cleaned
 
 
+def _normalize_component_part_item(item):
+    """Normalize a single nested component part payload."""
+    if not isinstance(item, dict):
+        return item
+
+    normalized = dict(item)
+    nested_aliases = {
+        "removedPartNo": "removed_part_no",
+        "removedSerialNo": "removed_serial_no",
+        "installedPartNo": "installed_part_no",
+        "installedSerialNo": "installed_serial_no",
+        "ataChapter": "ata_chapter",
+    }
+
+    for alias, field_name in nested_aliases.items():
+        if alias in normalized and field_name not in normalized:
+            normalized[field_name] = normalized.pop(alias)
+
+    if normalized.get("id") == "":
+        normalized["id"] = None
+
+    return clean_parsed_data(normalized)
+
+
 def normalize_logbook_payload(parsed: dict) -> dict:
     """Parse component_parts if JSON string; support componentParts (camelCase)."""
     out = dict(parsed)
@@ -78,6 +102,12 @@ def normalize_logbook_payload(parsed: dict) -> dict:
             pass
     elif isinstance(cp, str) and not cp.strip():
         out["component_parts"] = []
+
+    if isinstance(out.get("component_parts"), list):
+        out["component_parts"] = [
+            _normalize_component_part_item(item)
+            for item in out["component_parts"]
+        ]
     return out
 
 
@@ -671,5 +701,4 @@ async def api_delete_propeller_logbook(
             detail="Propeller Logbook not found",
         )
     return None
-
 

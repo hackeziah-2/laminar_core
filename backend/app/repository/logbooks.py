@@ -6,7 +6,7 @@ from fastapi import HTTPException, UploadFile
 from sqlalchemy import select, func, or_, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from sqlalchemy.orm.attributes import NO_VALUE
+from sqlalchemy.orm.attributes import NO_VALUE, set_committed_value
 from sqlalchemy import inspect
 
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
@@ -40,11 +40,9 @@ from app.schemas.logbook_schema import (
 
 
 def _component_record_payload(component_record) -> dict:
-    """Convert nested component record payloads into ORM-ready field names."""
     payload = component_record.dict(by_alias=False)
     payload.pop("id", None)
     return payload
-
 
 async def _sync_component_parts(
     session: AsyncSession,
@@ -55,40 +53,54 @@ async def _sync_component_parts(
     foreign_key_field: str,
     model_cls: Type,
     audit_account_id: Optional[int],
+    require_relationship_loaded: bool = True,
 ) -> None:
-    """Replace/update child component records for a logbook entry."""
     relationship_state = inspect(obj).attrs[relationship_attr]
     relationship_loaded = relationship_state.loaded_value is not NO_VALUE
-    existing_parts = list(relationship_state.loaded_value or []) if relationship_loaded else []
-    existing_parts_map = {part.id: part for part in existing_parts}
+
+    if not relationship_loaded and require_relationship_loaded:
+        raise ValueError(
+            f"Relationship '{relationship_attr}' must be eagerly loaded before syncing."
+        )
+
+    if not relationship_loaded:
+        # Create flows start from a freshly inserted parent row with no children yet.
+        # Seed an empty collection so appended records are reflected in the ORM object
+        # and the response payload includes component_parts immediately after commit.
+        set_committed_value(obj, relationship_attr, [])
+        relationship_state = inspect(obj).attrs[relationship_attr]
+        relationship_loaded = True
+
+    existing_parts = list(relationship_state.loaded_value or [])
+    existing_parts_map = {part.id: part for part in existing_parts if part.id is not None}
     received_ids = set()
 
     for component_record in parts or []:
         payload = _component_record_payload(component_record)
-        part_id = component_record.id
+        part_id = getattr(component_record, "id", None)
 
-        if part_id and part_id in existing_parts_map:
+        if part_id is not None and part_id in existing_parts_map:
             rec = existing_parts_map[part_id]
             for field_name, field_value in payload.items():
                 setattr(rec, field_name, field_value)
+
             if audit_account_id is not None:
                 await set_audit_fields(rec, audit_account_id, is_create=False)
+
             received_ids.add(part_id)
             continue
 
         payload[foreign_key_field] = obj.id
         rec = model_cls(**payload)
-        if relationship_loaded:
-            getattr(obj, relationship_attr).append(rec)
-        else:
-            session.add(rec)
+        getattr(obj, relationship_attr).append(rec)
+
         if audit_account_id is not None:
             await set_audit_fields(rec, audit_account_id, is_create=True)
 
-    for missing_id in set(existing_parts_map.keys()) - received_ids:
-        old_part = existing_parts_map[missing_id]
-        getattr(obj, relationship_attr).remove(old_part)
-        await session.delete(old_part)
+    for missing_id, old_part in existing_parts_map.items():
+        if missing_id not in received_ids:
+            getattr(obj, relationship_attr).remove(old_part)
+            await session.delete(old_part)
 
 
 # ========== Engine Logbook CRUD ==========
@@ -171,6 +183,7 @@ async def create_engine_logbook(
             foreign_key_field="engine_log_fk",
             model_cls=EngineComponentRecord,
             audit_account_id=audit_account_id,
+            require_relationship_loaded=False,
         )
         await session.flush()
         if audit_account_id is not None:
@@ -388,6 +401,7 @@ async def create_airframe_logbook(
             foreign_key_field="airframe_log_fk",
             model_cls=AirframeComponentRecord,
             audit_account_id=audit_account_id,
+            require_relationship_loaded=False,
         )
         await session.flush()
         if audit_account_id is not None:
@@ -606,6 +620,7 @@ async def create_avionics_logbook(
             foreign_key_field="avionics_log_fk",
             model_cls=AvionicsComponentRecord,
             audit_account_id=audit_account_id,
+            require_relationship_loaded=False,
         )
         await session.flush()
         if audit_account_id is not None:

@@ -41,6 +41,10 @@ class EngineLogbook(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     def __repr__(self):
         return f"<EngineLogbook(id={self.id}, seq='{self.sequence_no}')>"
 
+    @property
+    def component_parts(self):
+        return self.engine_component_parts
+
 class AirframeLogbook(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "airframe_logbook"
 
@@ -68,6 +72,10 @@ class AirframeLogbook(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
 
     def __repr__(self):
         return f"<AirframeLogbook(id={self.id}, seq='{self.sequence_no}')>"
+
+    @property
+    def component_parts(self):
+        return self.airframe_component_parts
         
 
 class AvionicsLogbook(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
@@ -99,6 +107,10 @@ class AvionicsLogbook(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
 
     def __repr__(self):
         return f"<AvionicsLogbook(id={self.id}, seq='{self.sequence_no}')>"
+
+    @property
+    def component_parts(self):
+        return self.avionics_component_parts
 
 class PropellerLogbook(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "propeller_logbook"
