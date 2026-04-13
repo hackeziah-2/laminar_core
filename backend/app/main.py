@@ -62,7 +62,9 @@ _default_origins = [
     "http://120.89.33.51:3002",   # prod frontend
     "http://120.89.33.51:8000",
     "http://fleet.llibus.com",
-    "https://api.llibus.com/",
+    "https://fleet.llibus.com",
+    "http://api.llibus.com",
+    "https://api.llibus.com",
 ]
 
 # Optional: still support old single-URL env like VITE_APP_URL
@@ -301,4 +303,3 @@ async def startup():
     except Exception as e:
         print(f"Database connection warning: {e}")
         # Don't fail startup - migrations should handle table creation
-

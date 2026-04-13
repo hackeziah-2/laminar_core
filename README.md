@@ -11,7 +11,7 @@ Use the **compose file and env file** for the environment you want. From the pro
 | Environment   | Run server | API (default port) |
 |---------------|------------|---------------------|
 | **Development** | `docker-compose -f docker-compose.dev.yml --env-file .env.dev up --build -d` then `docker-compose -f docker-compose.dev.yml exec backend alembic upgrade head` | http://localhost:8000/docs |
-| **UAT**        | `docker-compose -f docker-compose.uat.yml --env-file .env.uat up --build -d` then `docker-compose -f docker-compose.uat.yml exec backend alembic upgrade head` | http://localhost:8001/docs (or `FASTAPI_PORT` in `.env.uat`) |
+| **UAT**        | `docker-compose -f docker-compose.uat.yml --env-file .env.uat up --build -d` | http://localhost:8100/docs (or `FASTAPI_PORT` in `.env.uat`) |
 | **Production** | `docker-compose -f docker-compose.prod.yml --env-file .env.prod up --build -d` then `docker-compose -f docker-compose.prod.yml exec backend alembic upgrade head` | Port from `.env.prod` or your public URL |
 
 **First time:** copy `.env.example` to `.env.dev` (or `.env.uat` / `.env.prod`) and set ports and `SECRET_KEY` as needed. Each env uses its own containers, network, and ports so you can run dev, UAT, and prod side-by-side.
