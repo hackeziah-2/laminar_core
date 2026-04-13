@@ -26,6 +26,7 @@ router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 
 @router.post("/login", response_model=LoginResponse)
+@router.post("/login/", response_model=LoginResponse, include_in_schema=False)
 async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     session: AsyncSession = Depends(get_session),
@@ -65,6 +66,7 @@ async def login(
 
 
 @router.post("/token", response_model=Token)
+@router.post("/token/", response_model=Token, include_in_schema=False)
 async def token(
     form_data: OAuth2PasswordRequestForm = Depends(),
     session: AsyncSession = Depends(get_session),
@@ -97,6 +99,12 @@ async def token(
     "/register",
     response_model=Union[List[AccountInformationRead], AccountInformationRead],
     status_code=status.HTTP_201_CREATED,
+)
+@router.post(
+    "/register/",
+    response_model=Union[List[AccountInformationRead], AccountInformationRead],
+    status_code=status.HTTP_201_CREATED,
+    include_in_schema=False,
 )
 async def register(
     payload: Union[List[AccountInformationCreate], AccountInformationCreate],
