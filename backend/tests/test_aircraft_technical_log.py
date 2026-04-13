@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import update
 
 from app.api.deps import get_current_active_account
-from app.models.aircraft_techinical_log import AircraftTechnicalLog
+from app.models.aircraft_techinical_log import AircraftTechnicalLog, WorkStatus
 from app.main import app
 from app.models.role import Role
 from tests.conftest import TestSessionLocal
@@ -278,3 +278,112 @@ def test_atl_paged_admin_sees_all_work_statuses(client: TestClient):
     paged = client.get("/api/v1/aircraft-technical-log/paged?limit=50&page=1")
     assert paged.status_code == 200
     assert log_id in {i["id"] for i in paged.json()["items"]}
+
+
+def test_quality_manager_can_update_pending_to_completed(client: TestClient):
+    """Quality Manager may change ATL work_status from PENDING to COMPLETED."""
+    async def seed_role() -> int:
+        async with TestSessionLocal() as session:
+            role = Role(name="Quality Manager", description="workflow")
+            session.add(role)
+            await session.commit()
+            await session.refresh(role)
+            return role.id
+
+    qm_role_id = asyncio.run(seed_role())
+
+    async def override_account():
+        acc = type("Acc", (), {})()
+        acc.id = 8803
+        acc.status = True
+        acc.role_id = qm_role_id
+        return acc
+
+    app.dependency_overrides[get_current_active_account] = override_account
+
+    log_data = {
+        "aircraft_fk": 1,
+        "sequence_no": "ATL-QM-001",
+        "nature_of_flight": "TR",
+        "origin_station": "ORG",
+        "origin_date": "2025-01-17",
+        "origin_time": "10:00:00",
+        "destination_station": "DST",
+        "destination_date": "2025-01-17",
+        "destination_time": "12:00:00",
+        "number_of_landings": 1,
+        "hobbs_meter_start": 1.0,
+        "hobbs_meter_end": 2.0,
+        "hobbs_meter_total": 1.0,
+        "tachometer_start": 1.0,
+        "tachometer_end": 2.0,
+        "tachometer_total": 1.0,
+        "work_status": "PENDING",
+        "component_parts": [],
+    }
+
+    create_response = client.post("/api/v1/aircraft-technical-log/", json=log_data)
+    assert create_response.status_code == 201
+    log_id = create_response.json()["id"]
+    assert create_response.json()["work_status"] == WorkStatus.PENDING.value
+
+    update_response = client.put(
+        f"/api/v1/aircraft-technical-log/{log_id}",
+        json={"work_status": "COMPLETED"},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["work_status"] == WorkStatus.COMPLETED.value
+
+
+def test_quality_manager_cannot_update_for_review_to_completed(client: TestClient):
+    """Quality Manager may not skip directly from FOR_REVIEW to COMPLETED."""
+    async def seed_role() -> int:
+        async with TestSessionLocal() as session:
+            role = Role(name="Quality Manager", description="workflow")
+            session.add(role)
+            await session.commit()
+            await session.refresh(role)
+            return role.id
+
+    qm_role_id = asyncio.run(seed_role())
+
+    async def override_account():
+        acc = type("Acc", (), {})()
+        acc.id = 8804
+        acc.status = True
+        acc.role_id = qm_role_id
+        return acc
+
+    app.dependency_overrides[get_current_active_account] = override_account
+
+    log_data = {
+        "aircraft_fk": 1,
+        "sequence_no": "ATL-QM-002",
+        "nature_of_flight": "TR",
+        "origin_station": "ORG",
+        "origin_date": "2025-01-17",
+        "origin_time": "10:00:00",
+        "destination_station": "DST",
+        "destination_date": "2025-01-17",
+        "destination_time": "12:00:00",
+        "number_of_landings": 1,
+        "hobbs_meter_start": 1.0,
+        "hobbs_meter_end": 2.0,
+        "hobbs_meter_total": 1.0,
+        "tachometer_start": 1.0,
+        "tachometer_end": 2.0,
+        "tachometer_total": 1.0,
+        "work_status": "FOR_REVIEW",
+        "component_parts": [],
+    }
+
+    create_response = client.post("/api/v1/aircraft-technical-log/", json=log_data)
+    assert create_response.status_code == 201
+    log_id = create_response.json()["id"]
+
+    update_response = client.put(
+        f"/api/v1/aircraft-technical-log/{log_id}",
+        json={"work_status": "COMPLETED"},
+    )
+    assert update_response.status_code == 403
+    assert "cannot change work_status" in update_response.json()["detail"]
