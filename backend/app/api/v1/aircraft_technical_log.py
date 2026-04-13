@@ -266,6 +266,7 @@ async def api_update(
         log_id=log_id,
         log_in=log_in,
         audit_account_id=current_account.id,
+        current_account=current_account,
     )
 
     if not updated:

@@ -107,14 +107,34 @@ class EngineLogbookRead(BaseModel):
 
     @root_validator(pre=True)
     def orm_to_component_parts(cls, v: Any) -> Any:
-        if hasattr(v, "engine_component_parts"):
-            d = {k: getattr(v, k) for k in [
-                "id", "aircraft_fk", "date", "engine_tsn", "sequence_no", "tach_time",
-                "engine_tso", "engine_tbo", "description", "mechanic_fk", "mechanic",
-                "signature", "upload_file", "created_at", "updated_at"
-            ] if hasattr(v, k)}
-            d["component_parts"] = getattr(v, "engine_component_parts", None) or []
-            return d
+        if isinstance(v, dict):
+            if "component_parts" not in v and "engine_component_parts" in v:
+                v = dict(v)
+                v["component_parts"] = v.get("engine_component_parts") or []
+            return v
+
+        orm_state = getattr(v, "__dict__", None)
+        if orm_state is not None and (
+            "engine_component_parts" in orm_state or "mechanic" in orm_state
+        ):
+            return {
+                "id": orm_state.get("id"),
+                "aircraft_fk": orm_state.get("aircraft_fk"),
+                "date": orm_state.get("date"),
+                "engine_tsn": orm_state.get("engine_tsn"),
+                "sequence_no": orm_state.get("sequence_no"),
+                "tach_time": orm_state.get("tach_time"),
+                "engine_tso": orm_state.get("engine_tso"),
+                "engine_tbo": orm_state.get("engine_tbo"),
+                "description": orm_state.get("description"),
+                "mechanic_fk": orm_state.get("mechanic_fk"),
+                "mechanic": orm_state.get("mechanic"),
+                "signature": orm_state.get("signature"),
+                "upload_file": orm_state.get("upload_file"),
+                "created_at": orm_state.get("created_at"),
+                "updated_at": orm_state.get("updated_at"),
+                "component_parts": orm_state.get("engine_component_parts") or [],
+            }
         return v
 
     class Config:
@@ -185,14 +205,32 @@ class AirframeLogbookRead(BaseModel):
 
     @root_validator(pre=True)
     def orm_to_component_parts(cls, v: Any) -> Any:
-        if hasattr(v, "airframe_component_parts"):
-            d = {k: getattr(v, k) for k in [
-                "id", "aircraft_fk", "date", "sequence_no", "tach_time", "airframe_time",
-                "description", "mechanic_fk", "mechanic", "signature", "upload_file",
-                "created_at", "updated_at"
-            ] if hasattr(v, k)}
-            d["component_parts"] = getattr(v, "airframe_component_parts", None) or []
-            return d
+        if isinstance(v, dict):
+            if "component_parts" not in v and "airframe_component_parts" in v:
+                v = dict(v)
+                v["component_parts"] = v.get("airframe_component_parts") or []
+            return v
+
+        orm_state = getattr(v, "__dict__", None)
+        if orm_state is not None and (
+            "airframe_component_parts" in orm_state or "mechanic" in orm_state
+        ):
+            return {
+                "id": orm_state.get("id"),
+                "aircraft_fk": orm_state.get("aircraft_fk"),
+                "date": orm_state.get("date"),
+                "sequence_no": orm_state.get("sequence_no"),
+                "tach_time": orm_state.get("tach_time"),
+                "airframe_time": orm_state.get("airframe_time"),
+                "description": orm_state.get("description"),
+                "mechanic_fk": orm_state.get("mechanic_fk"),
+                "mechanic": orm_state.get("mechanic"),
+                "signature": orm_state.get("signature"),
+                "upload_file": orm_state.get("upload_file"),
+                "created_at": orm_state.get("created_at"),
+                "updated_at": orm_state.get("updated_at"),
+                "component_parts": orm_state.get("airframe_component_parts") or [],
+            }
         return v
 
     class Config:
@@ -269,14 +307,35 @@ class AvionicsLogbookRead(BaseModel):
 
     @root_validator(pre=True)
     def orm_to_component_parts(cls, v: Any) -> Any:
-        if hasattr(v, "avionics_component_parts"):
-            d = {k: getattr(v, k) for k in [
-                "id", "aircraft_fk", "date", "airframe_tsn", "sequence_no", "component",
-                "part_no", "serial_no", "description", "mechanic_fk", "mechanic",
-                "signature", "upload_file", "created_at", "updated_at"
-            ] if hasattr(v, k)}
-            d["component_parts"] = getattr(v, "avionics_component_parts", None) or []
-            return d
+        if isinstance(v, dict):
+            if "component_parts" not in v and "avionics_component_parts" in v:
+                v = dict(v)
+                v["component_parts"] = v.get("avionics_component_parts") or []
+            return v
+
+        orm_state = getattr(v, "__dict__", None)
+        if orm_state is not None and (
+            "avionics_component_parts" in orm_state or "mechanic" in orm_state
+        ):
+            data = {
+                "id": orm_state.get("id"),
+                "aircraft_fk": orm_state.get("aircraft_fk"),
+                "date": orm_state.get("date"),
+                "airframe_tsn": orm_state.get("airframe_tsn"),
+                "sequence_no": orm_state.get("sequence_no"),
+                "component": orm_state.get("component"),
+                "part_no": orm_state.get("part_no"),
+                "serial_no": orm_state.get("serial_no"),
+                "description": orm_state.get("description"),
+                "mechanic_fk": orm_state.get("mechanic_fk"),
+                "mechanic": orm_state.get("mechanic"),
+                "signature": orm_state.get("signature"),
+                "upload_file": orm_state.get("upload_file"),
+                "created_at": orm_state.get("created_at"),
+                "updated_at": orm_state.get("updated_at"),
+                "component_parts": orm_state.get("avionics_component_parts") or [],
+            }
+            return data
         return v
 
     class Config:

@@ -112,3 +112,11 @@ class AccountInformationListItem(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+class PasswordResetResponse(BaseModel):
+    """Response for account password reset."""
+    user_id: int
+    username: str
+    new_password: str
+    message: str

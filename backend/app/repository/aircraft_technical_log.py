@@ -16,6 +16,8 @@ from app.models.aircraft_techinical_log import (
 from app.models.aircraft import Aircraft
 from app.models.account import AccountInformation
 from app.core.atl_paged_rbac import atl_rbac_filter
+from app.core.atl_workflow_rbac import is_atl_work_status_transition_allowed
+from app.models.role import Role
 from app.schemas.aircraft_technical_log_schema import (
     AircraftTechnicalLogCreate,
     AircraftTechnicalLogUpdate,
@@ -223,6 +225,7 @@ async def update_aircraft_technical_log(
     log_in: AircraftTechnicalLogUpdate,
     *,
     audit_account_id: Optional[int] = None,
+    current_account: Optional[AccountInformation] = None,
 ) -> Optional[AircraftTechnicalLog]:
     """Update an Aircraft Technical Log entry."""
     obj = await session.get(AircraftTechnicalLog, log_id)
@@ -254,6 +257,31 @@ async def update_aircraft_technical_log(
         if ws is not None:
             update_data['work_status'] = WorkStatus(ws) if isinstance(ws, str) else ws
         # else keep None to clear or leave unchanged per API contract
+
+        role_name = None
+        if current_account and current_account.role_id:
+            role = await session.get(Role, current_account.role_id)
+            if role and not role.is_deleted:
+                role_name = role.name
+
+        if not is_atl_work_status_transition_allowed(
+            role_name=role_name,
+            current_status=obj.work_status,
+            next_status=update_data['work_status'],
+        ):
+            current_value = obj.work_status.value if obj.work_status else "NULL"
+            next_value = (
+                update_data['work_status'].value
+                if update_data['work_status'] is not None
+                else "NULL"
+            )
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"Role '{role_name}' cannot change work_status "
+                    f"from '{current_value}' to '{next_value}'."
+                ),
+            )
 
     for k, v in update_data.items():
         setattr(obj, k, v)

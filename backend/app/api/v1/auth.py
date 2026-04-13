@@ -8,9 +8,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session
 from app.api.deps import get_current_account
 from app.schemas.auth_schema import Token, LoginResponse, AccountMe
-from app.schemas.account_schema import AccountInformationCreate, AccountInformationRead
+from app.schemas.account_schema import (
+    AccountInformationCreate,
+    AccountInformationRead,
+    PasswordResetResponse,
+)
 from app.repository.account_auth import authenticate_account
-from app.repository.account import create_account_information, update_last_login
+from app.repository.account import (
+    create_account_information,
+    update_last_login,
+    reset_account_password,
+)
 from app.core.security import create_access_token, _truncate_password
 from app.models.account import AccountInformation
 
@@ -142,4 +150,27 @@ async def me(
         designation=account.designation,
         email=account.email,
         username=account.username,
+    )
+
+
+@router.post(
+    "/users/{user_id}/reset-password/",
+    response_model=PasswordResetResponse,
+)
+async def reset_user_password(
+    user_id: int,
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_account),
+):
+    """Generate and save a new temporary password for an existing account."""
+    account, new_password = await reset_account_password(
+        session,
+        user_id,
+        audit_account_id=current_account.id,
+    )
+    return PasswordResetResponse(
+        user_id=account.id,
+        username=account.username,
+        new_password=new_password,
+        message="Password reset successful",
     )

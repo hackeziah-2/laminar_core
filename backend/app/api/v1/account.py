@@ -93,6 +93,10 @@ async def api_list_paged(
     limit: int = Query(10, ge=1, le=100),
     page: int = Query(1, ge=1),
     search: Optional[str] = None,
+    roles: Optional[List[str]] = Query(
+        None,
+        description="Filter by role name(s) from linked Role. Example: ?roles=Pilot&roles=Admin",
+    ),
     sort: Optional[str] = Query(
         "",
         description="Example: -created_at,username"
@@ -106,6 +110,7 @@ async def api_list_paged(
         limit=limit,
         offset=offset,
         search=search,
+        roles=roles,
         sort=sort,
     )
     pages = ceil(total / limit) if total else 0
