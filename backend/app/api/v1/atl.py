@@ -9,133 +9,11 @@ from app.database import get_session
 from app.schemas import aircraft_technical_log_schema
 from app.repository.aircraft_technical_log import list_atl_paged, get_previous_atl
 from app.repository.aircraft import get_aircraft
-
-
-def _float_or_zero(value: Any) -> float:
-    """Parse value to float; return 0.0 on error or None."""
-    if value is None:
-        return 0.0
-    if isinstance(value, (int, float)):
-        return float(value) if (value == value) else 0.0  # NaN check
-    if isinstance(value, str):
-        try:
-            return float(value.strip()) if value.strip() else 0.0
-        except ValueError:
-            return 0.0
-    return 0.0
-
-
-def compute_auto_comp(
-    atl,
-    prev_atl,
-    aircraft,
-) -> Dict[str, float]:
-    """Compute auto_comp_* for one ATL row. Returns 0.0 on error.
-
-    Current ATL (atl) - data applied:
-      - tachometer_start, tachometer_end  → airframe_run_time (tach start - tach end), then used as Airframe/Engine/Propeller run time
-      - engine_tso                       → engine_tbo = aircraft.engine_life_time_limit - engine_tso
-      - propeller_tso                    → propeller_tbo = aircraft.propeller_life_time_limit - propeller_tso
-
-    Previous ATL (prev_atl) = row with latest sequence_no < current sequence_no (same aircraft):
-      - airframe_aftt, engine_tsn, engine_tso, propeller_tsn, propeller_tso
-
-    Aircraft: engine_life_time_limit, propeller_life_time_limit
-    """
-    out = {
-        "auto_comp_airframe_run_time": 0.0,
-        "auto_comp_airframe_aftt": 0.0,
-        "auto_comp_engine_run_time": 0.0,
-        "auto_comp_engine_tsn": 0.0,
-        "auto_comp_engine_tso": 0.0,
-        "auto_comp_engine_tbo": 0.0,
-        "auto_comp_propeller_run_time": 0.0,
-        "auto_comp_propeller_tsn": 0.0,
-        "auto_comp_propeller_tso": 0.0,
-        "auto_comp_propeller_tbo": 0.0,
-    }
-    # auto_comp_airframe_run_time = tach start - tach end
-    try:
-        tach_start = _float_or_zero(getattr(atl, "tachometer_start", None))
-        tach_end = _float_or_zero(getattr(atl, "tachometer_end", None))
-        out["auto_comp_airframe_run_time"] = tach_start - tach_end
-    except Exception:
-        pass
-
-    # auto_comp_airframe_aftt = Previous Airframe AFTT + Airframe current run time
-    try:
-        prev_aftt = _float_or_zero(getattr(prev_atl, "airframe_aftt", None)) if prev_atl else 0.0
-        curr_run = out["auto_comp_airframe_run_time"]
-        out["auto_comp_airframe_aftt"] = prev_aftt + curr_run
-    except Exception:
-        pass
-
-    # auto_comp_engine_run_time = Airframe Run Time
-    try:
-        out["auto_comp_engine_run_time"] = out["auto_comp_airframe_run_time"]
-    except Exception:
-        pass
-
-    # auto_comp_engine_tsn = Previous Engine TSN + Engine Current Run Time
-    try:
-        prev_engine_tsn = _float_or_zero(getattr(prev_atl, "engine_tsn", None)) if prev_atl else 0.0
-        curr_run = out["auto_comp_engine_run_time"]
-        out["auto_comp_engine_tsn"] = prev_engine_tsn + curr_run
-    except Exception:
-        pass
-
-    # auto_comp_engine_tso = Previous Engine TSO + Engine Current run time
-    try:
-        prev_engine_tso = _float_or_zero(getattr(prev_atl, "engine_tso", None)) if prev_atl else 0.0
-        curr_run = out["auto_comp_engine_run_time"]
-        out["auto_comp_engine_tso"] = prev_engine_tso + curr_run
-    except Exception:
-        pass
-
-    # auto_comp_engine_tbo = life_time_limit_engine (from aircraft) - ENGINE CURRENT TSO
-    try:
-        life_engine = _float_or_zero(getattr(aircraft, "engine_life_time_limit", None)) if aircraft else 0.0
-        curr_tso = _float_or_zero(getattr(atl, "engine_tso", None))
-        curent_id = _float_or_zero(getattr(atl, "id", None))
-        print(curent_id, "curent_id")
-        print(life_engine, "life_engine_life_enginelife_engine")
-        print(curr_tso if life_engine else 0.0, "ldldll")
-        print(life_engine - curr_tso if life_engine else 0.0,  "total")
-        out["auto_comp_engine_tbo"] = life_engine - curr_tso if life_engine else 0.0
-    except Exception:
-        pass
-
-    # auto_comp_propeller_run_time = Airframe Run Time
-    try:
-        out["auto_comp_propeller_run_time"] = out["auto_comp_airframe_run_time"]
-    except Exception:
-        pass
-
-    # auto_comp_propeller_tsn = Previous Propeller TSN + Propeller Run Time
-    try:
-        prev_prop_tsn = _float_or_zero(getattr(prev_atl, "propeller_tsn", None)) if prev_atl else 0.0
-        curr_run = out["auto_comp_propeller_run_time"]
-        out["auto_comp_propeller_tsn"] = prev_prop_tsn + curr_run
-    except Exception:
-        pass
-
-    # auto_comp_propeller_tso = Previous Propeller TSO + Propeller Run Time
-    try:
-        prev_prop_tso = _float_or_zero(getattr(prev_atl, "propeller_tso", None)) if prev_atl else 0.0
-        curr_run = out["auto_comp_propeller_run_time"]
-        out["auto_comp_propeller_tso"] = prev_prop_tso + curr_run
-    except Exception:
-        pass
-
-    # auto_comp_propeller_tbo = life_time_limit_propeller (from aircraft) - Propeller current TSO
-    try:
-        life_prop = _float_or_zero(getattr(aircraft, "propeller_life_time_limit", None)) if aircraft else 0.0
-        curr_tso = _float_or_zero(getattr(atl, "propeller_tso", None))
-        out["auto_comp_propeller_tbo"] = life_prop - curr_tso if life_prop else 0.0
-    except Exception:
-        pass
-
-    return out
+from app.core.atl_derived_times import (
+    compute_auto_fields,
+    canonical_time_fields_from_auto,
+    map_auto_fields_to_comp,
+)
 
 
 def _round_floats_2(obj: Union[Dict, List, Any]) -> Union[Dict, List, Any]:
@@ -192,13 +70,13 @@ async def atl_paged(
     for item in items:
         base = aircraft_technical_log_schema.AircraftTechnicalLogRead.from_orm(item)
         prev_atl = await get_previous_atl(session, item.aircraft_fk, item.sequence_no)
-        aircraft_obj = getattr(item, "aircraft", None)
-        auto_comp = compute_auto_comp(item, prev_atl, aircraft_obj)
-        # Round all auto_comp to 2 decimals
-        auto_comp = {k: round(v, 2) for k, v in auto_comp.items()}
-        paged_item = aircraft_technical_log_schema.ATLPagedItem(
-            **base.dict(),
-            **auto_comp,
+        # Use aircraft from get_aircraft (always loaded); not item.aircraft (relationship may be lazy/missing).
+        auto_base = compute_auto_fields(item, prev_atl, aircraft)
+        auto_rounded = {k: round(v, 2) for k, v in auto_base.items()}
+        auto_comp = {k: round(v, 2) for k, v in map_auto_fields_to_comp(auto_rounded).items()}
+        canonical = canonical_time_fields_from_auto(auto_rounded)
+        paged_item = aircraft_technical_log_schema.ATLPagedItem.parse_obj(
+            {**base.dict(), **canonical, **auto_comp},
         )
         # Apply n.2f for all floats in the response (including base fields and auto_comp)
         result_items.append(_round_floats_2(paged_item.dict()))

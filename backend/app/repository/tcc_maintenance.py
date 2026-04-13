@@ -4,6 +4,7 @@ from sqlalchemy import select, func, or_, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.database import set_audit_fields
 from app.models.tcc_maintenance import TCCMaintenance, MethodOfComplianceEnum, TCCCategoryEnum
 from app.models.aircraft_techinical_log import AircraftTechnicalLog
 from app.schemas.tcc_maintenance_schema import (
@@ -38,6 +39,8 @@ def _method_of_compliance_from_str(value: Optional[str]) -> Optional[MethodOfCom
 async def create_tcc_maintenance(
     session: AsyncSession,
     data: TCCMaintenanceCreate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> TCCMaintenanceRead:
     """Create a new TCC Maintenance entry."""
     payload = data.dict()
@@ -51,6 +54,8 @@ async def create_tcc_maintenance(
 
     obj = TCCMaintenance(**payload)
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=True)
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["aircraft", "atl"])
@@ -236,6 +241,8 @@ async def update_tcc_maintenance(
     session: AsyncSession,
     maintenance_id: int,
     data: TCCMaintenanceUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[TCCMaintenanceRead]:
     """Update a TCC Maintenance entry."""
     result = await session.execute(
@@ -266,6 +273,8 @@ async def update_tcc_maintenance(
         setattr(obj, k, v)
 
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["aircraft", "atl"])

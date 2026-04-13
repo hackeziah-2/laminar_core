@@ -12,16 +12,23 @@ from fastapi import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas import account_schema
-from app.schemas.account_schema import AccountInformationRead, AccountInformationListItem
+from app.schemas.account_schema import (
+    AccountInformationRead,
+    AccountInformationListItem,
+    AccountInformationByAuthStamp,
+)
 from app.repository.account import (
     list_account_informations,
     get_account_information,
+    get_account_information_by_auth_stamp,
     create_account_information,
     update_account_information,
     soft_delete_account_information,
-    get_all_account_informations_list
+    get_all_account_informations_list,
 )
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
 
 router = APIRouter(
     prefix="/api/v1/account-information",
@@ -29,21 +36,50 @@ router = APIRouter(
 )
 
 
+@router.get(
+    "/by-auth-stamp",
+    response_model=List[AccountInformationByAuthStamp],
+    summary="Get accounts by auth stamp or name (search)",
+)
+async def api_get_by_auth_stamp(
+    search: str = Query(
+        ...,
+        description="Case-insensitive partial match on auth_stamp, first_name, or last_name",
+    ),
+    limit: int = Query(10, ge=1, le=100, description="Max number of results"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Get account information matching search on auth_stamp, first name, or last name. Returns list of { id, full_name, designation, license_no, auth_stamp }. Empty list if none match."""
+    items = await get_account_information_by_auth_stamp(session, search, limit=limit)
+    return [AccountInformationByAuthStamp.from_orm_auth_stamp(obj) for obj in items]
+
+
 @router.get("/account-informations-list", response_model=List[AccountInformationListItem])
 async def api_account_informations_list(
-    designation: Optional[List[str]] = Query(None, description="Filter by designation(s) - can provide multiple values (case-insensitive partial match). Example: ?designation=pilot&designation=Maintenance+Engineer"),
-    search: Optional[str] = Query(None, description="Search across first name, last name, middle name, license number, and username"),
-    session: AsyncSession = Depends(get_session)
+    role: Optional[List[str]] = Query(
+        None,
+        description="Filter by role name(s) from linked Role (case-insensitive partial match). Example: ?role=Pilot",
+    ),
+    designation: Optional[List[str]] = Query(
+        None,
+        description="Filter by designation(s) on the account (case-insensitive partial match). Example: ?designation=Captain",
+    ),
+    search: Optional[str] = Query(
+        None,
+        description="Search across first name, last name, middle name, license number, and username",
+    ),
+    session: AsyncSession = Depends(get_session),
 ):
     """Get all Account Information entries with fullname and license_no.
-    
-    Optionally filter by designation(s) and/or search across name fields and license number.
-    Multiple designations can be provided: ?designation=pilot&designation=Maintenance+Engineer
+
+    Optional filters: role (Role.name), designation (account field), and search across names/username/license.
+    Role and designation both apply when set (AND). Multiple values for the same filter use OR.
     """
     items = await get_all_account_informations_list(
-        session, 
+        session,
+        role=role,
         designation=designation,
-        search=search
+        search=search,
     )
     
     # Convert to list items with fullname using the schema method
@@ -57,6 +93,10 @@ async def api_list_paged(
     limit: int = Query(10, ge=1, le=100),
     page: int = Query(1, ge=1),
     search: Optional[str] = None,
+    roles: Optional[List[str]] = Query(
+        None,
+        description="Filter by role name(s) from linked Role. Example: ?roles=Pilot&roles=Admin",
+    ),
     sort: Optional[str] = Query(
         "",
         description="Example: -created_at,username"
@@ -70,6 +110,7 @@ async def api_list_paged(
         limit=limit,
         offset=offset,
         search=search,
+        roles=roles,
         sort=sort,
     )
     pages = ceil(total / limit) if total else 0
@@ -108,10 +149,15 @@ async def api_get(
 )
 async def api_create(
     payload: account_schema.AccountInformationCreate,
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new Account Information entry."""
-    return await create_account_information(session, payload)
+    return await create_account_information(
+        session,
+        payload,
+        audit_account_id=current_account.id,
+    )
 
 
 @router.put(
@@ -122,12 +168,14 @@ async def api_update(
     account_id: int,
     account_in: account_schema.AccountInformationUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update an Account Information entry."""
     updated = await update_account_information(
         session=session,
         account_id=account_id,
         account_in=account_in,
+        audit_account_id=current_account.id,
     )
 
     if not updated:

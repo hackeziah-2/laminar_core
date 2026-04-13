@@ -1,16 +1,19 @@
 import os
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Type
 from math import ceil
 
 from fastapi import HTTPException, UploadFile
 from sqlalchemy import select, func, or_, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.attributes import NO_VALUE, set_committed_value
+from sqlalchemy import inspect
 
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 
 ensure_uploads_dir()
 
+from app.database import set_audit_fields
 from app.models.logbooks import (
     EngineLogbook,
     EngineComponentRecord,
@@ -36,11 +39,129 @@ from app.schemas.logbook_schema import (
 )
 
 
+def _component_record_payload(component_record) -> dict:
+    payload = component_record.dict(by_alias=False)
+    payload.pop("id", None)
+    return payload
+
+async def _sync_component_parts(
+    session: AsyncSession,
+    obj,
+    *,
+    parts,
+    relationship_attr: str,
+    foreign_key_field: str,
+    model_cls: Type,
+    audit_account_id: Optional[int],
+    require_relationship_loaded: bool = True,
+) -> None:
+    relationship_state = inspect(obj).attrs[relationship_attr]
+    relationship_loaded = relationship_state.loaded_value is not NO_VALUE
+
+    if not relationship_loaded and require_relationship_loaded:
+        raise ValueError(
+            f"Relationship '{relationship_attr}' must be eagerly loaded before syncing."
+        )
+
+    if not relationship_loaded:
+        # Create flows start from a freshly inserted parent row with no children yet.
+        # Seed an empty collection so appended records are reflected in the ORM object
+        # and the response payload includes component_parts immediately after commit.
+        set_committed_value(obj, relationship_attr, [])
+        relationship_state = inspect(obj).attrs[relationship_attr]
+        relationship_loaded = True
+
+    existing_parts = list(relationship_state.loaded_value or [])
+    existing_parts_map = {part.id: part for part in existing_parts if part.id is not None}
+    received_ids = set()
+
+    for component_record in parts or []:
+        payload = _component_record_payload(component_record)
+        part_id = getattr(component_record, "id", None)
+
+        if part_id is not None and part_id in existing_parts_map:
+            rec = existing_parts_map[part_id]
+            for field_name, field_value in payload.items():
+                setattr(rec, field_name, field_value)
+
+            if audit_account_id is not None:
+                await set_audit_fields(rec, audit_account_id, is_create=False)
+
+            received_ids.add(part_id)
+            continue
+
+        payload[foreign_key_field] = obj.id
+        rec = model_cls(**payload)
+        getattr(obj, relationship_attr).append(rec)
+
+        if audit_account_id is not None:
+            await set_audit_fields(rec, audit_account_id, is_create=True)
+
+    for missing_id, old_part in existing_parts_map.items():
+        if missing_id not in received_ids:
+            getattr(obj, relationship_attr).remove(old_part)
+            await session.delete(old_part)
+
+
 # ========== Engine Logbook CRUD ==========
+# async def create_engine_logbook(
+#     session: AsyncSession,
+#     data: EngineLogbookCreate,
+#     upload_file: UploadFile = None,
+#     *,
+#     audit_account_id: Optional[int] = None,
+# ) -> EngineLogbookRead:
+#     """Create a new Engine Logbook entry (with optional component_parts)."""
+#     logbook_data = data.dict(exclude={"component_parts"})
+#     if upload_file:
+#         file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
+#         with open(file_path, "wb") as f:
+#             f.write(await upload_file.read())
+#         logbook_data["upload_file"] = file_path
+
+#     entry = EngineLogbook(**logbook_data)
+#     try:
+#         session.add(entry)
+#         await session.flush()
+#         for cr in data.component_parts or []:
+#             cr_dict = cr.dict()
+#             cr_dict.pop("id", None)
+#             rec = EngineComponentRecord(engine_log_fk=entry.id, **cr_dict)
+#             session.add(rec)
+#         await session.flush()
+#         if audit_account_id is not None:
+#             await set_audit_fields(entry, audit_account_id, is_create=True)
+#             result_recs = await session.execute(
+#                 select(EngineComponentRecord).where(
+#                     EngineComponentRecord.engine_log_fk == entry.id
+#                 )
+#             )
+#             for rec in result_recs.scalars().all():
+#                 await set_audit_fields(rec, audit_account_id, is_create=True)
+#         await session.commit()
+#         # Re-fetch with component_parts so response includes them
+#         result = await session.execute(
+#             select(EngineLogbook)
+#             .options(
+#                 selectinload(EngineLogbook.mechanic),
+#                 selectinload(EngineLogbook.engine_component_parts),
+#             )
+#             .where(EngineLogbook.id == entry.id)
+#             .where(EngineLogbook.is_deleted == False)
+#             .execution_options(populate_existing=True)
+#         )
+#         entry = result.scalar_one_or_none() or entry
+#     except Exception as e:
+#         await session.rollback()
+#         raise HTTPException(status_code=400, detail=f"Failed to create engine logbook: {str(e)}")
+#     return EngineLogbookRead.from_orm(entry)
+
 async def create_engine_logbook(
     session: AsyncSession,
     data: EngineLogbookCreate,
-    upload_file: UploadFile = None
+    upload_file: UploadFile = None,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> EngineLogbookRead:
     """Create a new Engine Logbook entry (with optional component_parts)."""
     logbook_data = data.dict(exclude={"component_parts"})
@@ -54,10 +175,19 @@ async def create_engine_logbook(
     try:
         session.add(entry)
         await session.flush()
-        for cr in data.component_parts or []:
-            rec = EngineComponentRecord(**cr.dict())
-            entry.engine_component_parts.append(rec)
+        await _sync_component_parts(
+            session,
+            entry,
+            parts=data.component_parts,
+            relationship_attr="engine_component_parts",
+            foreign_key_field="engine_log_fk",
+            model_cls=EngineComponentRecord,
+            audit_account_id=audit_account_id,
+            require_relationship_loaded=False,
+        )
         await session.flush()
+        if audit_account_id is not None:
+            await set_audit_fields(entry, audit_account_id, is_create=True)
         await session.commit()
         # Re-fetch with component_parts so response includes them
         result = await session.execute(
@@ -68,13 +198,13 @@ async def create_engine_logbook(
             )
             .where(EngineLogbook.id == entry.id)
             .where(EngineLogbook.is_deleted == False)
+            .execution_options(populate_existing=True)
         )
         entry = result.scalar_one_or_none() or entry
     except Exception as e:
         await session.rollback()
         raise HTTPException(status_code=400, detail=f"Failed to create engine logbook: {str(e)}")
     return EngineLogbookRead.from_orm(entry)
-
 
 async def get_engine_logbook(
     session: AsyncSession,
@@ -167,7 +297,9 @@ async def update_engine_logbook(
     session: AsyncSession,
     logbook_id: int,
     logbook_in: EngineLogbookUpdate,
-    upload_file: UploadFile = None
+    upload_file: UploadFile = None,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[EngineLogbookRead]:
     """Update an Engine Logbook entry (optionally replace component_records)."""
     result = await session.execute(
@@ -194,14 +326,20 @@ async def update_engine_logbook(
         setattr(obj, k, v)
 
     if "component_parts" in logbook_in.dict(exclude_unset=True):
-        for existing in list(obj.engine_component_parts):
-            await session.delete(existing)
-        for cr in (logbook_in.component_parts or []):
-            rec = EngineComponentRecord(engine_log_fk=obj.id, **cr.dict())
-            session.add(rec)
+        await _sync_component_parts(
+            session,
+            obj,
+            parts=logbook_in.component_parts,
+            relationship_attr="engine_component_parts",
+            foreign_key_field="engine_log_fk",
+            model_cls=EngineComponentRecord,
+            audit_account_id=audit_account_id,
+        )
 
     try:
         session.add(obj)
+        if audit_account_id is not None:
+            await set_audit_fields(obj, audit_account_id, is_create=False)
         await session.commit()
         # Re-fetch with component_parts so response includes them
         result = await session.execute(
@@ -212,6 +350,7 @@ async def update_engine_logbook(
             )
             .where(EngineLogbook.id == obj.id)
             .where(EngineLogbook.is_deleted == False)
+            .execution_options(populate_existing=True)
         )
         obj = result.scalar_one_or_none() or obj
     except Exception as e:
@@ -238,7 +377,9 @@ async def soft_delete_engine_logbook(
 async def create_airframe_logbook(
     session: AsyncSession,
     data: AirframeLogbookCreate,
-    upload_file: UploadFile = None
+    upload_file: UploadFile = None,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> AirframeLogbookRead:
     """Create a new Airframe Logbook entry (with optional component_parts)."""
     logbook_data = data.dict(exclude={"component_parts"})
@@ -252,10 +393,19 @@ async def create_airframe_logbook(
     try:
         session.add(entry)
         await session.flush()
-        for cr in data.component_parts or []:
-            rec = AirframeComponentRecord(airframe_log_fk=entry.id, **cr.dict())
-            session.add(rec)
+        await _sync_component_parts(
+            session,
+            entry,
+            parts=data.component_parts,
+            relationship_attr="airframe_component_parts",
+            foreign_key_field="airframe_log_fk",
+            model_cls=AirframeComponentRecord,
+            audit_account_id=audit_account_id,
+            require_relationship_loaded=False,
+        )
         await session.flush()
+        if audit_account_id is not None:
+            await set_audit_fields(entry, audit_account_id, is_create=True)
         await session.commit()
         # Re-fetch with component_parts so response includes them
         result = await session.execute(
@@ -266,6 +416,7 @@ async def create_airframe_logbook(
             )
             .where(AirframeLogbook.id == entry.id)
             .where(AirframeLogbook.is_deleted == False)
+            .execution_options(populate_existing=True)
         )
         entry = result.scalar_one_or_none() or entry
     except Exception as e:
@@ -365,7 +516,9 @@ async def update_airframe_logbook(
     session: AsyncSession,
     logbook_id: int,
     logbook_in: AirframeLogbookUpdate,
-    upload_file: UploadFile = None
+    upload_file: UploadFile = None,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[AirframeLogbookRead]:
     """Update an Airframe Logbook entry (optionally replace component_records)."""
     result = await session.execute(
@@ -392,14 +545,20 @@ async def update_airframe_logbook(
         setattr(obj, k, v)
 
     if "component_parts" in logbook_in.dict(exclude_unset=True):
-        for existing in list(obj.airframe_component_parts):
-            await session.delete(existing)
-        for cr in (logbook_in.component_parts or []):
-            rec = AirframeComponentRecord(airframe_log_fk=obj.id, **cr.dict())
-            session.add(rec)
+        await _sync_component_parts(
+            session,
+            obj,
+            parts=logbook_in.component_parts,
+            relationship_attr="airframe_component_parts",
+            foreign_key_field="airframe_log_fk",
+            model_cls=AirframeComponentRecord,
+            audit_account_id=audit_account_id,
+        )
 
     try:
         session.add(obj)
+        if audit_account_id is not None:
+            await set_audit_fields(obj, audit_account_id, is_create=False)
         await session.commit()
         # Re-fetch with component_parts so response includes them
         result = await session.execute(
@@ -410,6 +569,7 @@ async def update_airframe_logbook(
             )
             .where(AirframeLogbook.id == obj.id)
             .where(AirframeLogbook.is_deleted == False)
+            .execution_options(populate_existing=True)
         )
         obj = result.scalar_one_or_none() or obj
     except Exception as e:
@@ -436,7 +596,9 @@ async def soft_delete_airframe_logbook(
 async def create_avionics_logbook(
     session: AsyncSession,
     data: AvionicsLogbookCreate,
-    upload_file: UploadFile = None
+    upload_file: UploadFile = None,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> AvionicsLogbookRead:
     """Create a new Avionics Logbook entry (with optional component_parts)."""
     logbook_data = data.dict(exclude={"component_parts"})
@@ -450,10 +612,19 @@ async def create_avionics_logbook(
     try:
         session.add(entry)
         await session.flush()
-        for cr in data.component_parts or []:
-            rec = AvionicsComponentRecord(**cr.dict())
-            entry.avionics_component_parts.append(rec)
+        await _sync_component_parts(
+            session,
+            entry,
+            parts=data.component_parts,
+            relationship_attr="avionics_component_parts",
+            foreign_key_field="avionics_log_fk",
+            model_cls=AvionicsComponentRecord,
+            audit_account_id=audit_account_id,
+            require_relationship_loaded=False,
+        )
         await session.flush()
+        if audit_account_id is not None:
+            await set_audit_fields(entry, audit_account_id, is_create=True)
         await session.commit()
         # Re-fetch with component_parts so response includes them
         result = await session.execute(
@@ -464,6 +635,7 @@ async def create_avionics_logbook(
             )
             .where(AvionicsLogbook.id == entry.id)
             .where(AvionicsLogbook.is_deleted == False)
+            .execution_options(populate_existing=True)
         )
         entry = result.scalar_one_or_none() or entry
     except Exception as e:
@@ -569,7 +741,9 @@ async def update_avionics_logbook(
     session: AsyncSession,
     logbook_id: int,
     logbook_in: AvionicsLogbookUpdate,
-    upload_file: UploadFile = None
+    upload_file: UploadFile = None,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[AvionicsLogbookRead]:
     """Update an Avionics Logbook entry (optionally replace component_records)."""
     result = await session.execute(
@@ -596,14 +770,20 @@ async def update_avionics_logbook(
         setattr(obj, k, v)
 
     if "component_parts" in logbook_in.dict(exclude_unset=True):
-        for existing in list(obj.avionics_component_parts):
-            await session.delete(existing)
-        for cr in (logbook_in.component_parts or []):
-            rec = AvionicsComponentRecord(avionics_log_fk=obj.id, **cr.dict())
-            session.add(rec)
+        await _sync_component_parts(
+            session,
+            obj,
+            parts=logbook_in.component_parts,
+            relationship_attr="avionics_component_parts",
+            foreign_key_field="avionics_log_fk",
+            model_cls=AvionicsComponentRecord,
+            audit_account_id=audit_account_id,
+        )
 
     try:
         session.add(obj)
+        if audit_account_id is not None:
+            await set_audit_fields(obj, audit_account_id, is_create=False)
         await session.commit()
         # Re-fetch with component_parts so response includes them
         result = await session.execute(
@@ -614,6 +794,7 @@ async def update_avionics_logbook(
             )
             .where(AvionicsLogbook.id == obj.id)
             .where(AvionicsLogbook.is_deleted == False)
+            .execution_options(populate_existing=True)
         )
         obj = result.scalar_one_or_none() or obj
     except Exception as e:
@@ -640,7 +821,9 @@ async def soft_delete_avionics_logbook(
 async def create_propeller_logbook(
     session: AsyncSession,
     data: PropellerLogbookCreate,
-    upload_file: UploadFile = None
+    upload_file: UploadFile = None,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> PropellerLogbookRead:
     """Create a new Propeller Logbook entry."""
     logbook_data = data.dict()
@@ -655,6 +838,8 @@ async def create_propeller_logbook(
     entry = PropellerLogbook(**logbook_data)
     try:
         session.add(entry)
+        if audit_account_id is not None:
+            await set_audit_fields(entry, audit_account_id, is_create=True)
         await session.commit()
         await session.refresh(entry)
         await session.refresh(entry, ['mechanic'])
@@ -749,7 +934,9 @@ async def update_propeller_logbook(
     session: AsyncSession,
     logbook_id: int,
     logbook_in: PropellerLogbookUpdate,
-    upload_file: UploadFile = None
+    upload_file: UploadFile = None,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[PropellerLogbookRead]:
     """Update a Propeller Logbook entry."""
     result = await session.execute(
@@ -776,6 +963,8 @@ async def update_propeller_logbook(
 
     try:
         session.add(obj)
+        if audit_account_id is not None:
+            await set_audit_fields(obj, audit_account_id, is_create=False)
         await session.commit()
         await session.refresh(obj)
         await session.refresh(obj, ['mechanic'])

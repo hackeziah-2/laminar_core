@@ -4,7 +4,7 @@ from sqlalchemy import Column, Integer, String, Float, Text, ForeignKey, UniqueC
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import ENUM as PGEnum
 
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
 FLEET_DAILY_UPDATE_STATUS_VALUES = (
@@ -26,12 +26,10 @@ class FleetDailyUpdateStatusEnum(str, enum.Enum):
     AOG = "AOG"
 
 
-class FleetDailyUpdate(Base, TimestampMixin, SoftDeleteMixin):
+class FleetDailyUpdate(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "fleet_daily_update"
 
     id = Column(Integer, primary_key=True, index=True)
-    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
-    updated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
 
     aircraft_fk = Column(
         Integer,

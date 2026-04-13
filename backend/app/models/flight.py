@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 import datetime
 from sqlalchemy import Column, Enum, String
 from enum import Enum as PyEnum
@@ -12,7 +12,7 @@ class FlightStatus(PyEnum):
     ARRIVED = "arrived"
     CANCELLED = "cancelled"
 
-class Flight(Base, TimestampMixin, SoftDeleteMixin):
+class Flight(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "flights"
     id = Column(Integer, primary_key=True, index=True)
     flight_no = Column(String(50), nullable=False, index=True)

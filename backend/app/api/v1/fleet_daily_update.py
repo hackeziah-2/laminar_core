@@ -19,7 +19,9 @@ from app.repository.aircraft import get_aircraft
 from app.repository.ldnd_monitoring import get_ldnd_latest_by_aircraft
 from app.repository.aircraft_technical_log import get_latest_aircraft_technical_log
 from app.repository.tcc_maintenance import get_latest_tcc_by_aircraft_and_description
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
 
 router = APIRouter(
     prefix="/api/v1/fleet-daily-update",
@@ -175,8 +177,11 @@ async def api_get_fleet_daily_update(
 async def api_create_fleet_daily_update(
     payload: fleet_daily_update_schema.FleetDailyUpdateCreate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
-    obj = await create_fleet_daily_update(session, payload)
+    obj = await create_fleet_daily_update(
+        session, payload, audit_account_id=current_account.id
+    )
     return _fleet_daily_update_item_with_aircraft(obj)
 
 
@@ -189,9 +194,12 @@ async def api_update_fleet_daily_update(
     update_id: int,
     payload: fleet_daily_update_schema.FleetDailyUpdateUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update any field; send only status and/or remarks to update just those."""
-    obj = await update_fleet_daily_update(session, update_id, payload)
+    obj = await update_fleet_daily_update(
+        session, update_id, payload, audit_account_id=current_account.id
+    )
     if not obj:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found")
     return _fleet_daily_update_item_with_aircraft(obj)
@@ -206,9 +214,12 @@ async def api_patch_fleet_daily_update(
     update_id: int,
     payload: fleet_daily_update_schema.FleetDailyUpdateUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Partial update: only provided fields are updated (e.g. status, remarks)."""
-    obj = await update_fleet_daily_update(session, update_id, payload)
+    obj = await update_fleet_daily_update(
+        session, update_id, payload, audit_account_id=current_account.id
+    )
     if not obj:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found")
     return _fleet_daily_update_item_with_aircraft(obj)
@@ -259,6 +270,7 @@ async def api_update_fleet_daily_update_by_aircraft_only(
     aircraft_id: int,
     payload: fleet_daily_update_schema.FleetDailyUpdateUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update status, remarks, etc. for the fleet daily update of this aircraft."""
     aircraft = await get_aircraft(session, aircraft_id)
@@ -267,7 +279,9 @@ async def api_update_fleet_daily_update_by_aircraft_only(
     record = await get_fleet_daily_update_by_aircraft(session, aircraft_id)
     if not record:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found for this aircraft")
-    obj = await update_fleet_daily_update(session, record.id, payload)
+    obj = await update_fleet_daily_update(
+        session, record.id, payload, audit_account_id=current_account.id
+    )
     if not obj:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found")
     return _fleet_daily_update_item_with_aircraft(obj)
@@ -282,6 +296,7 @@ async def api_patch_fleet_daily_update_by_aircraft(
     aircraft_id: int,
     payload: fleet_daily_update_schema.FleetDailyUpdateUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Partial update: only send status and/or remarks to update those."""
     aircraft = await get_aircraft(session, aircraft_id)
@@ -290,7 +305,9 @@ async def api_patch_fleet_daily_update_by_aircraft(
     record = await get_fleet_daily_update_by_aircraft(session, aircraft_id)
     if not record:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found for this aircraft")
-    obj = await update_fleet_daily_update(session, record.id, payload)
+    obj = await update_fleet_daily_update(
+        session, record.id, payload, audit_account_id=current_account.id
+    )
     if not obj:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found")
     return _fleet_daily_update_item_with_aircraft(obj)
@@ -351,6 +368,7 @@ async def api_create_fleet_daily_update_by_aircraft(
     aircraft_id: int,
     payload: fleet_daily_update_schema.FleetDailyUpdateCreate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     aircraft = await get_aircraft(session, aircraft_id)
     if not aircraft:
@@ -358,7 +376,9 @@ async def api_create_fleet_daily_update_by_aircraft(
     data = payload.dict(exclude_unset=True)
     data["aircraft_fk"] = aircraft_id
     create_payload = fleet_daily_update_schema.FleetDailyUpdateCreate(**data)
-    obj = await create_fleet_daily_update(session, create_payload)
+    obj = await create_fleet_daily_update(
+        session, create_payload, audit_account_id=current_account.id
+    )
     return _fleet_daily_update_item_with_aircraft(obj)
 
 
@@ -372,12 +392,15 @@ async def api_update_fleet_daily_update_by_aircraft(
     update_id: int,
     payload: fleet_daily_update_schema.FleetDailyUpdateUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update by explicit update_id; path must match the record’s aircraft. Prefer PUT /{aircraft_id}/fleet-daily-update when you only have aircraft_id."""
     existing = await get_fleet_daily_update_by_aircraft(session, aircraft_id)
     if not existing or existing.id != update_id:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found")
-    obj = await update_fleet_daily_update(session, update_id, payload)
+    obj = await update_fleet_daily_update(
+        session, update_id, payload, audit_account_id=current_account.id
+    )
     if not obj:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found")
     return _fleet_daily_update_item_with_aircraft(obj)

@@ -3,7 +3,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, validator, root_validator
+from pydantic import BaseModel, validator, root_validator, Field
 
 # Extensions treated as images (for modal preview in Aircraft Details)
 _IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"})
@@ -20,6 +20,7 @@ class AircraftBase(BaseModel):
     report_description: Optional[str] = None
 
     model: Optional[str] = None
+    model_year: Optional[int] = None
     msn: Optional[str] = None
     base: Optional[str] = None
     ownership: Optional[str] = None
@@ -33,11 +34,15 @@ class AircraftBase(BaseModel):
     engine_model: Optional[str]
     engine_serial_number: Optional[str]
     engine_life_time_limit: Optional[float] = None
-    
+    engine_tsn: Optional[float] = Field(0, ge=0, description="Time Since New (hours)")
+    engine_tso: Optional[float] = Field(0, ge=0, description="Time Since Overhaul (hours)")
+
     # Propeller Information
     propeller_model: Optional[str]
     propeller_serial_number: Optional[str]
     propeller_life_time_limit: Optional[float] = None
+    propeller_tsn: Optional[float] = Field(0, ge=0, description="Time Since New (hours)")
+    propeller_tso: Optional[float] = Field(0, ge=0, description="Time Since Overhaul (hours)")
 
     engine_arc: Optional[str] = None
     propeller_arc: Optional[str] = None
@@ -77,10 +82,12 @@ class AircraftOut(AircraftBase):
             return v
         # Build dict from ORM for Pydantic; add download URLs and is_image hints
         base_keys = [
-            "id", "created_at", "registration", "manufacturer", "report_description", "model", "msn",
+            "id", "created_at", "registration", "manufacturer", "report_description", "model", "model_year", "msn",
             "base", "ownership", "status", "airframe_service_manual", "airframe_ipc",
             "engine_model", "engine_serial_number", "engine_life_time_limit",
+            "engine_tsn", "engine_tso",
             "propeller_model", "propeller_serial_number", "propeller_life_time_limit",
+            "propeller_tsn", "propeller_tso",
             "engine_arc", "propeller_arc",
         ]
         d = {k: getattr(v, k, None) for k in base_keys if hasattr(v, k)}
@@ -109,6 +116,7 @@ class AircraftImportSchema(BaseModel):
     manufacturer: str
     report_description: Optional[str] = None
     model: str
+    model_year: Optional[int] = None
     msn: str
     base: str
     ownership: str
@@ -121,11 +129,15 @@ class AircraftImportSchema(BaseModel):
     engine_serial_number: Optional[str] = None
     engine_arc: Optional[str] = None
     engine_life_time_limit: Optional[float] = None
+    engine_tsn: Optional[float] = Field(0, ge=0)
+    engine_tso: Optional[float] = Field(0, ge=0)
 
     propeller_model: Optional[str] = None
     propeller_serial_number: Optional[str] = None
     propeller_arc: Optional[str] = None
     propeller_life_time_limit: Optional[float] = None
+    propeller_tsn: Optional[float] = Field(0, ge=0)
+    propeller_tso: Optional[float] = Field(0, ge=0)
 
     @validator("status", pre=True)
     def normalize_status(cls, v):

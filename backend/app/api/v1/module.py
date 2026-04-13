@@ -20,7 +20,9 @@ from app.repository.module import (
     soft_delete_module,
     get_all_modules_list,
 )
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
 
 router = APIRouter(
     prefix="/api/v1/modules",
@@ -87,10 +89,13 @@ async def api_get(
 )
 async def api_create(
     payload: ModuleCreate,
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new Module."""
-    return await create_module(session, payload)
+    return await create_module(
+        session, payload, audit_account_id=current_account.id
+    )
 
 
 @router.put("/{module_id}", response_model=ModuleRead)
@@ -98,12 +103,14 @@ async def api_update(
     module_id: int,
     module_in: ModuleUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update a Module."""
     updated = await update_module(
         session=session,
         module_id=module_id,
         module_in=module_in,
+        audit_account_id=current_account.id,
     )
     if not updated:
         raise HTTPException(

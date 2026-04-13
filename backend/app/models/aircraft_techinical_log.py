@@ -13,7 +13,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import ENUM as PGEnum
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
 class TypeEnum(str, enum.Enum):
@@ -37,7 +37,7 @@ class WorkStatus(str, enum.Enum):
     COMPLETED = "COMPLETED"
 
 
-class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin):
+class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "aircraft_technical_log"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -132,8 +132,6 @@ class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin):
     white_atl = Column(Text)
     dfp =  Column(Text)
 
-    created_by = Column(Integer, ForeignKey("account_information.id"), nullable=True)
-    updated_by = Column(Integer, ForeignKey("account_information.id"), nullable=True)
     work_status = Column(
         PGEnum(WorkStatus, name="work_status", create_type=False),
         nullable=True,
@@ -151,7 +149,7 @@ class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin):
         return f"<ATL(seq='{self.sequence_no}')>"
 
 
-class ComponentPartsRecord(Base, TimestampMixin, SoftDeleteMixin):
+class ComponentPartsRecord(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "component_parts_record"
 
     id = Column(Integer, primary_key=True, index=True)

@@ -9,9 +9,9 @@ from sqlalchemy import (
     and_,
 )
 from sqlalchemy.orm import relationship
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
-class EngineLogbook(Base, TimestampMixin, SoftDeleteMixin):
+class EngineLogbook(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "engine_logbook"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -41,7 +41,11 @@ class EngineLogbook(Base, TimestampMixin, SoftDeleteMixin):
     def __repr__(self):
         return f"<EngineLogbook(id={self.id}, seq='{self.sequence_no}')>"
 
-class AirframeLogbook(Base, TimestampMixin, SoftDeleteMixin):
+    @property
+    def component_parts(self):
+        return self.engine_component_parts
+
+class AirframeLogbook(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "airframe_logbook"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -68,9 +72,13 @@ class AirframeLogbook(Base, TimestampMixin, SoftDeleteMixin):
 
     def __repr__(self):
         return f"<AirframeLogbook(id={self.id}, seq='{self.sequence_no}')>"
+
+    @property
+    def component_parts(self):
+        return self.airframe_component_parts
         
 
-class AvionicsLogbook(Base, TimestampMixin, SoftDeleteMixin):
+class AvionicsLogbook(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "avionics_logbook"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -100,7 +108,11 @@ class AvionicsLogbook(Base, TimestampMixin, SoftDeleteMixin):
     def __repr__(self):
         return f"<AvionicsLogbook(id={self.id}, seq='{self.sequence_no}')>"
 
-class PropellerLogbook(Base, TimestampMixin, SoftDeleteMixin):
+    @property
+    def component_parts(self):
+        return self.avionics_component_parts
+
+class PropellerLogbook(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "propeller_logbook"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -123,7 +135,7 @@ class PropellerLogbook(Base, TimestampMixin, SoftDeleteMixin):
         return f"<PropellerLogbook(id={self.id}, seq='{self.sequence_no}')>"
 
 
-class AirframeComponentRecord(Base, TimestampMixin, SoftDeleteMixin):
+class AirframeComponentRecord(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "airframe_component_record"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -145,7 +157,7 @@ class AirframeComponentRecord(Base, TimestampMixin, SoftDeleteMixin):
 
 
 
-class AvionicsComponentRecord(Base, TimestampMixin, SoftDeleteMixin):
+class AvionicsComponentRecord(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "avionics_component_record"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -166,7 +178,7 @@ class AvionicsComponentRecord(Base, TimestampMixin, SoftDeleteMixin):
         return f"<AvionicsComponentRecord(id={self.id}, avionics_log='{self.avionics_log_fk}')>"
 
 
-class EngineComponentRecord(Base, TimestampMixin, SoftDeleteMixin):
+class EngineComponentRecord(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "engine_component_record"
 
     id = Column(Integer, primary_key=True, index=True)

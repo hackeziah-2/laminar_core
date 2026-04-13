@@ -22,8 +22,10 @@ from app.repository.ad_monitoring import (
     soft_delete_work_order_ad_monitoring,
     soft_delete_work_order_ad_monitoring_by_ad,
 )
-from app.repository.aircraft import get_aircraft
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
+from app.repository.aircraft import get_aircraft
 
 # ---------- Dependencies ----------
 async def get_ad_monitoring_scoped_to_aircraft(
@@ -103,6 +105,7 @@ async def api_create_ad_monitoring(
     json_data: Optional[str] = Form(None),
     upload_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     try:
         if json_data is not None:
@@ -114,7 +117,9 @@ async def api_create_ad_monitoring(
         raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
-    return await create_ad_monitoring(session, data, upload_file)
+    return await create_ad_monitoring(
+        session, data, upload_file, audit_account_id=current_account.id
+    )
 
 
 @router.put("/{ad_id}", response_model=ad_monitoring_schema.ADMonitoringRead)
@@ -124,6 +129,7 @@ async def api_update_ad_monitoring(
     json_data: Optional[str] = Form(None),
     upload_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     try:
         if json_data is not None:
@@ -135,7 +141,13 @@ async def api_update_ad_monitoring(
         raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
-    updated = await update_ad_monitoring(session, ad_id, data, upload_file)
+    updated = await update_ad_monitoring(
+        session,
+        ad_id,
+        data,
+        upload_file,
+        audit_account_id=current_account.id,
+    )
     if not updated:
         raise HTTPException(status_code=404, detail="ADMonitoring not found")
     return updated
@@ -209,6 +221,7 @@ async def api_create_ad_monitoring_by_aircraft(
     json_data: Optional[str] = Form(None),
     upload_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     aircraft = await get_aircraft(session, aircraft_fk)
     if not aircraft:
@@ -224,7 +237,12 @@ async def api_create_ad_monitoring_by_aircraft(
         raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
-    return await create_ad_monitoring(session, create_data, upload_file)
+    return await create_ad_monitoring(
+        session,
+        create_data,
+        upload_file,
+        audit_account_id=current_account.id,
+    )
 
 
 @router_aircraft_scoped.put(
@@ -238,6 +256,7 @@ async def api_update_ad_monitoring_by_aircraft(
     json_data: Optional[str] = Form(None),
     upload_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     existing = await get_ad_monitoring_by_aircraft(session, ad_id, aircraft_fk)
     if not existing:
@@ -252,7 +271,13 @@ async def api_update_ad_monitoring_by_aircraft(
         raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
-    updated = await update_ad_monitoring(session, ad_id, data, upload_file)
+    updated = await update_ad_monitoring(
+        session,
+        ad_id,
+        data,
+        upload_file,
+        audit_account_id=current_account.id,
+    )
     if not updated:
         raise HTTPException(status_code=404, detail="ADMonitoring not found")
     return updated
@@ -343,11 +368,14 @@ async def api_create_work_order_by_aircraft_ad(
     data: ad_monitoring_schema.WorkOrderADMonitoringCreate,
     session: AsyncSession = Depends(get_session),
     _: None = Depends(get_ad_monitoring_scoped_to_aircraft),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     create_data = ad_monitoring_schema.WorkOrderADMonitoringCreate(
         **{**data.dict(), "ad_monitoring_fk": ad_monitoring_fk}
     )
-    return await create_work_order_ad_monitoring(session, create_data)
+    return await create_work_order_ad_monitoring(
+        session, create_data, audit_account_id=current_account.id
+    )
 
 
 @router_aircraft_scoped.put(
@@ -362,6 +390,7 @@ async def api_update_work_order_by_aircraft_ad(
     data: ad_monitoring_schema.WorkOrderADMonitoringUpdate,
     session: AsyncSession = Depends(get_session),
     _: None = Depends(get_ad_monitoring_scoped_to_aircraft),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     existing = await get_work_order_ad_monitoring_by_ad(
         session, work_order_id, ad_monitoring_fk
@@ -371,7 +400,10 @@ async def api_update_work_order_by_aircraft_ad(
             status_code=404, detail="WorkOrderADMonitoring not found"
         )
     updated = await update_work_order_ad_monitoring(
-        session, work_order_id, data
+        session,
+        work_order_id,
+        data,
+        audit_account_id=current_account.id,
     )
     if not updated:
         raise HTTPException(
@@ -455,8 +487,11 @@ async def api_get_work_order_ad_monitoring(
 async def api_create_work_order_ad_monitoring(
     data: ad_monitoring_schema.WorkOrderADMonitoringCreate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
-    return await create_work_order_ad_monitoring(session, data)
+    return await create_work_order_ad_monitoring(
+        session, data, audit_account_id=current_account.id
+    )
 
 
 @router_work_order.put(
@@ -467,9 +502,13 @@ async def api_update_work_order_ad_monitoring(
     work_order_id: int,
     data: ad_monitoring_schema.WorkOrderADMonitoringUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     updated = await update_work_order_ad_monitoring(
-        session, work_order_id, data
+        session,
+        work_order_id,
+        data,
+        audit_account_id=current_account.id,
     )
     if not updated:
         raise HTTPException(

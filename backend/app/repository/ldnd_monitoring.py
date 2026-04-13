@@ -4,6 +4,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.database import set_audit_fields
 from app.models.atl_monitoring import LDNDMonitoring, UnitEnum
 from app.schemas.ldnd_monitoring_schema import (
     AircraftSummary,
@@ -214,13 +215,18 @@ def _unit_to_enum(value: Optional[str]):
 
 
 async def create_ldnd_monitoring(
-    session: AsyncSession, data: LDNDMonitoringCreate
+    session: AsyncSession,
+    data: LDNDMonitoringCreate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> LDNDMonitoringRead:
     """Create a new LDNDMonitoring entry."""
     payload = data.dict()
     payload["unit"] = _unit_to_enum(payload.get("unit")).value
     obj = LDNDMonitoring(**payload)
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=True)
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["aircraft"])
@@ -228,7 +234,11 @@ async def create_ldnd_monitoring(
 
 
 async def update_ldnd_monitoring(
-    session: AsyncSession, ldnd_id: int, data: LDNDMonitoringUpdate
+    session: AsyncSession,
+    ldnd_id: int,
+    data: LDNDMonitoringUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[LDNDMonitoringRead]:
     """Update an LDNDMonitoring entry."""
     result = await session.execute(
@@ -246,6 +256,8 @@ async def update_ldnd_monitoring(
     for k, v in update_data.items():
         setattr(obj, k, v)
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["aircraft"])

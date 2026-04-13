@@ -11,7 +11,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import ENUM as PGEnum
 
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
 # String values for PostgreSQL ENUM (asyncpg works reliably with string-based ENUM)
@@ -63,7 +63,7 @@ class MethodOfComplianceEnum(str, enum.Enum):
     CALIBRATION = "Calibration"
 
 
-class TCCMaintenance(Base, TimestampMixin, SoftDeleteMixin):
+class TCCMaintenance(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "tcc_maintenance"
 
     id = Column(Integer, primary_key=True, index=True)

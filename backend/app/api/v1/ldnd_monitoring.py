@@ -21,8 +21,10 @@ from app.repository.ldnd_monitoring import (
     soft_delete_ldnd_monitoring,
     soft_delete_ldnd_monitoring_by_aircraft,
 )
-from app.repository.aircraft import get_aircraft
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
+from app.repository.aircraft import get_aircraft
 
 router = APIRouter(
     prefix="/api/v1/ldnd-monitoring",
@@ -90,9 +92,12 @@ async def api_get_ldnd_monitoring(
 async def api_create_ldnd_monitoring(
     data: ldnd_monitoring_schema.LDNDMonitoringCreate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new LDNDMonitoring entry."""
-    return await create_ldnd_monitoring(session, data)
+    return await create_ldnd_monitoring(
+        session, data, audit_account_id=current_account.id
+    )
 
 
 @router.put(
@@ -104,9 +109,12 @@ async def api_update_ldnd_monitoring(
     ldnd_id: int,
     data: ldnd_monitoring_schema.LDNDMonitoringUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update an LDNDMonitoring entry."""
-    updated = await update_ldnd_monitoring(session, ldnd_id, data)
+    updated = await update_ldnd_monitoring(
+        session, ldnd_id, data, audit_account_id=current_account.id
+    )
     if not updated:
         raise HTTPException(status_code=404, detail="LDNDMonitoring not found")
     return updated
@@ -203,6 +211,7 @@ async def api_create_ldnd_monitoring_by_aircraft(
     aircraft_id: int,
     data: ldnd_monitoring_schema.LDNDMonitoringCreate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new LDNDMonitoring entry for a specific aircraft."""
     aircraft = await get_aircraft(session, aircraft_id)
@@ -211,7 +220,9 @@ async def api_create_ldnd_monitoring_by_aircraft(
     create_data = ldnd_monitoring_schema.LDNDMonitoringCreate(
         **{**data.dict(), "aircraft_fk": aircraft_id}
     )
-    return await create_ldnd_monitoring(session, create_data)
+    return await create_ldnd_monitoring(
+        session, create_data, audit_account_id=current_account.id
+    )
 
 
 @router_aircraft_scoped.put(
@@ -224,12 +235,15 @@ async def api_update_ldnd_monitoring_by_aircraft(
     ldnd_id: int,
     data: ldnd_monitoring_schema.LDNDMonitoringUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update an LDNDMonitoring entry for a specific aircraft."""
     existing = await get_ldnd_monitoring_by_aircraft(session, ldnd_id, aircraft_id)
     if not existing:
         raise HTTPException(status_code=404, detail="LDNDMonitoring not found")
-    updated = await update_ldnd_monitoring(session, ldnd_id, data)
+    updated = await update_ldnd_monitoring(
+        session, ldnd_id, data, audit_account_id=current_account.id
+    )
     if not updated:
         raise HTTPException(status_code=404, detail="LDNDMonitoring not found")
     return updated

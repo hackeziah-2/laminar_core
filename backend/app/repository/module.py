@@ -4,6 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import set_audit_fields
 from app.models.module import Module
 from app.schemas.module_schema import (
     ModuleCreate,
@@ -14,7 +15,9 @@ from app.schemas.module_schema import (
 
 async def create_module(
     session: AsyncSession,
-    data: ModuleCreate
+    data: ModuleCreate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> ModuleRead:
     """Create a new Module."""
     result = await session.execute(
@@ -32,6 +35,8 @@ async def create_module(
 
     module = Module(**data.dict())
     session.add(module)
+    if audit_account_id is not None:
+        await set_audit_fields(module, audit_account_id, is_create=True)
     await session.commit()
     await session.refresh(module)
     return ModuleRead.from_orm(module)
@@ -69,7 +74,9 @@ async def get_module_by_name(
 async def update_module(
     session: AsyncSession,
     module_id: int,
-    module_in: ModuleUpdate
+    module_in: ModuleUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[ModuleRead]:
     """Update a Module."""
     obj = await session.get(Module, module_id)
@@ -96,6 +103,8 @@ async def update_module(
         setattr(obj, k, v)
 
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     return ModuleRead.from_orm(obj)
@@ -152,13 +161,18 @@ async def list_modules(
     return items, total
 
 
+# Module names excluded from modules-list (do not show in UI)
+EXCLUDED_MODULE_NAMES = frozenset({"Certificate Monitoring", "Document On Board"})
+
+
 async def get_all_modules_list(
     session: AsyncSession,
 ) -> List[Module]:
-    """Get all Modules (no pagination, for dropdowns)."""
+    """Get all Modules (no pagination, for dropdowns). Excludes Certificate Monitoring and Document On Board."""
     result = await session.execute(
         select(Module)
         .where(Module.is_deleted == False)
+        .where(Module.name.notin_(EXCLUDED_MODULE_NAMES))
         .order_by(Module.name.asc())
     )
     return list(result.scalars().all())

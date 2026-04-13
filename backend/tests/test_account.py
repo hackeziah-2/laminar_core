@@ -378,6 +378,120 @@ def test_list_account_information_sorting(client: TestClient):
     assert created_ats == sorted(created_ats, reverse=True)
 
 
+def test_list_account_information_with_roles_filter(client: TestClient):
+    """Test listing account information filtered by linked role names."""
+    pilot_role = client.post(
+        "/api/v1/roles/",
+        json={"name": "Pilot Role Filter", "description": "Pilot role"},
+    )
+    admin_role = client.post(
+        "/api/v1/roles/",
+        json={"name": "Admin Role Filter", "description": "Admin role"},
+    )
+    assert pilot_role.status_code == 201
+    assert admin_role.status_code == 201
+    pilot_role_id = pilot_role.json()["id"]
+    admin_role_id = admin_role.json()["id"]
+
+    accounts = [
+        {
+            "first_name": "Role",
+            "last_name": "Pilot",
+            "username": "pilot_role_filter_user",
+            "password": "securepassword123",
+            "role_id": pilot_role_id,
+            "status": True,
+        },
+        {
+            "first_name": "Role",
+            "last_name": "Admin",
+            "username": "admin_role_filter_user",
+            "password": "securepassword123",
+            "role_id": admin_role_id,
+            "status": True,
+        },
+        {
+            "first_name": "Role",
+            "last_name": "Unassigned",
+            "username": "unassigned_role_filter_user",
+            "password": "securepassword123",
+            "status": True,
+        },
+    ]
+
+    for account_data in accounts:
+        response = client.post("/api/v1/account-information/", json=account_data)
+        assert response.status_code == 201
+
+    response = client.get(
+        "/api/v1/account-information/paged?roles=Pilot%20Role%20Filter&limit=10&page=1"
+    )
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["total"] == 1
+    assert [item["username"] for item in data["items"]] == ["pilot_role_filter_user"]
+
+
+def test_list_account_information_with_multiple_roles_filter(client: TestClient):
+    """Test listing account information when multiple role filters are supplied."""
+    qa_role = client.post(
+        "/api/v1/roles/",
+        json={"name": "QA Role Filter", "description": "QA role"},
+    )
+    engineering_role = client.post(
+        "/api/v1/roles/",
+        json={"name": "Engineering Role Filter", "description": "Engineering role"},
+    )
+    assert qa_role.status_code == 201
+    assert engineering_role.status_code == 201
+    qa_role_id = qa_role.json()["id"]
+    engineering_role_id = engineering_role.json()["id"]
+
+    accounts = [
+        {
+            "first_name": "Quality",
+            "last_name": "User",
+            "username": "qa_role_filter_user",
+            "password": "securepassword123",
+            "role_id": qa_role_id,
+            "status": True,
+        },
+        {
+            "first_name": "Engineer",
+            "last_name": "User",
+            "username": "engineering_role_filter_user",
+            "password": "securepassword123",
+            "role_id": engineering_role_id,
+            "status": True,
+        },
+        {
+            "first_name": "Support",
+            "last_name": "User",
+            "username": "support_role_filter_user",
+            "password": "securepassword123",
+            "status": True,
+        },
+    ]
+
+    for account_data in accounts:
+        response = client.post("/api/v1/account-information/", json=account_data)
+        assert response.status_code == 201
+
+    response = client.get(
+        "/api/v1/account-information/paged?roles=QA%20Role%20Filter&roles=Engineering%20Role%20Filter&limit=10&page=1"
+    )
+    assert response.status_code == 200
+    data = response.json()
+
+    usernames = sorted(item["username"] for item in data["items"])
+    assert data["total"] == 2
+    assert usernames == [
+        "engineering_role_filter_user",
+        "qa_role_filter_user",
+    ]
+
+
 def test_create_account_information_all_fields(client: TestClient):
     """Test creating account information with all fields."""
     account_data = {

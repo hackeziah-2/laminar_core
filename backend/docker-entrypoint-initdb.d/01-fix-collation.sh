@@ -1,12 +1,11 @@
 #!/bin/bash
-set -e
-
 # Fix collation version warning in PostgreSQL 15+
 # This script resets and refreshes collation versions for all databases
 # to prevent the warning: "database has no actual collation version,
 # but a version was recorded"
+# Non-fatal: if this fails (e.g. REFRESH not supported), container still starts.
 
-psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname template1 <<-EOSQL
+(psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname template1 <<-EOSQL
     -- Reset collation version for postgres database (if it exists)
     DO \$\$
     BEGIN
@@ -29,3 +28,4 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname template1 <<-EOSQL
     END
     \$\$;
 EOSQL
+) || echo "Collation fix skipped or failed (non-fatal)."

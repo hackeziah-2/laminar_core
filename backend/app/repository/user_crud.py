@@ -1,5 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database import set_audit_fields
 from app.models.user import User
 from app.schemas.user_schema import UserCreate
 from app.core.security import get_password_hash, verify_password
@@ -9,10 +11,17 @@ async def get_user_by_email(session: AsyncSession, email: str) -> Optional[User]
     res = await session.execute(select(User).where(User.email == email))
     return res.scalars().first()
 
-async def create_user(session: AsyncSession, user_in: UserCreate) -> User:
+async def create_user(
+    session: AsyncSession,
+    user_in: UserCreate,
+    *,
+    audit_account_id: Optional[int] = None,
+) -> User:
     hashed = get_password_hash(user_in.password)
     obj = User(email=user_in.email, full_name=user_in.full_name, hashed_password=hashed)
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=True)
     await session.commit()
     await session.refresh(obj)
     return obj
