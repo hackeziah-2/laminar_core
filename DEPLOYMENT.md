@@ -25,11 +25,11 @@ Ensure each environment uses:
 
 - **Backend CORS:** FastAPI in `backend/app/main.py` allows origins for localhost (e.g. `:3000`, `:5173`), and deployment IP `120.89.33.51` on dev (`:3000`), UAT (`:3011`), and prod (`:3002`). Override via `ALLOWED_ORIGINS` (comma-separated) or `VITE_APP_URL` if needed.
 - **Frontend API URLs:** In the **laminaraviationapp** repo, set env so the frontend calls the correct API:
-  - **Dev (local):** `VITE_APP_URL=http://localhost:3000`, `VITE_API_URL=http://localhost:8000/api/v1/` (or via NGINX: `http://localhost:8081/api/v1/`). See `docs/frontend-env-dev.example` → `.env.development` or `.env.local`.
-  - **UAT:** `VITE_APP_URL=http://120.89.33.51:3011`, `VITE_API_URL=http://120.89.33.51:8100/api/v1/` (or use NGINX: `http://120.89.33.51:8081/api/v1/`). See `docs/frontend-env-uat.example` → `.env.uat`.
+  - **Dev (local):** `VITE_APP_URL=http://localhost:3000`, `VITE_API_URL=http://localhost:8000/api/v1/` (or via NGINX: `http://localhost:8080/api/v1/`). See `docs/frontend-env-dev.example` → `.env.development` or `.env.local`.
+  - **UAT:** `VITE_APP_URL=http://120.89.33.51:3011`, `VITE_API_URL=http://120.89.33.51:8081/api/v1/`. Use the nginx UAT endpoint as the canonical API base, not the bare host or backend port. See `docs/frontend-env-uat.example` → `.env.uat`.
   - **Prod:** `VITE_APP_URL=http://120.89.33.51:3002`, `VITE_API_URL=http://120.89.33.51:8200/api/v1/` (or use NGINX: `http://120.89.33.51:8082/api/v1/`). See `docs/frontend-env-prod.example` → `.env.prod`.
 - **Reference files:** `docs/frontend-env-dev.example`, `docs/frontend-env-uat.example`, `docs/frontend-env-prod.example`; copy to laminaraviationapp as `.env.development`/`.env.local`, `.env.uat`, `.env.prod`.
-- **NGINX:** Dev uses `NGINX_PORT` (e.g. 8081); UAT and prod proxy `/api/v1/` with `NGINX_PORT` from `.env.uat` (8081) and `.env.prod` (8082).
+- **NGINX:** Dev uses `NGINX_PORT` (e.g. 8080); UAT and prod proxy `/api/v1/` with `NGINX_PORT` from `.env.uat` (8081) and `.env.prod` (8082).
 
 ---
 
@@ -55,7 +55,6 @@ docker-compose -f docker-compose.dev.yml exec backend alembic upgrade head
 ```bash
 cp .env.example .env.uat   # set UAT ports and config (e.g. FASTAPI_PORT=8100)
 docker-compose -f docker-compose.uat.yml --env-file .env.uat up --build -d
-docker-compose -f docker-compose.uat.yml exec backend alembic upgrade head
 ```
 
 - **API:** http://localhost:`FASTAPI_PORT`/docs (port from `.env.uat`)
@@ -160,7 +159,7 @@ cd /Users/kevinpaullamadrid/Desktop/Project/laminar_core
 ### 2. Set Environment Variables (Optional)
 Create an env file per environment so ports and config stay unique:
 - **Development:** copy `.env.example` to `.env.dev`, set `FASTAPI_PORT`, `NGINX_PORT`, `POSTGRES_PORT`, `REDIS_PORT` (e.g. 8000, 80, 5432, 6379).
-- **UAT:** `.env.uat` with different ports (e.g. 8001, 81, 5433, 6380).
+- **UAT:** `.env.uat` with different ports (e.g. 8100, 8081, 5433, 6380).
 - **Production:** `.env.prod` with your production ports and secrets.
 
 Example `.env.dev`:
