@@ -162,6 +162,11 @@ async def me(
 
 
 @router.post(
+    "/users/{user_id}/reset-password",
+    response_model=PasswordResetResponse,
+    include_in_schema=False,
+)
+@router.post(
     "/users/{user_id}/reset-password/",
     response_model=PasswordResetResponse,
 )

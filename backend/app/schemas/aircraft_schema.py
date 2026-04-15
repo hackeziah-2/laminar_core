@@ -104,6 +104,14 @@ class AircraftOut(AircraftBase):
         orm_mode = True
 
 
+class AircraftListItem(BaseModel):
+    id: int
+    registration: str
+
+    class Config:
+        orm_mode = True
+
+
 
 # Example Enum
 # class StatusEnum(str, enum.Enum):
