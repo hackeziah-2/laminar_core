@@ -19,6 +19,49 @@ def test_list_aircraft_empty(client: TestClient):
     assert len(data["items"]) == 0
 
 
+def test_list_aircraft_minimal(client: TestClient):
+    """Test the minimal aircraft list endpoint returns id and registration only."""
+    import json
+
+    payloads = [
+        {
+            "registration": "TEST-002",
+            "manufacturer": "Boeing",
+            "model": "737-800",
+            "msn": "TEST-MSN-002",
+            "base": "Test Base",
+            "ownership": "Test Owner",
+            "status": "Active",
+        },
+        {
+            "registration": "TEST-001",
+            "manufacturer": "Airbus",
+            "model": "A320",
+            "msn": "TEST-MSN-001",
+            "base": "Test Base",
+            "ownership": "Test Owner",
+            "status": "Active",
+        },
+    ]
+
+    for payload in payloads:
+        response = client.post(
+            "/api/v1/aircraft/",
+            data={"json_data": json.dumps(payload)},
+            files={},
+        )
+        assert response.status_code == 200
+
+    response = client.get("/api/v1/aircraft/list")
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data == [
+        {"id": 2, "registration": "TEST-001"},
+        {"id": 1, "registration": "TEST-002"},
+    ]
+
+
 def test_create_aircraft(client: TestClient, test_aircraft_data: dict):
     """Test creating a new aircraft."""
     # Convert to form data format

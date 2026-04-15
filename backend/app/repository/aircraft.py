@@ -142,6 +142,15 @@ async def list_aircraft(
     return items, total_count
 
 
+async def list_aircraft_minimal(session: AsyncSession) -> List[Aircraft]:
+    result = await session.execute(
+        select(Aircraft)
+        .where(Aircraft.is_deleted == False)
+        .order_by(Aircraft.registration.asc())
+    )
+    return result.scalars().all()
+
+
 async def update_aircraft(
     session: AsyncSession,
     aircraft_id: int,

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 
 from app.database import set_audit_fields
+from app.core.atl_paged_rbac import atl_rbac_filter
 from app.models.aircraft_techinical_log import (
     AircraftTechnicalLog,
     ComponentPartsRecord,
@@ -15,7 +16,6 @@ from app.models.aircraft_techinical_log import (
 )
 from app.models.aircraft import Aircraft
 from app.models.account import AccountInformation
-from app.core.atl_paged_rbac import atl_rbac_filter
 from app.core.atl_workflow_rbac import is_atl_work_status_transition_allowed
 from app.models.role import Role
 from app.schemas.aircraft_technical_log_schema import (
@@ -401,20 +401,12 @@ async def list_atl_paged(
     return items, total
 
 
-@atl_rbac_filter()
-async def list_aircraft_technical_logs(
-    session: AsyncSession,
-    limit: int = 0,
-    offset: int = 0,
+def _build_aircraft_technical_logs_list_statements(
     search: Optional[str] = None,
     aircraft_fk: Optional[int] = None,
-    work_status: Optional[WorkStatus] = None,
     sort: Optional[str] = "",
-    current_account: Optional[AccountInformation] = None,
-) -> Tuple[List[AircraftTechnicalLog], int]:
-    """List Aircraft Technical Log entries with pagination.
-    work_status RBAC is applied in ``atl_rbac_filter`` from ``current_account``'s role.
-    """
+) -> Tuple:
+    """Build list/count statements shared by ATL paged endpoints."""
     stmt = (
         select(AircraftTechnicalLog)
         .options(
@@ -518,6 +510,55 @@ async def list_aircraft_technical_logs(
             )
         )
 
+    return stmt, count_stmt
+
+
+async def list_aircraft_technical_logs(
+    session: AsyncSession,
+    limit: int = 0,
+    offset: int = 0,
+    search: Optional[str] = None,
+    aircraft_fk: Optional[int] = None,
+    work_status: Optional[WorkStatus] = None,
+    sort: Optional[str] = "",
+) -> Tuple[List[AircraftTechnicalLog], int]:
+    """List Aircraft Technical Log entries with pagination."""
+    stmt, count_stmt = _build_aircraft_technical_logs_list_statements(
+        search=search,
+        aircraft_fk=aircraft_fk,
+        sort=sort,
+    )
+
+    if work_status:
+        stmt = stmt.where(AircraftTechnicalLog.work_status == work_status)
+        count_stmt = count_stmt.where(AircraftTechnicalLog.work_status == work_status)
+
+    total = (await session.execute(count_stmt)).scalar()
+    total = int(total) if total is not None else 0
+
+    stmt = stmt.limit(limit).offset(offset)
+    result = await session.execute(stmt)
+    items = result.scalars().all()
+    return items, total
+
+
+@atl_rbac_filter()
+async def list_aircraft_technical_logs_manage(
+    session: AsyncSession,
+    limit: int = 0,
+    offset: int = 0,
+    search: Optional[str] = None,
+    aircraft_fk: Optional[int] = None,
+    work_status: Optional[WorkStatus] = None,
+    sort: Optional[str] = "",
+    current_account: Optional[AccountInformation] = None,
+) -> Tuple[List[AircraftTechnicalLog], int]:
+    """List ATL entries for the manage paged endpoint with RBAC applied by decorator."""
+    stmt, count_stmt = _build_aircraft_technical_logs_list_statements(
+        search=search,
+        aircraft_fk=aircraft_fk,
+        sort=sort,
+    )
     return stmt, count_stmt
 
 

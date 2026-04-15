@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.schemas import aircraft_schema, aircraft_technical_log_schema
 from app.repository.aircraft import (
     list_aircraft,
+    list_aircraft_minimal,
     get_aircraft,
     get_aircraft_raw,
     create_aircraft_with_file,
@@ -37,6 +38,12 @@ from app.services.generate_report_excel import generate_excel
 from app.services.generate_report_pdf import generate_pdf_report
 
 router = APIRouter(prefix="/api/v1/aircraft", tags=["aircrafts"])
+
+
+@router.get("/list", response_model=List[aircraft_schema.AircraftListItem])
+async def api_list_aircraft(session: AsyncSession = Depends(get_session)):
+    items = await list_aircraft_minimal(session)
+    return [aircraft_schema.AircraftListItem.from_orm(item) for item in items]
 
 @router.get("/paged")
 async def api_list_paged(
