@@ -7,12 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.schemas import aircraft_technical_log_schema
-from app.repository.aircraft_technical_log import list_atl_paged, get_previous_atl
+from app.repository.aircraft_technical_log import list_atl_paged
 from app.repository.aircraft import get_aircraft
 from app.core.atl_derived_times import (
-    compute_auto_fields,
     canonical_time_fields_from_auto,
     map_auto_fields_to_comp,
+    resolve_auto_fields,
 )
 
 
@@ -66,12 +66,12 @@ async def atl_paged(
     total = int(total) if total is not None else 0
     pages = int(ceil(total / page_size)) if total else 0
     result_items = []
+    auto_fields_memo = {}
 
     for item in items:
         base = aircraft_technical_log_schema.AircraftTechnicalLogRead.from_orm(item)
-        prev_atl = await get_previous_atl(session, item.aircraft_fk, item.sequence_no)
         # Use aircraft from get_aircraft (always loaded); not item.aircraft (relationship may be lazy/missing).
-        auto_base = compute_auto_fields(item, prev_atl, aircraft)
+        auto_base = await resolve_auto_fields(session, item, aircraft, auto_fields_memo)
         auto_rounded = {k: round(v, 2) for k, v in auto_base.items()}
         auto_comp = {k: round(v, 2) for k, v in map_auto_fields_to_comp(auto_rounded).items()}
         canonical = canonical_time_fields_from_auto(auto_rounded)

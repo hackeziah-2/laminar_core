@@ -207,6 +207,58 @@ def test_update_aircraft_technical_log(
     assert response.json()["remarks"] == "Updated remarks for testing"
 
 
+def test_create_aircraft_technical_log_uses_previous_sequence_for_meter_starts(
+    client_with_atl_auth: TestClient,
+    test_aircraft_technical_log_data: dict,
+):
+    """Create should default hobbs/tach starts from the previous ATL in sequence order."""
+    first_payload = {
+        **test_aircraft_technical_log_data,
+        "sequence_no": "ATL-001",
+        "hobbs_meter_start": 10.0,
+        "hobbs_meter_end": 11.5,
+        "tachometer_start": 20.0,
+        "tachometer_end": 21.25,
+    }
+    create_first = client_with_atl_auth.post("/api/v1/aircraft-technical-log/", json=first_payload)
+    assert create_first.status_code == 201, create_first.text
+
+    second_payload = {
+        **test_aircraft_technical_log_data,
+        "sequence_no": "ATL-002",
+        "hobbs_meter_start": None,
+        "hobbs_meter_end": 13.0,
+        "tachometer_start": None,
+        "tachometer_end": 23.0,
+    }
+    create_second = client_with_atl_auth.post("/api/v1/aircraft-technical-log/", json=second_payload)
+    assert create_second.status_code == 201, create_second.text
+    body = create_second.json()
+    assert body["hobbs_meter_start"] == 11.5
+    assert body["tachometer_start"] == 21.25
+
+
+def test_update_aircraft_technical_log_allows_meter_start_changes(
+    client_with_atl_auth: TestClient,
+    test_aircraft_technical_log_data: dict,
+):
+    """Update should allow correcting hobbs/tach start values."""
+    create_response = client_with_atl_auth.post(
+        "/api/v1/aircraft-technical-log/",
+        json=test_aircraft_technical_log_data,
+    )
+    assert create_response.status_code == 201
+    log_id = create_response.json()["id"]
+
+    response = client_with_atl_auth.put(
+        f"/api/v1/aircraft-technical-log/{log_id}",
+        json={"hobbs_meter_start": 123.4, "tachometer_start": 234.5},
+    )
+    assert response.status_code == 200
+    assert response.json()["hobbs_meter_start"] == 123.4
+    assert response.json()["tachometer_start"] == 234.5
+
+
 def test_delete_aircraft_technical_log(
     client_with_atl_auth: TestClient,
     test_aircraft_technical_log_data: dict

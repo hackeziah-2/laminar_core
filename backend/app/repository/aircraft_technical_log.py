@@ -52,6 +52,21 @@ def generate_range(start_id: str, end_id: str) -> list[str]:
     return [str(i).zfill(width) for i in range(start_num + 1, end_num)]
 
 
+async def _get_previous_meter_starts(
+    session: AsyncSession,
+    aircraft_fk: int,
+    sequence_no: str,
+) -> tuple[float, float]:
+    """Return hobbs/tach start defaults from the previous ATL in sequence order."""
+    prev_atl = await get_previous_atl(session, aircraft_fk, sequence_no)
+    if not prev_atl:
+        return 0.0, 0.0
+    return (
+        float(prev_atl.hobbs_meter_end or 0.0),
+        float(prev_atl.tachometer_end or 0.0),
+    )
+
+
 async def create_aircraft_technical_log(
     session: AsyncSession,
     data: AircraftTechnicalLogCreate,
@@ -98,30 +113,27 @@ async def create_aircraft_technical_log(
     else:
         log_data['work_status'] = WorkStatus.FOR_REVIEW
 
-    # Get latest ATL for this aircraft (for hobbs/tach and for gap detection)
+    # Get latest ATL for this aircraft (for gap detection)
     latest_stmt = (
         select(AircraftTechnicalLog)
         .where(AircraftTechnicalLog.aircraft_fk == data.aircraft_fk)
         .where(AircraftTechnicalLog.is_deleted.is_(False))
-        .order_by(AircraftTechnicalLog.sequence_no.desc())
+        .order_by(cast(AircraftTechnicalLog.sequence_no, Integer).desc())
         .limit(1)
     )
     latest_result = await session.execute(latest_stmt)
     latest_atl = latest_result.scalar_one_or_none()
     latest_sequence_no = latest_atl.sequence_no if latest_atl else None
 
-    # Auto-populate hobbs_meter_start and tachometer_start from latest ATL, or 0 for first entry
+    # Auto-populate hobbs_meter_start and tachometer_start from the previous ATL by sequence_no.
     if log_data.get('hobbs_meter_start') is None or log_data.get('tachometer_start') is None:
-        if latest_atl:
-            if log_data.get('hobbs_meter_start') is None:
-                log_data['hobbs_meter_start'] = latest_atl.hobbs_meter_end
-            if log_data.get('tachometer_start') is None:
-                log_data['tachometer_start'] = latest_atl.tachometer_end
-        else:
-            if log_data.get('hobbs_meter_start') is None:
-                log_data['hobbs_meter_start'] = 0.0
-            if log_data.get('tachometer_start') is None:
-                log_data['tachometer_start'] = 0.0
+        prev_hobbs_start, prev_tach_start = await _get_previous_meter_starts(
+            session, data.aircraft_fk, sequence_no
+        )
+        if log_data.get('hobbs_meter_start') is None:
+            log_data['hobbs_meter_start'] = prev_hobbs_start
+        if log_data.get('tachometer_start') is None:
+            log_data['tachometer_start'] = prev_tach_start
 
     # Create the main ATL entry (use model, not schema); store sequence_no as number only
     entry = AircraftTechnicalLog(**{**log_data, 'sequence_no': sequence_no})
@@ -190,7 +202,7 @@ async def search_atl_by_sequence_no(
         .options(selectinload(AircraftTechnicalLog.aircraft))
         .where(AircraftTechnicalLog.is_deleted == False)
         .where(AircraftTechnicalLog.sequence_no.ilike(q))
-        .order_by(AircraftTechnicalLog.sequence_no.asc())
+        .order_by(cast(AircraftTechnicalLog.sequence_no, Integer).asc())
         .limit(limit)
     )
     if aircraft_fk is not None:
@@ -239,10 +251,6 @@ async def update_aircraft_technical_log(
     if 'sequence_no' in update_data and update_data['sequence_no']:
         update_data['sequence_no'] = _sequence_no_digits_only(update_data['sequence_no'])
 
-    # Remove hobbs_meter_start and tachometer_start from updates (read-only fields)
-    update_data.pop('hobbs_meter_start', None)
-    update_data.pop('tachometer_start', None)
-    
     # nature_of_flight: empty string or "" -> NULL in DB
     if 'nature_of_flight' in update_data:
         nf = update_data['nature_of_flight']
@@ -257,6 +265,28 @@ async def update_aircraft_technical_log(
         if ws is not None:
             update_data['work_status'] = WorkStatus(ws) if isinstance(ws, str) else ws
         # else keep None to clear or leave unchanged per API contract
+
+    target_aircraft_fk = update_data.get("aircraft_fk", obj.aircraft_fk)
+    target_sequence_no = update_data.get("sequence_no", obj.sequence_no)
+    should_refresh_meter_starts = (
+        target_aircraft_fk != obj.aircraft_fk
+        or target_sequence_no != obj.sequence_no
+        or obj.hobbs_meter_start is None
+        or obj.tachometer_start is None
+    )
+    if should_refresh_meter_starts and (
+        'hobbs_meter_start' not in update_data
+        or 'tachometer_start' not in update_data
+    ):
+        prev_hobbs_start, prev_tach_start = await _get_previous_meter_starts(
+            session,
+            target_aircraft_fk,
+            target_sequence_no,
+        )
+        if 'hobbs_meter_start' not in update_data:
+            update_data['hobbs_meter_start'] = prev_hobbs_start
+        if 'tachometer_start' not in update_data:
+            update_data['tachometer_start'] = prev_tach_start
 
         role_name = None
         if current_account and current_account.role_id:
@@ -325,12 +355,16 @@ async def get_previous_atl(
 ) -> Optional[AircraftTechnicalLog]:
     """Get the previous ATL for the same aircraft: the row with the latest sequence_no that is less than the given sequence_no (immediate predecessor by sequence order). Used for auto_comp 'Previous' values. Excludes soft-deleted. sequence_no is normalized to number-only for comparison."""
     sequence_no = _sequence_no_digits_only(sequence_no)
+    try:
+        sequence_no_int = int(sequence_no)
+    except (TypeError, ValueError):
+        return None
     stmt = (
         select(AircraftTechnicalLog)
         .where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
-        .where(AircraftTechnicalLog.sequence_no < sequence_no)
+        .where(cast(AircraftTechnicalLog.sequence_no, Integer) < sequence_no_int)
         .where(AircraftTechnicalLog.is_deleted.is_(False))
-        .order_by(AircraftTechnicalLog.sequence_no.desc())
+        .order_by(cast(AircraftTechnicalLog.sequence_no, Integer).desc())
         .limit(1)
     )
     result = await session.execute(stmt)
@@ -370,9 +404,9 @@ async def list_atl_paged(
         except ValueError:
             pass
     if sort_sequence.lower() == "desc":
-        stmt = stmt.order_by(AircraftTechnicalLog.sequence_no.desc())
+        stmt = stmt.order_by(cast(AircraftTechnicalLog.sequence_no, Integer).desc())
     else:
-        stmt = stmt.order_by(AircraftTechnicalLog.sequence_no.asc())
+        stmt = stmt.order_by(cast(AircraftTechnicalLog.sequence_no, Integer).asc())
 
     count_stmt = (
         select(func.count())
@@ -441,7 +475,7 @@ def _build_aircraft_technical_logs_list_statements(
     sortable_fields = {
         "created_at": AircraftTechnicalLog.created_at,
         "updated_at": AircraftTechnicalLog.updated_at,
-        "sequence_no": AircraftTechnicalLog.sequence_no,
+        "sequence_no": cast(AircraftTechnicalLog.sequence_no, Integer),
         "origin_date": AircraftTechnicalLog.origin_date,
         "destination_date": AircraftTechnicalLog.destination_date,
         "origin_station": AircraftTechnicalLog.origin_station,
@@ -474,10 +508,9 @@ def _build_aircraft_technical_logs_list_statements(
                 column.desc() if desc_order else column.asc()
             )
     else:
-        # Default ordering
+        # Default ordering: sequence number ascending so computed "previous" base follows ATL order.
         stmt = stmt.order_by(
-            AircraftTechnicalLog.created_at.desc(),
-            AircraftTechnicalLog.sequence_no.asc(),
+            cast(AircraftTechnicalLog.sequence_no, Integer).asc(),
         )
 
     # Total count query (same filters, no ORDER BY)
