@@ -33,13 +33,10 @@ def float_or_zero(value: Any) -> float:
 
 
 def current_airframe_run_time(atl) -> float:
-    """Leg airframe run time: stored airframe_run_time when non-zero; else tach_end - tach_start (non-negative)."""
-    stored = float_or_zero(getattr(atl, "airframe_run_time", None))
-    if stored != 0.0:
-        return stored
+    """Leg airframe run time derived from tachometer delta for ATL computed fields."""
     tach_start = float_or_zero(getattr(atl, "tachometer_start", None))
     tach_end = float_or_zero(getattr(atl, "tachometer_end", None))
-    return max(0.0, tach_end - tach_start)
+    return abs(tach_end - tach_start)
 
 
 def previous_value_or_aircraft(
@@ -76,8 +73,10 @@ def compute_auto_fields(atl, prev_atl, aircraft) -> Dict[str, float]:
         pass
 
     try:
-        prev_aftt = float_or_zero(getattr(prev_atl, "airframe_aftt", None)) if prev_atl else 0.0
-        out["auto_airframe_aftt"] = prev_aftt + out["auto_airframe_run_time"]
+        base_aftt = previous_value_or_aircraft(
+            prev_atl, "airframe_aftt", aircraft, "airframe_aftt"
+        )
+        out["auto_airframe_aftt"] = base_aftt + out["auto_airframe_run_time"]
     except Exception:
         pass
 

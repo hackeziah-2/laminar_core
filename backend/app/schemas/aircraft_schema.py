@@ -27,6 +27,7 @@ class AircraftBase(BaseModel):
     status: Optional[str] = "Active"
 
     # Airframe Information
+    airframe_aftt: Optional[float] = None
     airframe_service_manual: Optional[str]
     airframe_ipc: Optional[str]
     
@@ -83,7 +84,7 @@ class AircraftOut(AircraftBase):
         # Build dict from ORM for Pydantic; add download URLs and is_image hints
         base_keys = [
             "id", "created_at", "registration", "manufacturer", "report_description", "model", "model_year", "msn",
-            "base", "ownership", "status", "airframe_service_manual", "airframe_ipc",
+            "base", "ownership", "status", "airframe_aftt", "airframe_service_manual", "airframe_ipc",
             "engine_model", "engine_serial_number", "engine_life_time_limit",
             "engine_tsn", "engine_tso",
             "propeller_model", "propeller_serial_number", "propeller_life_time_limit",
@@ -132,6 +133,7 @@ class AircraftImportSchema(BaseModel):
 
     airframe_service_manual: Optional[str] = None
     airframe_ipc: Optional[str] = None
+    airframe_aftt: Optional[float] = None
 
     engine_model: Optional[str] = None
     engine_serial_number: Optional[str] = None
