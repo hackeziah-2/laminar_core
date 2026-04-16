@@ -31,7 +31,6 @@ from app.repository.aircraft_technical_log import (
     create_aircraft_technical_log,
     update_aircraft_technical_log,
     soft_delete_aircraft_technical_log,
-    get_previous_atl,
 )
 from app.api.deps import get_current_active_account
 from app.database import get_session
@@ -112,10 +111,12 @@ async def api_list_paged(
     pages = ceil(total / limit) if total else 0
 
     result_items = []
+    auto_fields_memo = {}
     for item in items:
-        prev_atl = await get_previous_atl(session, item.aircraft_fk, item.sequence_no)
         aircraft_obj = getattr(item, "aircraft", None)
-        paged_item = atl_paged_item_with_computed(item, prev_atl, aircraft_obj)
+        paged_item = await atl_paged_item_with_computed(
+            session, item, aircraft_obj, auto_fields_memo
+        )
         result_items.append(paged_item.dict())
 
     return {
@@ -333,10 +334,12 @@ async def api_atl_list_paged(
     pages = ceil(total / limit) if total else 0
 
     result_items = []
+    auto_fields_memo = {}
     for item in items:
-        prev_atl = await get_previous_atl(session, item.aircraft_fk, item.sequence_no)
         aircraft_obj = getattr(item, "aircraft", None)
-        paged_item = atl_paged_item_with_computed(item, prev_atl, aircraft_obj)
+        paged_item = await atl_paged_item_with_computed(
+            session, item, aircraft_obj, auto_fields_memo
+        )
         result_items.append(paged_item.dict())
 
     return {

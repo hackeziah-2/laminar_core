@@ -52,7 +52,28 @@ def previous_value_or_aircraft(
     return float_or_zero(getattr(aircraft, aircraft_attr, None)) if aircraft else 0.0
 
 
-def compute_auto_fields(atl, prev_atl, aircraft) -> Dict[str, float]:
+def previous_computed_or_aircraft(
+    prev_auto_fields: Optional[Dict[str, float]],
+    prev_auto_key: str,
+    prev_atl,
+    prev_attr: str,
+    aircraft,
+    aircraft_attr: str,
+) -> float:
+    """Previous computed total when available; otherwise fall back to raw previous/aircraft baseline."""
+    if prev_auto_fields is not None:
+        prev_val = float_or_zero(prev_auto_fields.get(prev_auto_key))
+        if prev_val != 0.0:
+            return prev_val
+    return previous_value_or_aircraft(prev_atl, prev_attr, aircraft, aircraft_attr)
+
+
+def compute_auto_fields(
+    atl,
+    prev_atl,
+    aircraft,
+    prev_auto_fields: Optional[Dict[str, float]] = None,
+) -> Dict[str, float]:
     """Compute auto_* field values (floats, not rounded)."""
     out = {
         "auto_airframe_run_time": 0.0,
@@ -73,8 +94,13 @@ def compute_auto_fields(atl, prev_atl, aircraft) -> Dict[str, float]:
         pass
 
     try:
-        base_aftt = previous_value_or_aircraft(
-            prev_atl, "airframe_aftt", aircraft, "airframe_aftt"
+        base_aftt = previous_computed_or_aircraft(
+            prev_auto_fields,
+            "auto_airframe_aftt",
+            prev_atl,
+            "airframe_aftt",
+            aircraft,
+            "airframe_aftt",
         )
         out["auto_airframe_aftt"] = base_aftt + out["auto_airframe_run_time"]
     except Exception:
@@ -88,16 +114,26 @@ def compute_auto_fields(atl, prev_atl, aircraft) -> Dict[str, float]:
         pass
 
     try:
-        base_tsn = previous_value_or_aircraft(
-            prev_atl, "engine_tsn", aircraft, "engine_tsn"
+        base_tsn = previous_computed_or_aircraft(
+            prev_auto_fields,
+            "auto_engine_tsn",
+            prev_atl,
+            "engine_tsn",
+            aircraft,
+            "engine_tsn",
         )
         out["auto_engine_tsn"] = base_tsn + out["auto_engine_run_time"]
     except Exception:
         pass
 
     try:
-        base_tso = previous_value_or_aircraft(
-            prev_atl, "engine_tso", aircraft, "engine_tso"
+        base_tso = previous_computed_or_aircraft(
+            prev_auto_fields,
+            "auto_engine_tso",
+            prev_atl,
+            "engine_tso",
+            aircraft,
+            "engine_tso",
         )
         out["auto_engine_tso"] = base_tso + out["auto_engine_run_time"]
     except Exception:
@@ -116,16 +152,26 @@ def compute_auto_fields(atl, prev_atl, aircraft) -> Dict[str, float]:
         pass
 
     try:
-        base_ptsn = previous_value_or_aircraft(
-            prev_atl, "propeller_tsn", aircraft, "propeller_tsn"
+        base_ptsn = previous_computed_or_aircraft(
+            prev_auto_fields,
+            "auto_propeller_tsn",
+            prev_atl,
+            "propeller_tsn",
+            aircraft,
+            "propeller_tsn",
         )
         out["auto_propeller_tsn"] = base_ptsn + out["auto_propeller_run_time"]
     except Exception:
         pass
 
     try:
-        base_ptso = previous_value_or_aircraft(
-            prev_atl, "propeller_tso", aircraft, "propeller_tso"
+        base_ptso = previous_computed_or_aircraft(
+            prev_auto_fields,
+            "auto_propeller_tso",
+            prev_atl,
+            "propeller_tso",
+            aircraft,
+            "propeller_tso",
         )
         out["auto_propeller_tso"] = base_ptso + out["auto_propeller_run_time"]
     except Exception:
@@ -191,24 +237,51 @@ async def aircraft_technical_log_read_with_computed(
     entry: AircraftTechnicalLog,
 ) -> AircraftTechnicalLogRead:
     """Build AircraftTechnicalLogRead with standard time fields replaced by computed values."""
-    from app.repository.aircraft_technical_log import get_previous_atl
-
-    prev_atl = await get_previous_atl(session, entry.aircraft_fk, entry.sequence_no)
     aircraft_obj = getattr(entry, "aircraft", None)
-    auto_fields = compute_auto_fields(entry, prev_atl, aircraft_obj)
+    auto_fields = await resolve_auto_fields(session, entry, aircraft_obj)
     auto_fields = {k: round(v, 2) for k, v in auto_fields.items()}
     base = AircraftTechnicalLogRead.from_orm(entry)
     merged = {**base.dict(), **canonical_time_fields_from_auto(auto_fields)}
     return AircraftTechnicalLogRead.parse_obj(merged)
 
 
-def atl_paged_item_with_computed(
+async def resolve_auto_fields(
+    session: AsyncSession,
     item: AircraftTechnicalLog,
-    prev_atl: Optional[AircraftTechnicalLog],
     aircraft_obj: Any,
+    memo: Optional[Dict[tuple[int, str], Dict[str, float]]] = None,
+) -> Dict[str, float]:
+    """Resolve cumulative auto_* values through the previous ATL chain."""
+    from app.repository.aircraft_technical_log import get_previous_atl
+
+    key = (int(item.aircraft_fk), str(getattr(item, "sequence_no", "")))
+    if memo is not None and key in memo:
+        return memo[key]
+
+    prev_atl = await get_previous_atl(session, item.aircraft_fk, item.sequence_no)
+    prev_auto_fields = None
+    if prev_atl is not None:
+        prev_auto_fields = await resolve_auto_fields(session, prev_atl, aircraft_obj, memo)
+
+    auto_fields = compute_auto_fields(
+        item,
+        prev_atl,
+        aircraft_obj,
+        prev_auto_fields=prev_auto_fields,
+    )
+    if memo is not None:
+        memo[key] = auto_fields
+    return auto_fields
+
+
+async def atl_paged_item_with_computed(
+    session: AsyncSession,
+    item: AircraftTechnicalLog,
+    aircraft_obj: Any,
+    memo: Optional[Dict[tuple[int, str], Dict[str, float]]] = None,
 ) -> ATLPagedItemWithAuto:
     """Single list row: standard fields + auto_* both reflect the same computation."""
-    auto_fields = compute_auto_fields(item, prev_atl, aircraft_obj)
+    auto_fields = await resolve_auto_fields(session, item, aircraft_obj, memo)
     auto_fields = {k: round(v, 2) for k, v in auto_fields.items()}
     base = AircraftTechnicalLogRead.from_orm(item)
     merged = {
