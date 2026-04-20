@@ -103,3 +103,57 @@ def test_me_returns_profile_with_full_name(client: TestClient):
     assert body["email"] == "me@example.com"
     assert "role" in body
     assert "designation" in body
+
+
+def test_reset_password_supports_non_slash_route_and_updates_credentials(client: TestClient):
+    """POST /auth/users/{id}/reset-password works without trailing slash and rotates credentials."""
+    admin_data = {
+        "first_name": "Admin",
+        "last_name": "User",
+        "username": "reset_admin_user",
+        "email": "reset_admin@example.com",
+        "password": "adminpassword123",
+    }
+    target_data = {
+        "first_name": "Target",
+        "last_name": "User",
+        "username": "reset_target_user",
+        "email": "reset_target@example.com",
+        "password": "targetpassword123",
+    }
+
+    admin_reg = client.post("/api/v1/auth/register", json=admin_data)
+    assert admin_reg.status_code == 201, admin_reg.text
+    target_reg = client.post("/api/v1/auth/register", json=target_data)
+    assert target_reg.status_code == 201, target_reg.text
+    target_id = target_reg.json()["id"]
+
+    admin_token = client.post(
+        "/api/v1/auth/token",
+        data={"username": "reset_admin_user", "password": "adminpassword123"},
+    )
+    assert admin_token.status_code == 200, admin_token.text
+    access_token = admin_token.json()["access_token"]
+
+    reset_response = client.post(
+        f"/api/v1/auth/users/{target_id}/reset-password",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert reset_response.status_code == 200, reset_response.text
+    body = reset_response.json()
+    assert body["user_id"] == target_id
+    assert body["username"] == "reset_target_user"
+    assert body["message"] == "Password reset successful"
+    assert body["new_password"]
+
+    old_password_login = client.post(
+        "/api/v1/auth/token",
+        data={"username": "reset_target_user", "password": "targetpassword123"},
+    )
+    assert old_password_login.status_code == 401, old_password_login.text
+
+    new_password_login = client.post(
+        "/api/v1/auth/token",
+        data={"username": "reset_target_user", "password": body["new_password"]},
+    )
+    assert new_password_login.status_code == 200, new_password_login.text

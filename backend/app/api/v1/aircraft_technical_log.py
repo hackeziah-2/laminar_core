@@ -24,13 +24,13 @@ from app.core.atl_derived_times import (
 )
 from app.repository.aircraft_technical_log import (
     list_aircraft_technical_logs,
+    list_aircraft_technical_logs_manage,
     search_atl_by_sequence_no,
     get_aircraft_technical_log,
     get_latest_aircraft_technical_log,
     create_aircraft_technical_log,
     update_aircraft_technical_log,
     soft_delete_aircraft_technical_log,
-    get_previous_atl,
 )
 from app.api.deps import get_current_active_account
 from app.database import get_session
@@ -83,9 +83,7 @@ async def api_list_paged(
         description=(
             "Filter by work status (e.g. work_status=APPROVED). "
             "Values: FOR_REVIEW, REJECTED_MAINTENANCE, APPROVED, AWAITING_ATTACHMENT, "
-            "REJECTED_QUALITY, PENDING, COMPLETED. Omit for no filter. "
-            "Non-Admin: restricted to statuses allowed for your role (intersection). "
-            "Admin: all statuses; optional work_status still narrows the list when provided."
+            "REJECTED_QUALITY, PENDING, COMPLETED. Omit for no filter."
         ),
     ),
     sort: Optional[str] = Query(
@@ -93,13 +91,12 @@ async def api_list_paged(
         description="Example: -created_at,sequence_no"
     ),
     session: AsyncSession = Depends(get_session),
-    current_account: AccountInformation = Depends(get_current_active_account),
+    _current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Get paginated list of Aircraft Technical Log entries with auto_* computed fields.
     Previous row = last ATL by sequence_no (same aircraft). Airframe run time from ATL or tach delta;
     engine/propeller run time match airframe; TSN/TSO use previous ATL or aircraft baseline when zero.
-    RBAC: work_status visibility by role; Admin sees all ATL rows. Unknown or unmapped roles see no rows.
-    Optional work_status query param further narrows results (within RBAC when applicable).
+    Optional work_status query param narrows results when provided.
     """
     offset = (page - 1) * limit
     items, total = await list_aircraft_technical_logs(
@@ -110,15 +107,16 @@ async def api_list_paged(
         aircraft_fk=aircraft_fk,
         work_status=work_status,
         sort=sort,
-        current_account=current_account,
     )
     pages = ceil(total / limit) if total else 0
 
     result_items = []
+    auto_fields_memo = {}
     for item in items:
-        prev_atl = await get_previous_atl(session, item.aircraft_fk, item.sequence_no)
         aircraft_obj = getattr(item, "aircraft", None)
-        paged_item = atl_paged_item_with_computed(item, prev_atl, aircraft_obj)
+        paged_item = await atl_paged_item_with_computed(
+            session, item, aircraft_obj, auto_fields_memo
+        )
         result_items.append(paged_item.dict())
 
     return {
@@ -295,3 +293,58 @@ async def api_delete(
             detail="Aircraft Technical Log not found",
         )
     return {"ok": True}
+
+@router.get("/manage/paged")
+async def api_atl_list_paged(
+    limit: int = Query(10, ge=1, le=100),
+    page: int = Query(1, ge=1),
+    search: Optional[str] = None,
+    aircraft_fk: Optional[int] = Query(None, description="Filter by aircraft ID"),
+    work_status: Optional[WorkStatus] = Query(
+        None,
+        description=(
+            "Filter by work status (e.g. work_status=APPROVED). "
+            "Values: FOR_REVIEW, REJECTED_MAINTENANCE, APPROVED, AWAITING_ATTACHMENT, "
+            "REJECTED_QUALITY, PENDING, COMPLETED. Omit for no filter."
+        ),
+    ),
+    sort: Optional[str] = Query(
+        "",
+        description="Example: -created_at,sequence_no"
+    ),
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
+):
+    """Get paginated list of Aircraft Technical Log entries with auto_* computed fields.
+    Previous row = last ATL by sequence_no (same aircraft). Airframe run time from ATL or tach delta;
+    engine/propeller run time match airframe; TSN/TSO use previous ATL or aircraft baseline when zero.
+    Optional work_status query param narrows results when provided.
+    """
+    offset = (page - 1) * limit
+    items, total = await list_aircraft_technical_logs_manage(
+        session=session,
+        limit=limit,
+        offset=offset,
+        search=search,
+        aircraft_fk=aircraft_fk,
+        work_status=work_status,
+        sort=sort,
+        current_account=current_account,
+    )
+    pages = ceil(total / limit) if total else 0
+
+    result_items = []
+    auto_fields_memo = {}
+    for item in items:
+        aircraft_obj = getattr(item, "aircraft", None)
+        paged_item = await atl_paged_item_with_computed(
+            session, item, aircraft_obj, auto_fields_memo
+        )
+        result_items.append(paged_item.dict())
+
+    return {
+        "items": result_items,
+        "total": total,
+        "page": page,
+        "pages": pages,
+    }

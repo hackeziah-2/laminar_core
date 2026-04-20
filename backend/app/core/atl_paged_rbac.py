@@ -12,25 +12,23 @@ from app.models.role import Role
 _ATL_PAGED_WORK_STATUSES_BY_ROLE: Dict[str, Tuple[WorkStatus, ...]] = {
     "Maintenance Planner": (
         WorkStatus.FOR_REVIEW,
-        WorkStatus.AWAITING_ATTACHMENT,
-        WorkStatus.COMPLETED,
-        WorkStatus.PENDING,
-        WorkStatus.FOR_REVIEW,
         WorkStatus.APPROVED,
         WorkStatus.REJECTED_MAINTENANCE,
-        WorkStatus.REJECTED_QUALITY
     ),
     "Maintenance Manager": (
         WorkStatus.FOR_REVIEW,
         WorkStatus.APPROVED,
+        WorkStatus.REJECTED_MAINTENANCE,
     ),
     "Technical Publication": (
         WorkStatus.AWAITING_ATTACHMENT,
         WorkStatus.PENDING,
+        WorkStatus.REJECTED_QUALITY
     ),
     "Quality Manager": (
         WorkStatus.PENDING,
         WorkStatus.COMPLETED,
+        WorkStatus.REJECTED_QUALITY
     ),
     "Mechanic": (
         WorkStatus.FOR_REVIEW,

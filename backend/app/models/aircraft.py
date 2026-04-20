@@ -31,6 +31,7 @@ class Aircraft(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     )
 
     # Airframe Information
+    airframe_aftt = Column(Float, nullable=True)
     airframe_service_manual = Column(String, nullable=True)
     airframe_ipc = Column(String, nullable=True)
     

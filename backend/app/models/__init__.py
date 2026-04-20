@@ -28,6 +28,7 @@ from .certificate_category_type import CertificateCategoryType
 from .organizational_approval import OrganizationalApproval
 from .organizational_approval_history import OrganizationalApprovalHistory
 from .aircraft_statutory_certificate_history import AircraftStatutoryCertificateHistory
+from .aircraft_history import AircraftHistory
 from .oem_item_type import OemItemType
 from .oem_technical_publication import OemTechnicalPublication
 from .authorization_scope_cessna import AuthorizationScopeCessna
@@ -39,4 +40,3 @@ from .personnel_compliance import (
     PersonnelCompliance,
     PersonnelComplianceItemType,
 )
-

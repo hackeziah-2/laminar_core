@@ -1,8 +1,8 @@
 """Unit tests for Aircraft Technical Log endpoints."""
+
 import asyncio
 
 from fastapi.testclient import TestClient
-from sqlalchemy import update
 
 from app.api.deps import get_current_active_account
 from app.models.aircraft_techinical_log import AircraftTechnicalLog, WorkStatus
@@ -115,6 +115,75 @@ def test_list_aircraft_technical_logs_filter_work_status(
     assert log_id in approved_ids2
 
 
+def test_manage_paged_applies_atl_rbac_filter(
+    client_with_atl_auth: TestClient,
+    test_aircraft_technical_log_data: dict,
+):
+    """Maintenance Manager should not see PENDING ATL rows on /manage/paged."""
+    create_response = client_with_atl_auth.post(
+        "/api/v1/aircraft-technical-log/",
+        json={**test_aircraft_technical_log_data, "sequence_no": "ATL-002"},
+    )
+    assert create_response.status_code == 201
+    allowed_log_id = create_response.json()["id"]
+
+    async def seed_pending_row() -> int:
+        async with TestSessionLocal() as session:
+            pending_row = AircraftTechnicalLog(
+                aircraft_fk=test_aircraft_technical_log_data["aircraft_fk"],
+                sequence_no="002",
+                work_status=WorkStatus.PENDING,
+            )
+            session.add(pending_row)
+            await session.commit()
+            await session.refresh(pending_row)
+            return pending_row.id
+
+    pending_log_id = asyncio.run(seed_pending_row())
+
+    manage_response = client_with_atl_auth.get(
+        "/api/v1/aircraft-technical-log/manage/paged?limit=10&page=1"
+    )
+    assert manage_response.status_code == 200
+    manage_ids = {item["id"] for item in manage_response.json()["items"]}
+    assert allowed_log_id in manage_ids
+    assert pending_log_id not in manage_ids
+
+    pending_response = client_with_atl_auth.get(
+        "/api/v1/aircraft-technical-log/manage/paged?work_status=PENDING&limit=10&page=1"
+    )
+    assert pending_response.status_code == 200
+    assert pending_response.json()["items"] == []
+    assert pending_response.json()["total"] == 0
+
+
+def test_paged_does_not_apply_atl_rbac_filter(
+    client_with_atl_auth: TestClient,
+    test_aircraft_technical_log_data: dict,
+):
+    """The general /paged endpoint should remain unfiltered by ATL RBAC."""
+    async def seed_pending_row() -> int:
+        async with TestSessionLocal() as session:
+            pending_row = AircraftTechnicalLog(
+                aircraft_fk=test_aircraft_technical_log_data["aircraft_fk"],
+                sequence_no="003",
+                work_status=WorkStatus.PENDING,
+            )
+            session.add(pending_row)
+            await session.commit()
+            await session.refresh(pending_row)
+            return pending_row.id
+
+    pending_log_id = asyncio.run(seed_pending_row())
+
+    paged_response = client_with_atl_auth.get(
+        "/api/v1/aircraft-technical-log/paged?limit=10&page=1"
+    )
+    assert paged_response.status_code == 200
+    paged_ids = {item["id"] for item in paged_response.json()["items"]}
+    assert pending_log_id in paged_ids
+
+
 def test_update_aircraft_technical_log(
     client_with_atl_auth: TestClient,
     test_aircraft_technical_log_data: dict
@@ -138,6 +207,58 @@ def test_update_aircraft_technical_log(
     assert response.json()["remarks"] == "Updated remarks for testing"
 
 
+def test_create_aircraft_technical_log_uses_previous_sequence_for_meter_starts(
+    client_with_atl_auth: TestClient,
+    test_aircraft_technical_log_data: dict,
+):
+    """Create should default hobbs/tach starts from the previous ATL in sequence order."""
+    first_payload = {
+        **test_aircraft_technical_log_data,
+        "sequence_no": "ATL-001",
+        "hobbs_meter_start": 10.0,
+        "hobbs_meter_end": 11.5,
+        "tachometer_start": 20.0,
+        "tachometer_end": 21.25,
+    }
+    create_first = client_with_atl_auth.post("/api/v1/aircraft-technical-log/", json=first_payload)
+    assert create_first.status_code == 201, create_first.text
+
+    second_payload = {
+        **test_aircraft_technical_log_data,
+        "sequence_no": "ATL-002",
+        "hobbs_meter_start": None,
+        "hobbs_meter_end": 13.0,
+        "tachometer_start": None,
+        "tachometer_end": 23.0,
+    }
+    create_second = client_with_atl_auth.post("/api/v1/aircraft-technical-log/", json=second_payload)
+    assert create_second.status_code == 201, create_second.text
+    body = create_second.json()
+    assert body["hobbs_meter_start"] == 11.5
+    assert body["tachometer_start"] == 21.25
+
+
+def test_update_aircraft_technical_log_allows_meter_start_changes(
+    client_with_atl_auth: TestClient,
+    test_aircraft_technical_log_data: dict,
+):
+    """Update should allow correcting hobbs/tach start values."""
+    create_response = client_with_atl_auth.post(
+        "/api/v1/aircraft-technical-log/",
+        json=test_aircraft_technical_log_data,
+    )
+    assert create_response.status_code == 201
+    log_id = create_response.json()["id"]
+
+    response = client_with_atl_auth.put(
+        f"/api/v1/aircraft-technical-log/{log_id}",
+        json={"hobbs_meter_start": 123.4, "tachometer_start": 234.5},
+    )
+    assert response.status_code == 200
+    assert response.json()["hobbs_meter_start"] == 123.4
+    assert response.json()["tachometer_start"] == 234.5
+
+
 def test_delete_aircraft_technical_log(
     client_with_atl_auth: TestClient,
     test_aircraft_technical_log_data: dict
@@ -154,130 +275,6 @@ def test_delete_aircraft_technical_log(
     # Delete it
     response = client_with_atl_auth.delete(f"/api/v1/aircraft-technical-log/{log_id}")
     assert response.status_code == 204
-
-
-def test_atl_paged_rbac_maintenance_planner_sees_null_work_status(client: TestClient):
-    """Maintenance Planner without work_status query param may list rows where work_status is NULL."""
-    async def seed_roles():
-        async with TestSessionLocal() as session:
-            mm = Role(name="Maintenance Manager", description="rbac")
-            pl = Role(name="Maintenance Planner", description="rbac")
-            session.add_all([mm, pl])
-            await session.commit()
-            await session.refresh(mm)
-            await session.refresh(pl)
-            return mm.id, pl.id
-
-    async def clear_work_status(log_id: int) -> None:
-        async with TestSessionLocal() as session:
-            await session.execute(
-                update(AircraftTechnicalLog)
-                .where(AircraftTechnicalLog.id == log_id)
-                .values(work_status=None)
-            )
-            await session.commit()
-
-    mm_rid, pl_rid = asyncio.run(seed_roles())
-    acting_role = {"rid": mm_rid}
-
-    async def override_account():
-        acc = type("Acc", (), {})()
-        acc.id = 8801
-        acc.status = True
-        acc.role_id = acting_role["rid"]
-        return acc
-
-    app.dependency_overrides[get_current_active_account] = override_account
-
-    log_data = {
-        "aircraft_fk": 1,
-        "sequence_no": "ATL-RBAC-PLAN-NULL",
-        "nature_of_flight": "TR",
-        "origin_station": "ORG",
-        "origin_date": "2025-01-17",
-        "origin_time": "10:00:00",
-        "destination_station": "DST",
-        "destination_date": "2025-01-17",
-        "destination_time": "12:00:00",
-        "number_of_landings": 1,
-        "hobbs_meter_start": 1.0,
-        "hobbs_meter_end": 2.0,
-        "hobbs_meter_total": 1.0,
-        "tachometer_start": 1.0,
-        "tachometer_end": 2.0,
-        "tachometer_total": 1.0,
-        "component_parts": [],
-    }
-    cr = client.post("/api/v1/aircraft-technical-log/", json=log_data)
-    assert cr.status_code == 201
-    log_id = cr.json()["id"]
-
-    asyncio.run(clear_work_status(log_id))
-
-    acting_role["rid"] = pl_rid
-    p1 = client.get("/api/v1/aircraft-technical-log/paged?limit=50&page=1")
-    assert p1.status_code == 200
-    assert log_id in {i["id"] for i in p1.json()["items"]}
-
-    p2 = client.get(
-        "/api/v1/aircraft-technical-log/paged?work_status=APPROVED&limit=50&page=1"
-    )
-    assert p2.status_code == 200
-    assert log_id not in {i["id"] for i in p2.json()["items"]}
-
-
-def test_atl_paged_admin_sees_all_work_statuses(client: TestClient):
-    """Admin lists ATL rows regardless of work_status (e.g. FOR_REVIEW)."""
-    async def seed_roles():
-        async with TestSessionLocal() as session:
-            adm = Role(name="Admin", description="rbac")
-            mm = Role(name="Maintenance Manager", description="rbac")
-            session.add_all([adm, mm])
-            await session.commit()
-            await session.refresh(adm)
-            await session.refresh(mm)
-            return adm.id, mm.id
-
-    adm_rid, mm_rid = asyncio.run(seed_roles())
-    acting_role = {"rid": mm_rid}
-
-    async def override_account():
-        acc = type("Acc", (), {})()
-        acc.id = 8802
-        acc.status = True
-        acc.role_id = acting_role["rid"]
-        return acc
-
-    app.dependency_overrides[get_current_active_account] = override_account
-
-    log_data = {
-        "aircraft_fk": 1,
-        "sequence_no": "ATL-RBAC-ADM",
-        "nature_of_flight": "TR",
-        "origin_station": "ORG",
-        "origin_date": "2025-01-17",
-        "origin_time": "10:00:00",
-        "destination_station": "DST",
-        "destination_date": "2025-01-17",
-        "destination_time": "12:00:00",
-        "number_of_landings": 1,
-        "hobbs_meter_start": 1.0,
-        "hobbs_meter_end": 2.0,
-        "hobbs_meter_total": 1.0,
-        "tachometer_start": 1.0,
-        "tachometer_end": 2.0,
-        "tachometer_total": 1.0,
-        "component_parts": [],
-    }
-    cr = client.post("/api/v1/aircraft-technical-log/", json=log_data)
-    assert cr.status_code == 201
-    log_id = cr.json()["id"]
-    assert cr.json().get("work_status") in (None, "FOR_REVIEW")
-
-    acting_role["rid"] = adm_rid
-    paged = client.get("/api/v1/aircraft-technical-log/paged?limit=50&page=1")
-    assert paged.status_code == 200
-    assert log_id in {i["id"] for i in paged.json()["items"]}
 
 
 def test_quality_manager_can_update_pending_to_completed(client: TestClient):

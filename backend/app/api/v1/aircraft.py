@@ -20,13 +20,19 @@ from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas import aircraft_schema, aircraft_technical_log_schema
+from app.schemas.aircraft_history_schema import AircraftUpdateWithHistoryResponse
 from app.repository.aircraft import (
     list_aircraft,
+    list_aircraft_minimal,
     get_aircraft,
     get_aircraft_raw,
     create_aircraft_with_file,
-    update_aircraft_with_file,
     soft_delete_aircraft
+)
+from app.services.aircraft_history_service import (
+    list_aircraft_history_paged,
+    update_aircraft_and_log_history,
+    update_aircraft_with_history as update_aircraft_with_history_service,
 )
 from app.repository.aircraft_technical_log import search_atl_by_sequence_no
 from app.database import get_session
@@ -37,6 +43,12 @@ from app.services.generate_report_excel import generate_excel
 from app.services.generate_report_pdf import generate_pdf_report
 
 router = APIRouter(prefix="/api/v1/aircraft", tags=["aircrafts"])
+
+
+@router.get("/list", response_model=List[aircraft_schema.AircraftListItem])
+async def api_list_aircraft(session: AsyncSession = Depends(get_session)):
+    items = await list_aircraft_minimal(session)
+    return [aircraft_schema.AircraftListItem.from_orm(item) for item in items]
 
 @router.get("/paged")
 async def api_list_paged(
@@ -90,6 +102,27 @@ async def api_get(aircraft_id: int, session: AsyncSession = Depends(get_session)
     if not obj:
         raise HTTPException(status_code=404, detail="Aircraft not found")
     return obj
+
+
+@router.get("/{aircraft_id}/history")
+async def api_get_aircraft_history(
+    aircraft_id: int,
+    limit: int = Query(10, ge=1, le=100),
+    page: int = Query(1, ge=1),
+    session: AsyncSession = Depends(get_session),
+):
+    obj = await get_aircraft(session, aircraft_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Aircraft not found")
+    offset = (page - 1) * limit
+    items, total = await list_aircraft_history_paged(
+        session,
+        aircraft_id,
+        limit=limit,
+        offset=offset,
+    )
+    pages = ceil(total / limit) if total else 0
+    return {"items": items, "total": total, "page": page, "pages": pages}
 
 
 def _serve_aircraft_file(
@@ -193,13 +226,34 @@ async def api_update_aircraft_with_file(
 ):  
     parsed = json.loads(json_data)
     aircraft_data = aircraft_schema.AircraftUpdate(**parsed)
-    return await update_aircraft_with_file(
+    return await update_aircraft_and_log_history(
         session=session,
         aircraft_id=aircraft_id,
         data=aircraft_data,
+        user_id=current_account.id,
         engine_file=engine_arc_file,
         propeller_file=propeller_arc_file,
-        audit_account_id=current_account.id,
+    )
+
+
+@router.post("/{aircraft_id}/update-with-history", response_model=AircraftUpdateWithHistoryResponse)
+async def api_update_aircraft_with_history(
+    aircraft_id: int,
+    json_data: str = Form(...),
+    engine_arc_file: UploadFile = File(None),
+    propeller_arc_file: UploadFile = File(None),
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
+):
+    parsed = json.loads(json_data)
+    aircraft_data = aircraft_schema.AircraftUpdate(**parsed)
+    return await update_aircraft_with_history_service(
+        session=session,
+        aircraft_id=aircraft_id,
+        data=aircraft_data,
+        user_id=current_account.id,
+        engine_file=engine_arc_file,
+        propeller_file=propeller_arc_file,
     )
 
 
