@@ -11,6 +11,7 @@ from app.repository.tcc_maintenance import (
     get_tcc_maintenance,
     get_tcc_maintenance_by_aircraft,
     list_tcc_maintenances,
+    tcc_maintenance_to_read,
     update_tcc_maintenance,
     soft_delete_tcc_maintenance,
     soft_delete_tcc_maintenance_by_aircraft,
@@ -19,6 +20,7 @@ from app.repository.aircraft import get_aircraft
 from app.api.deps import get_current_active_account
 from app.database import get_session
 from app.models.account import AccountInformation
+from app.services.tcc_computation import fetch_latest_atl_tach_aftt
 
 router = APIRouter(
     prefix="/api/v1/tcc-maintenance",
@@ -32,7 +34,10 @@ router_aircraft_scoped = APIRouter(
 )
 
 
-@router.get("/paged")
+@router.get(
+    "/paged",
+    response_model=tcc_maintenance_schema.TCCMaintenancePagedResponse,
+)
 async def api_list_tcc_maintenances_paged(
     limit: int = Query(10, ge=1, le=100, description="Number of items per page"),
     page: int = Query(1, ge=1, description="Page number (1-indexed)"),
@@ -60,15 +65,14 @@ async def api_list_tcc_maintenances_paged(
     )
     pages = ceil(total / limit) if total else 0
     items_schemas = [
-        tcc_maintenance_schema.TCCMaintenanceRead.from_orm(item)
-        for item in items
+        await tcc_maintenance_to_read(session, item) for item in items
     ]
-    return {
-        "items": items_schemas,
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+    return tcc_maintenance_schema.TCCMaintenancePagedResponse(
+        items=items_schemas,
+        total=total,
+        page=page,
+        pages=pages,
+    )
 
 
 @router.get(
@@ -160,6 +164,7 @@ async def api_delete_tcc_maintenance(
 
 @router_aircraft_scoped.get(
     "/{aircraft_id}/tcc-maintenance/paged",
+    response_model=tcc_maintenance_schema.TCCMaintenancePagedResponse,
     summary="List TCC Maintenance for aircraft (paginated)",
     description="Get paginated list of TCC Maintenance entries for a specific aircraft. aircraft_id is required.",
 )
@@ -189,16 +194,21 @@ async def api_list_tcc_maintenances_by_aircraft_paged(
         sort=sort or "",
     )
     pages = ceil(total / limit) if total else 0
+    prefetched_tach_aftt = await fetch_latest_atl_tach_aftt(session, aircraft_id)
     items_schemas = [
-        tcc_maintenance_schema.TCCMaintenanceRead.from_orm(item)
+        await tcc_maintenance_to_read(
+            session,
+            item,
+            prefetched_latest_atl_tach_aftt=prefetched_tach_aftt,
+        )
         for item in items
     ]
-    return {
-        "items": items_schemas,
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+    return tcc_maintenance_schema.TCCMaintenancePagedResponse(
+        items=items_schemas,
+        total=total,
+        page=page,
+        pages=pages,
+    )
 
 
 @router_aircraft_scoped.get(

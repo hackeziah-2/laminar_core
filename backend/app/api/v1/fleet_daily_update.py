@@ -37,13 +37,13 @@ router_aircraft_scoped = APIRouter(
 def _fleet_daily_update_item_with_aircraft(orm):
     """Build list item dict with aircraft: { id, registration }."""
     read = fleet_daily_update_schema.FleetDailyUpdateRead.from_orm(orm)
-    d = read.dict()
-    d["aircraft"] = (
+    data_item = read.dict()
+    data_item["aircraft"] = (
         {"id": orm.aircraft.id, "registration": orm.aircraft.registration}
         if orm.aircraft is not None
         else None
     )
-    return d
+    return data_item
 
 
 def _remaining_or_zero(value: Optional[float]) -> float:
