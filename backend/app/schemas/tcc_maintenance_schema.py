@@ -84,7 +84,11 @@ class TCCMaintenanceBase(BaseModel):
     )
     remaining_aftt: Optional[float] = Field(
         None,
-        description="Computed on save: next_due_aftt − airframe_aftt from the latest ATL (by sequence_no); may be negative if overdue.",
+        description=(
+            "Computed on save: next_due_aftt (from this row after save) minus cumulative airframe AFTT "
+            "from the latest ATL by sequence_no, using the same auto_comp_airframe_aftt rule as "
+            "GET /api/v1/aircraft/{id}/details/; may be negative if overdue."
+        ),
     )
 
     next_due_date: Optional[date] = Field(

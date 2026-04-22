@@ -165,3 +165,32 @@ class AircraftImportSchema(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+class AircraftDetailsSummary(BaseModel):
+    """Subset of aircraft fields for GET /aircraft/{id}/details/."""
+
+    aircraft_id: int
+    registration: str
+    msn: str
+    engine_serial_number: Optional[str] = None
+    propeller_serial_number: Optional[str] = None
+
+
+class AircraftDetailsATLBlock(BaseModel):
+    """Latest ATL row (max sequence_no) with times from the same auto_* / auto_comp rules as ATL paged."""
+
+    tachometer_end: Optional[float] = None
+    airframe_aftt: Optional[float] = None
+    engine_tsn: Optional[float] = None
+    engine_tbo: Optional[float] = None
+    engine_tso: Optional[float] = None
+    propeller_tsn: Optional[float] = None
+    propeller_tbo: Optional[float] = None
+    propeller_tso: Optional[float] = None
+    sequence_no: str
+
+
+class AircraftDetailsResponse(BaseModel):
+    aircraft: AircraftDetailsSummary
+    atl: Optional[AircraftDetailsATLBlock] = None

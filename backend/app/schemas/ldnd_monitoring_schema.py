@@ -80,11 +80,11 @@ class LDNDMonitoringRead(LDNDMonitoringBase):
 
 
 class LDNDLatestResponse(BaseModel):
-    """Maintenance summary: current tach, next inspection, last updated, and latest record details (from latest LDND record for aircraft)."""
+    """Maintenance summary: current tach, next inspection, last updated, and latest record details (from the latest performed LDND record for aircraft)."""
 
     current_tach: Optional[float] = Field(
         None,
-        description="Latest current tach (last_done_tach_done from the most recently updated LDND record).",
+        description="Latest current tach (last_done_tach_done from the LDND record with the newest performed_date_start).",
     )
     next_inspection_tach_hours: Optional[float] = Field(
         None,
@@ -100,7 +100,11 @@ class LDNDLatestResponse(BaseModel):
     )
     last_updated: Optional[datetime] = Field(
         None,
-        description="Most recent updated_at across all LDND records for this aircraft.",
+        description="updated_at (or created_at) of the LDND record with the newest performed_date_start.",
+    )
+    lastest_inspection: Optional[str] = Field(
+        None,
+        description="Inspection type from the latest created LDND monitoring entry.",
     )
     # Latest record fields
     inspection_type: Optional[str] = Field(None, description="Inspection type from latest record.")

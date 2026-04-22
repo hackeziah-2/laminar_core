@@ -8,7 +8,9 @@ from typing import Any, Dict, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.repository.aircraft import get_aircraft_raw
 from app.repository.aircraft_technical_log import get_latest_aircraft_technical_log
+from app.core.atl_derived_times import resolve_auto_fields, map_auto_fields_to_comp
 
 _MS_PER_DAY = 24 * 60 * 60 * 1000
 
@@ -120,6 +122,8 @@ def compute_tcc_derived_field_values(
         remaining_years = round(float(db) / 365.0, 2)
 
     # Latest meter readings: highest sequence_no ATL (see fetch_latest_atl_tach_aftt).
+    # remaining_aftt uses next_due_aftt (computed above) minus airframe hours aligned with
+    # GET /api/v1/aircraft/{id}/details/ (auto_comp_airframe_aftt on that latest ATL).
     remaining_tach: Optional[float] = None
     ndt = as_finite_float(next_due_tach)
     ct = as_finite_float(latest_tachometer_end)
@@ -147,13 +151,20 @@ async def fetch_latest_atl_tach_aftt(
     session: AsyncSession,
     aircraft_fk: int,
 ) -> Tuple[Optional[float], Optional[float]]:
-    """Tachometer_end and airframe_aftt from the latest ATL row for this aircraft (highest sequence_no)."""
+    """Tachometer_end from latest ATL row; airframe hours as auto_comp_airframe_aftt (same as GET …/aircraft/{id}/details/)."""
     latest = await get_latest_aircraft_technical_log(session, aircraft_fk)
     latest_tach = None
     latest_aftt = None
     if latest is not None:
         latest_tach = as_finite_float(getattr(latest, "tachometer_end", None))
-        latest_aftt = as_finite_float(getattr(latest, "airframe_aftt", None))
+        aircraft = await get_aircraft_raw(session, aircraft_fk)
+        if aircraft is not None:
+            auto_base = await resolve_auto_fields(session, latest, aircraft)
+            auto_rounded = {k: round(v, 2) for k, v in auto_base.items()}
+            auto_comp = map_auto_fields_to_comp(auto_rounded)
+            latest_aftt = as_finite_float(auto_comp.get("auto_comp_airframe_aftt"))
+        else:
+            latest_aftt = as_finite_float(getattr(latest, "airframe_aftt", None))
     return latest_tach, latest_aftt
 
 

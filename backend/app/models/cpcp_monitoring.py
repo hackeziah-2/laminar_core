@@ -24,6 +24,10 @@ class CPCPMonitoring(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     last_done_aftt = Column(Float, nullable=True)
     last_done_date = Column(Date, nullable=True)
 
+    next_due_tach = Column(Float, nullable=True)
+    next_due_aftt = Column(Float, nullable=True)
+    next_due_date = Column(Date, nullable=True)
+
     atl_ref = Column(Integer, ForeignKey("aircraft_technical_log.id"), nullable=True, index=True)
 
     aircraft = relationship("Aircraft", backref="cpcp_monitorings")
