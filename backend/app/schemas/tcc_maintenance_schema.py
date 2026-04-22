@@ -80,7 +80,11 @@ class TCCMaintenanceBase(BaseModel):
     )
     remaining_tach: Optional[float] = Field(
         None,
-        description="Computed on save: next_due_tach − tachometer_end from the latest ATL (by sequence_no); may be negative if overdue. Optional explicit value on create overrides computed.",
+        description=(
+            "Computed on save: next_due_tach − tachometer_end from the latest ATL (by sequence_no); "
+            "may be negative if overdue. Optional explicit value on create overrides computed. "
+            "Read responses round to 1 decimal place."
+        ),
     )
     remaining_aftt: Optional[float] = Field(
         None,
@@ -173,6 +177,7 @@ class TCCMaintenanceRead(TCCMaintenanceBase):
     def null_floats_to_zero(cls, values):
         for key in _TCC_MAINTENANCE_API_FLOAT_FIELDS:
             values[key] = _float_api_default_zero(values.get(key))
+        values["remaining_tach"] = round(values["remaining_tach"], 1)
         return values
 
     class Config:
