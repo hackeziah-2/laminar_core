@@ -12,6 +12,7 @@ from app.schemas.cpcp_monitoring_schema import (
     CPCPMonitoringUpdate,
     CPCPMonitoringRead,
 )
+from app.services.cpcp_computation import apply_cpcp_next_due_fields, to_cpcp_monitoring_read
 
 
 async def create_cpcp_monitoring(
@@ -22,13 +23,14 @@ async def create_cpcp_monitoring(
 ) -> CPCPMonitoringRead:
     """Create a new CPCP Monitoring entry."""
     obj = CPCPMonitoring(**data.dict())
+    apply_cpcp_next_due_fields(obj)
     session.add(obj)
     if audit_account_id is not None:
         await set_audit_fields(obj, audit_account_id, is_create=True)
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["atl"])
-    return CPCPMonitoringRead.from_orm(obj)
+    return await to_cpcp_monitoring_read(session, obj)
 
 
 async def get_cpcp_monitoring(
@@ -45,7 +47,7 @@ async def get_cpcp_monitoring(
     obj = result.scalar_one_or_none()
     if not obj:
         return None
-    return CPCPMonitoringRead.from_orm(obj)
+    return await to_cpcp_monitoring_read(session, obj)
 
 
 async def list_cpcp_monitorings(
@@ -147,13 +149,14 @@ async def update_cpcp_monitoring(
     for k, v in update_data.items():
         setattr(obj, k, v)
 
+    apply_cpcp_next_due_fields(obj)
     session.add(obj)
     if audit_account_id is not None:
         await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["atl"])
-    return CPCPMonitoringRead.from_orm(obj)
+    return await to_cpcp_monitoring_read(session, obj)
 
 
 async def soft_delete_cpcp_monitoring(

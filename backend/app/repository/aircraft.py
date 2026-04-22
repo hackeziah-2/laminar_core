@@ -11,7 +11,7 @@ from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 
 ensure_uploads_dir()
 
-from app.models.aircraft import Aircraft
+from app.models.aircraft import Aircraft, StatusEnum
 from app.models.fleet_daily_update import FleetDailyUpdate, FleetDailyUpdateStatusEnum
 from app.models.aircraft_logbook_entries import AircraftLogbookEntry
 from app.models.aircraft_techinical_log import AircraftTechnicalLog
@@ -28,6 +28,35 @@ from app.models.document_on_board import DocumentOnBoard
 from app.models.cpcp_monitoring import CPCPMonitoring
 from app.schemas.aircraft_schema import AircraftCreate, AircraftOut, AircraftUpdate
 from app.database import set_audit_fields
+
+
+async def _sync_fleet_daily_update_when_aircraft_maintenance(
+    session: AsyncSession,
+    aircraft: Aircraft,
+    *,
+    audit_account_id: Optional[int] = None,
+) -> None:
+    """If aircraft is in Maintenance, align Fleet Daily Update status to Ongoing Maintenance."""
+    st = aircraft.status
+    st_val = st.value if hasattr(st, "value") else str(st)
+    if st_val != StatusEnum.MAINTENANCE.value:
+        return
+    fd_res = await session.execute(
+        select(FleetDailyUpdate).where(
+            FleetDailyUpdate.aircraft_fk == aircraft.id,
+            FleetDailyUpdate.is_deleted == False,
+        )
+    )
+    fd = fd_res.scalar_one_or_none()
+    if not fd:
+        return
+    fd_st = fd.status
+    fd_st_val = fd_st.value if hasattr(fd_st, "value") else str(fd_st)
+    if fd_st_val != FleetDailyUpdateStatusEnum.ONGOING_MAINTENANCE.value:
+        fd.status = FleetDailyUpdateStatusEnum.ONGOING_MAINTENANCE.value
+        if audit_account_id is not None:
+            await set_audit_fields(fd, audit_account_id, is_create=False)
+        session.add(fd)
 
 
 async def _persist_upload_file(upload_file: UploadFile) -> str:
@@ -170,6 +199,9 @@ async def update_aircraft(
         return None
     for k, v in aircraft_in.dict(exclude_unset=True).items():
         setattr(obj, k, v)
+    await _sync_fleet_daily_update_when_aircraft_maintenance(
+        session, obj, audit_account_id=audit_account_id
+    )
     session.add(obj)
     if audit_account_id is not None:
         await set_audit_fields(obj, audit_account_id, is_create=False)
@@ -294,6 +326,9 @@ async def update_aircraft_with_file(
     # --- Apply updates ---
     for key, value in update_data.items():
         setattr(aircraft, key, value)
+    await _sync_fleet_daily_update_when_aircraft_maintenance(
+        session, aircraft, audit_account_id=audit_account_id
+    )
     if audit_account_id is not None:
         await set_audit_fields(aircraft, audit_account_id, is_create=False)
     await session.commit()

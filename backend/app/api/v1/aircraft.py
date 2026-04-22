@@ -27,14 +27,18 @@ from app.repository.aircraft import (
     get_aircraft,
     get_aircraft_raw,
     create_aircraft_with_file,
-    soft_delete_aircraft
+    soft_delete_aircraft,
 )
 from app.services.aircraft_history_service import (
     list_aircraft_history_paged,
     update_aircraft_and_log_history,
     update_aircraft_with_history as update_aircraft_with_history_service,
 )
-from app.repository.aircraft_technical_log import search_atl_by_sequence_no
+from app.repository.aircraft_technical_log import (
+    search_atl_by_sequence_no,
+    get_latest_aircraft_technical_log,
+)
+from app.core.atl_derived_times import resolve_auto_fields, map_auto_fields_to_comp
 from app.database import get_session
 from app.api.deps import get_current_active_account
 from app.models.account import AccountInformation
@@ -94,6 +98,62 @@ async def api_aircraft_atl_search(
         session, search=sequence_number.strip(), aircraft_fk=aircraft_id
     )
     return [aircraft_technical_log_schema.ATLSearchItem.from_orm(item) for item in items]
+
+
+def _round_optional_float_2(value) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return round(float(value), 2)
+    except (TypeError, ValueError):
+        return None
+
+
+@router.get(
+    "/{aircraft_id}/details/",
+    response_model=aircraft_schema.AircraftDetailsResponse,
+    summary="Aircraft details and latest ATL",
+    description=(
+        "Returns identification fields for the aircraft and the latest non-deleted ATL "
+        "(highest sequence_no). ATL time fields use the same cumulative auto_* rules as "
+        "GET …/atl/paged (airframe_aftt from auto_comp_airframe_aftt; engine/prop times from auto_engine_* / auto_propeller_*)."
+    ),
+)
+async def api_aircraft_details(
+    aircraft_id: int,
+    session: AsyncSession = Depends(get_session),
+):
+    aircraft = await get_aircraft_raw(session, aircraft_id)
+    if not aircraft:
+        raise HTTPException(status_code=404, detail="Aircraft not found")
+
+    summary = aircraft_schema.AircraftDetailsSummary(
+        aircraft_id=aircraft.id,
+        registration=aircraft.registration,
+        msn=aircraft.msn,
+        engine_serial_number=aircraft.engine_serial_number,
+        propeller_serial_number=aircraft.propeller_serial_number,
+    )
+
+    latest = await get_latest_aircraft_technical_log(session, aircraft_fk=aircraft_id)
+    atl_block = None
+    if latest is not None:
+        auto_base = await resolve_auto_fields(session, latest, aircraft)
+        auto_rounded = {k: round(v, 2) for k, v in auto_base.items()}
+        auto_comp = {k: round(v, 2) for k, v in map_auto_fields_to_comp(auto_rounded).items()}
+        atl_block = aircraft_schema.AircraftDetailsATLBlock(
+            tachometer_end=_round_optional_float_2(latest.tachometer_end),
+            airframe_aftt=auto_comp.get("auto_comp_airframe_aftt"),
+            engine_tsn=auto_rounded.get("auto_engine_tsn"),
+            engine_tbo=auto_rounded.get("auto_engine_tbo"),
+            engine_tso=auto_rounded.get("auto_engine_tso"),
+            propeller_tsn=auto_rounded.get("auto_propeller_tsn"),
+            propeller_tbo=auto_rounded.get("auto_propeller_tbo"),
+            propeller_tso=auto_rounded.get("auto_propeller_tso"),
+            sequence_no=str(latest.sequence_no).strip() if latest.sequence_no is not None else "",
+        )
+
+    return aircraft_schema.AircraftDetailsResponse(aircraft=summary, atl=atl_block)
 
 
 @router.get("/{aircraft_id}", response_model=aircraft_schema.AircraftOut)

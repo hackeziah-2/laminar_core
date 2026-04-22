@@ -1,5 +1,5 @@
 from math import ceil
-from typing import List, Optional
+from typing import Optional, Set
 
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 
@@ -17,6 +17,10 @@ from app.api.deps import get_current_active_account
 from app.database import get_session
 from app.models.account import AccountInformation
 from app.repository.aircraft import get_aircraft
+from app.services.cpcp_computation import (
+    fetch_latest_atl_metrics_by_aircraft_ids,
+    to_cpcp_monitoring_read_sync,
+)
 
 router = APIRouter(
     prefix="/api/v1/cpcp-monitoring",
@@ -50,8 +54,14 @@ async def api_list_paged(
         aircraft_id=aircraft_id,
     )
     pages = ceil(total / limit) if total else 0
+    aircraft_ids: Set[int] = {item.aircraft_id for item in items}
+    metrics = await fetch_latest_atl_metrics_by_aircraft_ids(session, aircraft_ids)
     items_schemas = [
-        cpcp_monitoring_schema.CPCPMonitoringRead.from_orm(item)
+        to_cpcp_monitoring_read_sync(
+            item,
+            tachometer_end=metrics[item.aircraft_id][0],
+            airframe_aftt=metrics[item.aircraft_id][1],
+        )
         for item in items
     ]
     return {

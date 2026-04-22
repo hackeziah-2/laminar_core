@@ -67,5 +67,34 @@ class CPCPMonitoringRead(CPCPMonitoringBase):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
+    next_due_tach: Optional[float] = Field(
+        None,
+        description="last_done_tach + interval_hours (stored on create/update).",
+    )
+    next_due_aftt: Optional[float] = Field(
+        None,
+        description="last_done_aftt + interval_hours (stored on create/update).",
+    )
+    next_due_date: Optional[date] = Field(
+        None,
+        description="last_done_date advanced by interval_months (EDATE-style; stored on create/update).",
+    )
+    remaining_months: Optional[float] = Field(
+        None,
+        description="Approx. months from current Asia/Manila date to next_due_date: (end_date - today).days / 365 * 12.",
+    )
+    remaining_days: Optional[int] = Field(
+        None,
+        description="Calendar days from current Asia/Manila date to next_due_date: (end_date - today).days (negative if overdue).",
+    )
+    remaining_tach: Optional[float] = Field(
+        None,
+        description="next_due_tach minus latest ATL tachometer_end (same source as GET …/aircraft/{id}/details).",
+    )
+    remaining_aftt: Optional[float] = Field(
+        None,
+        description="next_due_aftt minus latest ATL airframe_aftt (auto_comp_airframe_aftt from details).",
+    )
+
     class Config:
         orm_mode = True

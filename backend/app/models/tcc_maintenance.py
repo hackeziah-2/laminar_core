@@ -89,6 +89,15 @@ class TCCMaintenance(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     last_done_tach = Column(Float, nullable=True)
     last_done_aftt = Column(Float, nullable=True)
 
+    remaining_years = Column(Float, nullable=True)
+    remaining_days = Column(Float, nullable=True)
+    remaining_tach = Column(Float, nullable=True)
+    remaining_aftt = Column(Float, nullable=True)
+
+    next_due_date = Column(Date, nullable=True)
+    next_due_tach = Column(Float, nullable=True)
+    next_due_aftt = Column(Float, nullable=True)
+
     last_done_method_of_compliance = Column(
         method_of_compliance_enum,
         nullable=True,

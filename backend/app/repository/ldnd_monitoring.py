@@ -51,20 +51,21 @@ async def get_ldnd_monitoring_by_aircraft(
 async def get_ldnd_latest_by_aircraft(
     session: AsyncSession, aircraft_id: int
 ) -> LDNDLatestResponse:
-    """Get maintenance summary for aircraft: current tach (from latest-updated record), next inspection, last_updated.
-    Uses two targeted queries so we only fetch the latest record and the soonest next-due record, not all rows.
+    """Get maintenance summary for aircraft: current tach (from latest-performed record), next inspection, last_updated.
+    Uses two targeted queries so we only fetch the latest performed record and the soonest next-due record, not all rows.
     """
     base_filter = (
         LDNDMonitoring.aircraft_fk == aircraft_id,
         LDNDMonitoring.is_deleted == False,
     )
 
-    # 1) Single latest-updated record -> current_tach, last_updated, and full latest record fields
+    # 1) Single latest performed record -> current_tach, last_updated, and full latest record fields
     latest_stmt = (
         select(LDNDMonitoring)
         .options(selectinload(LDNDMonitoring.aircraft))
         .where(*base_filter)
         .order_by(
+            LDNDMonitoring.performed_date_start.desc().nulls_last(),
             LDNDMonitoring.updated_at.desc().nulls_last(),
             LDNDMonitoring.created_at.desc().nulls_last(),
         )
@@ -126,12 +127,26 @@ async def get_ldnd_latest_by_aircraft(
             else None
         )
 
+    # 3) Inspection type from latest created LDND monitoring entry
+    latest_created_stmt = (
+        select(LDNDMonitoring.inspection_type)
+        .where(*base_filter)
+        .order_by(
+            LDNDMonitoring.created_at.desc().nulls_last(),
+            LDNDMonitoring.id.desc(),
+        )
+        .limit(1)
+    )
+    latest_created_result = await session.execute(latest_created_stmt)
+    lastest_inspection = latest_created_result.scalar_one_or_none()
+
     return LDNDLatestResponse(
         current_tach=current_tach,
         next_inspection_tach_hours=next_inspection_tach_hours,
         next_inspection_due=next_inspection_due,
         next_inspection_unit=next_inspection_unit,
         last_updated=last_updated,
+        lastest_inspection=lastest_inspection,
         inspection_type=inspection_type,
         unit=unit,
         last_done_tach_due=last_done_tach_due,

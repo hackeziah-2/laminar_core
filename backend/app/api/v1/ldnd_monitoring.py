@@ -147,7 +147,7 @@ async def api_get_ldnd_latest_by_aircraft(
     aircraft_id: int,
     session: AsyncSession = Depends(get_session),
 ):
-    """Get current tach, next inspection, and last updated from LDND monitoring for this aircraft."""
+    """Get latest LDND summary for aircraft based on most recent performed_date_start."""
     aircraft = await get_aircraft(session, aircraft_id)
     if not aircraft:
         raise HTTPException(status_code=404, detail="Aircraft not found")

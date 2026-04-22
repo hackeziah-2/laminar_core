@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import set_audit_fields
-from app.models.aircraft import Aircraft
+from app.models.aircraft import Aircraft, StatusEnum
 from app.models.fleet_daily_update import FleetDailyUpdate, FleetDailyUpdateStatusEnum
 from app.schemas.fleet_daily_update_schema import (
     FleetDailyUpdateCreate,
@@ -50,6 +50,18 @@ async def create_fleet_daily_update(
 
     obj = FleetDailyUpdate(**payload)
     session.add(obj)
+    if payload["status"] == FleetDailyUpdateStatusEnum.ONGOING_MAINTENANCE.value:
+        ac_res = await session.execute(
+            select(Aircraft)
+            .where(Aircraft.id == payload["aircraft_fk"])
+            .where(Aircraft.is_deleted == False)
+        )
+        ac = ac_res.scalar_one_or_none()
+        if ac:
+            ac.status = StatusEnum.MAINTENANCE
+            if audit_account_id is not None:
+                await set_audit_fields(ac, audit_account_id, is_create=False)
+            session.add(ac)
     if audit_account_id is not None:
         await set_audit_fields(obj, audit_account_id, is_create=True)
     await session.commit()
@@ -176,6 +188,20 @@ async def update_fleet_daily_update(
     for k, v in update_data.items():
         if hasattr(obj, k):
             setattr(obj, k, v)
+
+    if (
+        obj.aircraft
+        and obj.status == FleetDailyUpdateStatusEnum.ONGOING_MAINTENANCE.value
+    ):
+        ac_status = obj.aircraft.status
+        ac_status_val = (
+            ac_status.value if hasattr(ac_status, "value") else str(ac_status)
+        )
+        if ac_status_val != StatusEnum.MAINTENANCE.value:
+            obj.aircraft.status = StatusEnum.MAINTENANCE
+            if audit_account_id is not None:
+                await set_audit_fields(obj.aircraft, audit_account_id, is_create=False)
+            session.add(obj.aircraft)
 
     session.add(obj)
     if audit_account_id is not None:
