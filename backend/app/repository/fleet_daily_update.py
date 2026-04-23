@@ -139,6 +139,7 @@ async def list_fleet_daily_updates(
     sortable_fields = {
         "id": FleetDailyUpdate.id,
         "aircraft_fk": FleetDailyUpdate.aircraft_fk,
+        "registration": Aircraft.registration,
         "status": FleetDailyUpdate.status,
         "created_at": FleetDailyUpdate.created_at,
         "updated_at": FleetDailyUpdate.updated_at,

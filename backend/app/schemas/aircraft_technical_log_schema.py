@@ -489,10 +489,15 @@ class AircraftRead(BaseModel):
 
 # ---------- ATL Search response (id for atl_ref, sequence_no + aircraft summary) ----------
 class ATLSearchItem(BaseModel):
-    """Minimal ATL search result for TCC ATL Reference dropdown / Sequence No. type-to-search. id is aircraft_technical_log.id (use as atl_ref). sequence_no is number only."""
+    """ATL sequence search (CPCP/TCC ATL Reference, etc.). id = atl_ref. search_display is CPCP label: sequence_no: TACH: … AFTT: … DATE: …"""
+
     id: int
     sequence_no: str
-    sequence_no_display: Optional[str] = None  # Same as sequence_no for dropdown label (number only)
+    tachometer_end: Optional[float] = None
+    auto_airframe_aftt: Optional[float] = None
+    origin_date: Optional[date] = None
+    search_display: Optional[str] = None
+    sequence_no_display: Optional[str] = None  # Same as sequence_no for legacy dropdown label (number only)
     aircraft: AircraftRead
 
     @validator("sequence_no_display", always=True)
@@ -502,8 +507,40 @@ class ATLSearchItem(BaseModel):
             return ""
         return str(seq).strip()
 
+    @root_validator
+    def set_search_display(cls, values: Any) -> Any:
+        """One-line label for Add/Edit forms (e.g. CPCP ATL Reference)."""
+        if not isinstance(values, dict):
+            return values
+        seq = str(values.get("sequence_no") or "").strip()
+
+        def fmt_num(v: Any) -> str:
+            if v is None:
+                return "—"
+            try:
+                return f"{float(v):.2f}"
+            except (TypeError, ValueError):
+                return "—"
+
+        od = values.get("origin_date")
+        date_s = od.isoformat() if isinstance(od, date) else "—"
+        tach = values.get("tachometer_end")
+        aftt = values.get("auto_airframe_aftt")
+        values["search_display"] = f"{seq}: TACH: {fmt_num(tach)} AFTT: {fmt_num(aftt)} DATE: {date_s}"
+        return values
+
     class Config:
         orm_mode = True
+
+
+class ATLAircraftScopedSearchItem(BaseModel):
+    """GET /api/v1/aircraft/{aircraft_id}/atl/?sequence_number= — sequence row with tach end, computed AFTT (same chain as auto_airframe_aftt / atl/paged), and origin date."""
+
+    id: int
+    sequence_no: str
+    tachometer_end: Optional[float] = None
+    auto_airframe_aftt: Optional[float] = None
+    origin_date: Optional[date] = None
 
 
 # ---------- Aircraft Technical Log Read Schema ----------

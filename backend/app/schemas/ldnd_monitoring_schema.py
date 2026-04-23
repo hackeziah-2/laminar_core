@@ -79,6 +79,16 @@ class LDNDMonitoringRead(LDNDMonitoringBase):
         orm_mode = True
 
 
+class LDNDInspectionTypeLatestResponse(BaseModel):
+    """Latest LDND row for an aircraft where tach and performed-date fields are all unset (placeholder / not-yet-filled row)."""
+
+    inspection_type: str = ""
+    unit: str = ""
+
+    class Config:
+        orm_mode = True
+
+
 class LDNDLatestResponse(BaseModel):
     """Maintenance summary: current tach, next inspection, last updated, and latest record details (from the latest performed LDND record for aircraft)."""
 

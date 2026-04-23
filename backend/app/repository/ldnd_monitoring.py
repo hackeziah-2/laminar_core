@@ -12,6 +12,7 @@ from app.schemas.ldnd_monitoring_schema import (
     LDNDMonitoringUpdate,
     LDNDMonitoringRead,
     LDNDLatestResponse,
+    LDNDInspectionTypeLatestResponse,
 )
 
 
@@ -155,6 +156,40 @@ async def get_ldnd_latest_by_aircraft(
         performed_date_start=performed_date_start,
         performed_date_end=performed_date_end,
         aircraft=aircraft,
+    )
+
+
+async def get_ldnd_latest_unfilled_by_aircraft(
+    session: AsyncSession, aircraft_id: int
+) -> LDNDInspectionTypeLatestResponse:
+    """Latest LDND row (by created_at, then id) where tach and performed-date fields are all NULL."""
+    stmt = (
+        select(LDNDMonitoring)
+        .where(LDNDMonitoring.aircraft_fk == aircraft_id)
+        .where(LDNDMonitoring.is_deleted == False)
+        .where(LDNDMonitoring.last_done_tach_due.is_(None))
+        .where(LDNDMonitoring.last_done_tach_done.is_(None))
+        .where(LDNDMonitoring.next_due_tach_hours.is_(None))
+        .where(LDNDMonitoring.performed_date_start.is_(None))
+        .where(LDNDMonitoring.performed_date_end.is_(None))
+        .order_by(
+            LDNDMonitoring.created_at.desc().nulls_last(),
+            LDNDMonitoring.id.desc(),
+        )
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    row = result.scalar_one_or_none()
+    if not row:
+        return LDNDInspectionTypeLatestResponse()
+    unit_str = (
+        getattr(row.unit, "value", None) or str(row.unit)
+        if row.unit is not None
+        else "HRS"
+    )
+    return LDNDInspectionTypeLatestResponse(
+        inspection_type=row.inspection_type or "",
+        unit=unit_str or "",
     )
 
 

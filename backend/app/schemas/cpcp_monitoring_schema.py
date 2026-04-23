@@ -28,7 +28,11 @@ class CPCPMonitoringBase(BaseModel):
 
     atl_ref: Optional[int] = Field(
         None,
-        description="ATL (aircraft_technical_log) ID. Search: GET /api/v1/aircraft-technical-log/search?search={sequence_no}; use response item id.",
+        description=(
+            "ATL (aircraft_technical_log) ID. Search: GET /api/v1/aircraft-technical-log/search"
+            "?search={sequence_no}&aircraft_id={aircraft_id}; use response item `id`. "
+            "Show `search_display` in the picker (sequence_no: TACH: … AFTT: … DATE: …)."
+        ),
     )
 
     class Config:

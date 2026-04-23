@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from math import ceil
-from typing import List, Dict
+from typing import Dict, List, Optional, Tuple
 from fastapi import (
     APIRouter,
     Depends,
@@ -16,7 +16,6 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse, FileResponse
 
-from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas import aircraft_schema, aircraft_technical_log_schema
@@ -82,22 +81,40 @@ async def api_list_paged(
 
 @router.get(
     "/{aircraft_id}/atl/",
-    response_model=List[aircraft_technical_log_schema.ATLSearchItem],
+    response_model=List[aircraft_technical_log_schema.ATLAircraftScopedSearchItem],
     summary="Search ATL by sequence number (aircraft-scoped)",
-    description="Use GET /api/v1/aircraft-technical-log/search?search={sequence_no}&aircraft_id={id} instead. Returns same shape: id (atl_ref), sequence_no, aircraft.",
+    description=(
+        "Returns matching rows for this aircraft: id (atl_ref), sequence_no, tachometer_end, "
+        "auto_airframe_aftt (cumulative, same rules as GET …/atl/paged), origin_date. "
+        "For dropdown label + aircraft only, use GET /api/v1/aircraft-technical-log/search."
+    ),
 )
 async def api_aircraft_atl_search(
     aircraft_id: int,
     sequence_number: Optional[str] = Query(None, description="Search by ATL sequence number"),
     session: AsyncSession = Depends(get_session),
 ):
-    """[Compatibility] Search ATL by sequence number for this aircraft. Prefer /api/v1/aircraft-technical-log/search?search={sequence_no}&aircraft_id={id} for new code."""
+    """Search ATL by sequence number for this aircraft; each hit includes tach end, computed AFTT, and origin date."""
     if not sequence_number or not str(sequence_number).strip():
         return []
     items = await search_atl_by_sequence_no(
         session, search=sequence_number.strip(), aircraft_fk=aircraft_id
     )
-    return [aircraft_technical_log_schema.ATLSearchItem.from_orm(item) for item in items]
+    memo: Dict[Tuple[int, str], Dict[str, float]] = {}
+    out: List[aircraft_technical_log_schema.ATLAircraftScopedSearchItem] = []
+    for item in items:
+        aircraft_obj = getattr(item, "aircraft", None)
+        auto = await resolve_auto_fields(session, item, aircraft_obj, memo)
+        out.append(
+            aircraft_technical_log_schema.ATLAircraftScopedSearchItem(
+                id=item.id,
+                sequence_no=str(item.sequence_no).strip() if item.sequence_no is not None else "",
+                tachometer_end=_round_optional_float_2(item.tachometer_end),
+                auto_airframe_aftt=_round_optional_float_2(auto.get("auto_airframe_aftt")),
+                origin_date=item.origin_date,
+            )
+        )
+    return out
 
 
 def _round_optional_float_2(value) -> Optional[float]:
