@@ -15,6 +15,7 @@ from app.repository.ldnd_monitoring import (
     get_ldnd_monitoring,
     get_ldnd_monitoring_by_aircraft,
     get_ldnd_latest_by_aircraft,
+    get_ldnd_latest_unfilled_by_aircraft,
     list_ldnd_monitoring,
     create_ldnd_monitoring,
     update_ldnd_monitoring,
@@ -182,6 +183,22 @@ async def api_list_ldnd_monitoring_by_aircraft_paged(
     pages = ceil(total / limit) if total else 0
     items_schemas = [ldnd_monitoring_schema.LDNDMonitoringRead.from_orm(item) for item in items]
     return {"items": items_schemas, "total": total, "page": page, "pages": pages}
+
+
+@router_aircraft_scoped.get(
+    "/{aircraft_id}/ldnd-monitoring/inspection_type/latest",
+    response_model=ldnd_monitoring_schema.LDNDInspectionTypeLatestResponse,
+    summary="Latest unfilled LDND row (inspection_type and unit only)",
+)
+async def api_get_ldnd_latest_inspection_type_by_aircraft(
+    aircraft_id: int,
+    session: AsyncSession = Depends(get_session),
+):
+    """Most recently created LDND row for the aircraft where last_done_tach_due, last_done_tach_done, next_due_tach_hours, performed_date_start, and performed_date_end are all null (limit 1)."""
+    aircraft = await get_aircraft(session, aircraft_id)
+    if not aircraft:
+        raise HTTPException(status_code=404, detail="Aircraft not found")
+    return await get_ldnd_latest_unfilled_by_aircraft(session, aircraft_id)
 
 
 @router_aircraft_scoped.get(

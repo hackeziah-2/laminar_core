@@ -2,7 +2,7 @@ import json
 import uuid
 from math import ceil
 from pathlib import Path
-from typing import List, Optional, Any
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import (
     APIRouter,
@@ -21,6 +21,7 @@ from app.schemas import aircraft_technical_log_schema
 from app.core.atl_derived_times import (
     aircraft_technical_log_read_with_computed,
     atl_paged_item_with_computed,
+    resolve_auto_fields,
 )
 from app.repository.aircraft_technical_log import (
     list_aircraft_technical_logs,
@@ -46,6 +47,15 @@ def _sanitize_filename(name: str) -> str:
     if not base or ".." in base:
         return "upload"
     return "".join(c for c in base if c.isalnum() or c in "._- ") or "upload"
+
+
+def _round_optional_float_2(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return round(float(value), 2)
+    except (TypeError, ValueError):
+        return None
 
 
 async def _save_atl_upload(form_file: Any, subdir: str) -> Optional[str]:
@@ -136,13 +146,28 @@ async def api_search_by_sequence(
     aircraft_id: Optional[int] = Query(None, description="Filter by aircraft ID (e.g. when on aircraft-scoped TCC form)"),
     session: AsyncSession = Depends(get_session)
 ):
-    """Search by ATL Sequence Number for Sequence No. / ATL Reference (type to search). Accepts 'ATL-24451' or '24451'. Returns id (use as atl_ref), sequence_no, sequence_no_display (same as sequence_no for dropdown label), and aircraft (id, registration, model)."""
+    """Search by ATL Sequence Number for ATL Reference (CPCP Add/Edit, TCC, etc.). Accepts 'ATL-24451' or '24451'. Returns id (atl_ref), sequence_no, tachometer_end, auto_airframe_aftt (cumulative), origin_date, search_display (formatted one-line label), sequence_no_display, aircraft."""
     if not search or not str(search).strip():
         return []
     items = await search_atl_by_sequence_no(
         session, search=search.strip(), aircraft_fk=aircraft_id
     )
-    return [aircraft_technical_log_schema.ATLSearchItem.from_orm(item) for item in items]
+    memo: Dict[Tuple[int, str], Dict[str, float]] = {}
+    out: List[aircraft_technical_log_schema.ATLSearchItem] = []
+    for item in items:
+        aircraft_obj = getattr(item, "aircraft", None)
+        auto = await resolve_auto_fields(session, item, aircraft_obj, memo)
+        out.append(
+            aircraft_technical_log_schema.ATLSearchItem(
+                id=item.id,
+                sequence_no=str(item.sequence_no).strip() if item.sequence_no is not None else "",
+                tachometer_end=_round_optional_float_2(item.tachometer_end),
+                auto_airframe_aftt=_round_optional_float_2(auto.get("auto_airframe_aftt")),
+                origin_date=item.origin_date,
+                aircraft=aircraft_technical_log_schema.AircraftRead.from_orm(aircraft_obj),
+            )
+        )
+    return out
 
 
 @router.get(

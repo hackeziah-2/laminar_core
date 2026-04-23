@@ -16,7 +16,10 @@ from app.repository.fleet_daily_update import (
     soft_delete_fleet_daily_update_by_aircraft,
 )
 from app.repository.aircraft import get_aircraft
-from app.repository.ldnd_monitoring import get_ldnd_latest_by_aircraft
+from app.repository.ldnd_monitoring import (
+    get_ldnd_latest_by_aircraft,
+    get_ldnd_latest_unfilled_by_aircraft,
+)
 from app.repository.aircraft_technical_log import get_latest_aircraft_technical_log
 from app.repository.tcc_maintenance import get_latest_tcc_by_aircraft_and_description
 from app.api.deps import get_current_active_account
@@ -57,14 +60,19 @@ def _round1(value: Optional[float]) -> Optional[float]:
 
 
 async def _enrich_item_with_ldnd(session, orm_item):
-    """Build list item with next_insp_due (latest created LDND inspection_type),
+    """Build list item with next_insp_due / next_insp_due_unit from latest unfilled LDND row,
     tach_time_due from LDND latest, tach_time_eod from latest ATL,
     and remaining_time_before_next_isp / remaining_time_before_engine / remaining_time_before_propeller."""
     base = _fleet_daily_update_item_with_aircraft(orm_item)
     aircraft_id = orm_item.aircraft_fk
+    ldnd_unfilled = await get_ldnd_latest_unfilled_by_aircraft(session, aircraft_id)
+    insp = ldnd_unfilled.inspection_type or ""
+    base["next_insp_due"] = (
+        insp if insp else "LDND IS NOT YET SET-UP"
+    )
+    unit = ldnd_unfilled.unit or ""
+    base["next_insp_due_unit"] = unit if unit else ""
     ldnd = await get_ldnd_latest_by_aircraft(session, aircraft_id)
-    # next_insp_due: latest created LDND record's inspection_type
-    base["next_insp_due"] = ldnd.lastest_inspection if ldnd else None
     # tach_time_due: from next_due_tach_hours (latest record), rounded to one decimal
     raw_tach_due = ldnd.next_due_tach_hours if ldnd else None
     base["tach_time_due"] = _round1(raw_tach_due)
@@ -121,13 +129,15 @@ async def api_list_fleet_daily_updates_paged(
     aircraft_fk: Optional[int] = Query(None, description="Filter by aircraft ID"),
     sort: Optional[str] = Query(
         "",
-        description="Sort fields (comma-separated). Prefix '-' for descending. E.g. -created_at,status",
+        description="Sort fields (comma-separated). Prefix '-' for descending. E.g. registration, -created_at, status",
     ),
     session: AsyncSession = Depends(get_session),
 ):
     """Get paginated list of Fleet Daily Update entries. Search by aircraft registration; filter by status.
-    Each item includes next_insp_due and tach_time_due from api/v1/aircraft/{id}/ldnd-monitoring/latest,
-    and tach_time_eod from api/v1/aircraft-technical-log/latest?aircraft_fk={id} (tachometer_end)."""
+    Each item includes next_insp_due and next_insp_due_unit from the latest unfilled LDND row
+    (api/v1/aircraft/{id}/ldnd-monitoring/inspection_type/latest semantics), tach_time_due from
+    api/v1/aircraft/{id}/ldnd-monitoring/latest, and tach_time_eod from api/v1/aircraft-technical-log/latest
+    (tachometer_end)."""
     offset = (page - 1) * limit
     items, total = await list_fleet_daily_updates(
         session=session,
@@ -313,7 +323,7 @@ async def api_patch_fleet_daily_update_by_aircraft(
 @router_aircraft_scoped.get(
     "/{aircraft_id}/fleet-daily-update/paged",
     summary="List Fleet Daily Update for aircraft (paginated; at most one)",
-    description="Paginated list filtered by aircraft_id. For one-to-one use GET .../fleet-daily-update to get the single record.",
+    description="Paginated list filtered by aircraft_id. Items use the same LDND enrichment as GET /fleet-daily-update/paged (next_insp_due, next_insp_due_unit, tach fields). For one-to-one use GET .../fleet-daily-update to get the single record.",
 )
 async def api_list_fleet_daily_updates_by_aircraft_paged(
     aircraft_id: int,
@@ -327,7 +337,10 @@ async def api_list_fleet_daily_updates_by_aircraft_paged(
         None,
         description="Filter by status: Running, Ongoing Maintenance, AOG",
     ),
-    sort: Optional[str] = Query(""),
+    sort: Optional[str] = Query(
+        "",
+        description="Sort fields (comma-separated). Prefix '-' for descending. E.g. registration, -created_at",
+    ),
     session: AsyncSession = Depends(get_session),
 ):
     aircraft = await get_aircraft(session, aircraft_id)
