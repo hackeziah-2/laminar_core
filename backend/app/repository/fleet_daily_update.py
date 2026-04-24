@@ -32,7 +32,7 @@ async def create_fleet_daily_update(
 ) -> FleetDailyUpdate:
     """Create a new Fleet Daily Update entry. aircraft_fk must be unique (one-to-one). Returns ORM."""
     payload = data.dict(exclude_unset=True)
-    status_val = _status_from_str(payload.get("status")) or FleetDailyUpdateStatusEnum.RUNNING.value
+    status_val = _status_from_str(payload.get("status")) or FleetDailyUpdateStatusEnum.OP.value
     payload["status"] = status_val
 
     # Enforce one-to-one: one record per aircraft
@@ -240,7 +240,7 @@ async def get_dashboard_counts(session: AsyncSession) -> dict:
 
             func.sum(
                 case(
-                    (FleetDailyUpdate.status == FleetDailyUpdateStatusEnum.RUNNING.value, 1),
+                    (FleetDailyUpdate.status == FleetDailyUpdateStatusEnum.OP.value, 1),
                     else_=0,
                 )
             ).label("total_aircraft_running"),

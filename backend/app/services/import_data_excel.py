@@ -225,7 +225,7 @@ async def import_excel_generic(
 
                 if fd_row:
                     fd_row.is_deleted = False
-                    fd_row.status = FleetDailyUpdateStatusEnum.RUNNING.value
+                    fd_row.status = FleetDailyUpdateStatusEnum.OP.value
                     if audit_account_id is not None:
                         await set_audit_fields(
                             fd_row, audit_account_id, is_create=False
@@ -233,7 +233,7 @@ async def import_excel_generic(
                 else:
                     fd_new = FleetDailyUpdate(
                         aircraft_fk=aircraft.id,
-                        status=FleetDailyUpdateStatusEnum.RUNNING.value,
+                        status=FleetDailyUpdateStatusEnum.OP.value,
                     )
                     session.add(fd_new)
                     if audit_account_id is not None:

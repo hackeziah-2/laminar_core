@@ -272,7 +272,7 @@ async def api_download_propeller_arc(
     "/",
     response_model=aircraft_schema.AircraftOut,
     summary="Create aircraft",
-    description="Create a new aircraft. Also creates a FleetDailyUpdate (one-to-one with aircraft) with status RUNNING.",
+    description="Create a new aircraft. Also creates a FleetDailyUpdate (one-to-one with aircraft) with status Operational.",
 )
 async def api_create_aircraft_with_file(
     json_data: str = Form(...),

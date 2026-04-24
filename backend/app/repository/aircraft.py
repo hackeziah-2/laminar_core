@@ -263,7 +263,7 @@ async def create_aircraft_with_file(
     # One-to-one: each aircraft has exactly one FleetDailyUpdate
     fleet_daily_update = FleetDailyUpdate(
         aircraft_fk=aircraft.id,
-        status=FleetDailyUpdateStatusEnum.RUNNING.value,
+        status=FleetDailyUpdateStatusEnum.OP.value,
     )
     session.add(fleet_daily_update)
 

@@ -124,7 +124,7 @@ async def api_list_fleet_daily_updates_paged(
     ),
     status: Optional[str] = Query(
         None,
-        description="Filter by status: Running, Ongoing Maintenance, AOG",
+        description="Filter by status: Operational, Ongoing Maintenance, AOG",
     ),
     aircraft_fk: Optional[int] = Query(None, description="Filter by aircraft ID"),
     sort: Optional[str] = Query(
@@ -335,7 +335,7 @@ async def api_list_fleet_daily_updates_by_aircraft_paged(
     ),
     status: Optional[str] = Query(
         None,
-        description="Filter by status: Running, Ongoing Maintenance, AOG",
+        description="Filter by status: Operational, Ongoing Maintenance, AOG",
     ),
     sort: Optional[str] = Query(
         "",

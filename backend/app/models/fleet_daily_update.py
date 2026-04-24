@@ -8,7 +8,7 @@ from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
 FLEET_DAILY_UPDATE_STATUS_VALUES = (
-    "Running",
+    "Operational",
     "Ongoing Maintenance",
     "AOG",
 )
@@ -21,7 +21,7 @@ fleet_daily_update_status_enum = PGEnum(
 
 
 class FleetDailyUpdateStatusEnum(str, enum.Enum):
-    RUNNING = "Running"
+    OP = "Operational"
     ONGOING_MAINTENANCE = "Ongoing Maintenance"
     AOG = "AOG"
 
@@ -43,7 +43,7 @@ class FleetDailyUpdate(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     status = Column(
         fleet_daily_update_status_enum,
         nullable=False,
-        default=FleetDailyUpdateStatusEnum.RUNNING.value,
+        default=FleetDailyUpdateStatusEnum.OP.value,
     )
 
     next_insp_due = Column(Float, nullable=True)
