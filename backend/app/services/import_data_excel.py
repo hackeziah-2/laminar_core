@@ -12,12 +12,13 @@ import pandas as pd
 from fastapi import HTTPException, UploadFile
 from io import BytesIO
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import Integer, cast, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.inspection import inspect as sa_inspect
 
 from app.database import set_audit_fields
+from app.core.atl_derived_times import persist_atl_auto_fields_to_row
 from app.models.fleet_daily_update import FleetDailyUpdate, FleetDailyUpdateStatusEnum
 from app.models.aircraft import Aircraft
 
@@ -207,6 +208,19 @@ async def import_excel_generic(
         if errors:
             await session.rollback()
             return {"status": "failed", "inserted": inserted, "updated": updated, "errors": errors}
+
+        if model.__name__ == "AircraftTechnicalLog" and inject_fields.get("aircraft_fk") is not None:
+            await session.flush()
+            aid = int(inject_fields["aircraft_fk"])
+            ac = await session.get(Aircraft, aid)
+            stmt = (
+                select(model)
+                .where(model.aircraft_fk == aid)
+                .where(model.is_deleted.is_(False))
+                .order_by(cast(model.sequence_no, Integer).asc())
+            )
+            for atl_row in (await session.execute(stmt)).scalars().all():
+                await persist_atl_auto_fields_to_row(session, atl_row, ac)
 
         await session.commit()
         # ---------- POST-COMMIT HOOK (Aircraft only) ----------

@@ -238,6 +238,18 @@ class AircraftTechnicalLogBase(BaseModel):
     updated_by: Optional[int] = None
     work_status: Optional[WorkStatus] = None
 
+    auto_airframe_run_time: Optional[float] = None
+    auto_airframe_aftt: Optional[float] = None
+    auto_engine_run_time: Optional[float] = None
+    auto_run_time: Optional[float] = None
+    auto_engine_tsn: Optional[float] = None
+    auto_engine_tso: Optional[float] = None
+    auto_engine_tbo: Optional[float] = None
+    auto_propeller_run_time: Optional[float] = None
+    auto_propeller_tsn: Optional[float] = None
+    auto_propeller_tso: Optional[float] = None
+    auto_propeller_tbo: Optional[float] = None
+
     component_parts: Optional[List[ComponentPartsRecordCreate]] = []
 
     @validator("nature_of_flight", pre=True)
@@ -448,6 +460,18 @@ class AircraftTechnicalLogUpdate(BaseModel):
     updated_by: Optional[int] = None
     work_status: Optional[WorkStatus] = None
 
+    auto_airframe_run_time: Optional[float] = None
+    auto_airframe_aftt: Optional[float] = None
+    auto_engine_run_time: Optional[float] = None
+    auto_run_time: Optional[float] = None
+    auto_engine_tsn: Optional[float] = None
+    auto_engine_tso: Optional[float] = None
+    auto_engine_tbo: Optional[float] = None
+    auto_propeller_run_time: Optional[float] = None
+    auto_propeller_tsn: Optional[float] = None
+    auto_propeller_tso: Optional[float] = None
+    auto_propeller_tbo: Optional[float] = None
+
     component_parts: Optional[List[ComponentPartsRecordCreate]] = None
 
     @validator("nature_of_flight", pre=True)
@@ -584,21 +608,9 @@ class ATLPagedItem(AircraftTechnicalLogRead):
         orm_mode = True
 
 
-# ---------- ATL Paged response for /aircraft-technical-log/paged (Read + auto_* computed fields) ----------
+# ---------- ATL Paged response for /aircraft-technical-log/paged (Read + persisted auto_* columns) ----------
 class ATLPagedItemWithAuto(AircraftTechnicalLogRead):
-    """ATL read with auto_* computed fields for v1/aircraft-technical-log/paged. Previous = last ATL by sequence_no (same aircraft)."""
-
-    auto_airframe_run_time: Optional[float] = 0.0
-    auto_airframe_aftt: Optional[float] = 0.0
-    auto_engine_run_time: Optional[float] = 0.0
-    auto_run_time: Optional[float] = 0.0
-    auto_engine_tsn: Optional[float] = 0.0
-    auto_engine_tso: Optional[float] = 0.0
-    auto_engine_tbo: Optional[float] = 0.0
-    auto_propeller_run_time: Optional[float] = 0.0
-    auto_propeller_tsn: Optional[float] = 0.0
-    auto_propeller_tso: Optional[float] = 0.0
-    auto_propeller_tbo: Optional[float] = 0.0
+    """ATL read including auto_* from AircraftTechnicalLog persisted columns (same shape as list paged API)."""
 
     class Config:
         orm_mode = True

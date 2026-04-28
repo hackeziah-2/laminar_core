@@ -4,9 +4,28 @@ import asyncio
 import json
 
 from fastapi.testclient import TestClient
+from sqlalchemy import Integer, cast, select
 
+from app.core.atl_derived_times import persist_atl_auto_fields_to_row
+from app.models.aircraft import Aircraft
 from app.models.aircraft_techinical_log import AircraftTechnicalLog
 from tests.conftest import TestSessionLocal
+
+
+async def _persist_auto_columns_for_all_atl_rows(aircraft_id: int) -> None:
+    """Backfill auto_* DB columns for raw SQLAlchemy seeds (mirrors create/update persist)."""
+    async with TestSessionLocal() as session:
+        ac = await session.get(Aircraft, aircraft_id)
+        stmt = (
+            select(AircraftTechnicalLog)
+            .where(AircraftTechnicalLog.aircraft_fk == aircraft_id)
+            .where(AircraftTechnicalLog.is_deleted.is_(False))
+            .order_by(cast(AircraftTechnicalLog.sequence_no, Integer).asc())
+        )
+        rows = (await session.execute(stmt)).scalars().all()
+        for row in rows:
+            await persist_atl_auto_fields_to_row(session, row, ac)
+        await session.commit()
 
 
 def test_atl_paged_computes_runtime_and_component_totals_from_tach_and_aircraft_baselines(
@@ -332,6 +351,7 @@ def test_atl_paged_keeps_tso_cumulative_from_previous_computed_values_for_later_
             await session.commit()
 
     asyncio.run(seed_rows())
+    asyncio.run(_persist_auto_columns_for_all_atl_rows(aircraft_id))
 
     paged_response = client_with_atl_auth.get(
         f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&limit=10&page=1&sort=sequence_no"
@@ -387,6 +407,7 @@ def test_atl_paged_defaults_to_sequence_number_ascending_for_base_computation(
             await session.commit()
 
     asyncio.run(seed_atls())
+    asyncio.run(_persist_auto_columns_for_all_atl_rows(aircraft_id))
 
     paged_response = client_with_atl_auth.get(
         f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&limit=10&page=1"
@@ -619,6 +640,7 @@ def test_aircraft_technical_log_paged_sequence_sort_does_not_change_auto_computa
             await session.commit()
 
     asyncio.run(seed_rows())
+    asyncio.run(_persist_auto_columns_for_all_atl_rows(aircraft_id))
 
     asc_response = client_with_atl_auth.get(
         f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&limit=10&page=1&sort=sequence_no"

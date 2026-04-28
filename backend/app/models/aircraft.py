@@ -40,7 +40,7 @@ class Aircraft(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     engine_serial_number = Column(String, nullable=True)
     engine_arc = Column(String, nullable=True)
     engine_life_time_limit = Column(Float, nullable=True)
-    engine_tsn = Column(Float, default=0, nullable=False)   # Time Since New
+    engine_tsn = Column(Float, nullable=True)   # Time Since New
     engine_tso = Column(Float, default=0, nullable=False)   # Time Since Overhaul
 
     # Propeller Information
@@ -48,7 +48,7 @@ class Aircraft(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     propeller_serial_number = Column(String, nullable=True)
     propeller_arc = Column(String, nullable=True)
     propeller_life_time_limit = Column(Float, nullable=True)
-    propeller_tsn = Column(Float, default=0, nullable=False)   # Time Since New
+    propeller_tsn = Column(Float, nullable=True)   # Time Since New
     propeller_tso = Column(Float, default=0, nullable=False)   # Time Since Overhaul
 
     logbook_entries = relationship("AircraftLogbookEntry", back_populates="aircraft")

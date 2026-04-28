@@ -1,4 +1,4 @@
-from typing import Optional, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from datetime import date, time
 
 from fastapi import HTTPException
@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 
 from app.database import set_audit_fields
+from app.core.atl_derived_times import ATL_AUTO_FIELD_KEYS, persist_atl_auto_fields_to_row
 from app.core.atl_paged_rbac import atl_rbac_filter
 from app.models.aircraft_techinical_log import (
     AircraftTechnicalLog,
@@ -67,13 +68,141 @@ async def _get_previous_meter_starts(
     )
 
 
+def _atl_update_payload_from_schema(log_in: AircraftTechnicalLogUpdate) -> dict:
+    ex = {"component_parts"}
+    if hasattr(log_in, "model_dump"):
+        return log_in.model_dump(exclude_unset=True, exclude=ex)  # type: ignore[call-arg]
+    return log_in.dict(exclude_unset=True, exclude=ex)  # type: ignore[call-arg]
+
+
+def _component_part_to_dict(part_data: ComponentPartsRecordCreate) -> dict:
+    if hasattr(part_data, "model_dump"):
+        return part_data.model_dump(exclude_unset=True)  # type: ignore[union-attr]
+    return part_data.dict(exclude_unset=True)
+
+
+def _clean_atl_update_data(update_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize sequence, enums, strip client auto_*, coerce work_status / nature_of_flight."""
+    if "sequence_no" in update_data and update_data["sequence_no"]:
+        update_data["sequence_no"] = _sequence_no_digits_only(str(update_data["sequence_no"]))
+
+    if "nature_of_flight" in update_data:
+        nf = update_data["nature_of_flight"]
+        if nf is None:
+            update_data["nature_of_flight"] = None
+        elif isinstance(nf, str):
+            s = nf.strip()
+            if not s or s == "-":
+                update_data["nature_of_flight"] = None
+            else:
+                update_data["nature_of_flight"] = TypeEnum(
+                    s.upper().replace(" ", "_")
+                )
+        elif isinstance(nf, TypeEnum):
+            pass
+
+    if "work_status" in update_data:
+        ws = update_data["work_status"]
+        if ws is not None and isinstance(ws, str):
+            update_data["work_status"] = WorkStatus(ws)
+        # None or already WorkStatus: keep
+
+    for field in ATL_AUTO_FIELD_KEYS:
+        update_data.pop(field, None)
+
+    return update_data
+
+
+async def _validate_work_status_transition(
+    *,
+    session: AsyncSession,
+    obj: AircraftTechnicalLog,
+    update_data: dict,
+    current_account: Optional[AccountInformation],
+) -> None:
+    if "work_status" not in update_data:
+        return
+    role_name = None
+    if current_account and current_account.role_id:
+        role = await session.get(Role, current_account.role_id)
+        if role and not role.is_deleted:
+            role_name = role.name
+    next_status = update_data["work_status"]
+    if not is_atl_work_status_transition_allowed(
+        role_name=role_name,
+        current_status=obj.work_status,
+        next_status=next_status,
+    ):
+        current_value = obj.work_status.value if obj.work_status else "NULL"
+        next_value = next_status.value if next_status else "NULL"
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Role '{role_name}' cannot change work_status "
+                f"from '{current_value}' to '{next_value}'."
+            ),
+        )
+
+
+async def _apply_meter_start_defaults_if_needed(
+    *,
+    session: AsyncSession,
+    obj: AircraftTechnicalLog,
+    update_data: dict,
+) -> None:
+    target_aircraft_fk = update_data.get("aircraft_fk", obj.aircraft_fk)
+    target_sequence_no = update_data.get("sequence_no", obj.sequence_no)
+    should_refresh = (
+        target_aircraft_fk != obj.aircraft_fk
+        or target_sequence_no != obj.sequence_no
+        or obj.hobbs_meter_start is None
+        or obj.tachometer_start is None
+    )
+    if not should_refresh:
+        return
+    need_hobbs = "hobbs_meter_start" not in update_data
+    need_tach = "tachometer_start" not in update_data
+    if not need_hobbs and not need_tach:
+        return
+    prev_hobbs_start, prev_tach_start = await _get_previous_meter_starts(
+        session,
+        target_aircraft_fk,
+        str(target_sequence_no) if target_sequence_no is not None else "",
+    )
+    if need_hobbs:
+        update_data["hobbs_meter_start"] = prev_hobbs_start
+    if need_tach:
+        update_data["tachometer_start"] = prev_tach_start
+
+
+async def _replace_atl_component_parts(
+    *,
+    session: AsyncSession,
+    atl_id: int,
+    component_parts: List[ComponentPartsRecordCreate],
+    audit_account_id: Optional[int] = None,
+) -> None:
+    existing_res = await session.execute(
+        select(ComponentPartsRecord).where(ComponentPartsRecord.atl_fk == atl_id)
+    )
+    for part in existing_res.scalars().all():
+        await session.delete(part)
+    await session.flush()
+    for part_data in component_parts:
+        data = _component_part_to_dict(part_data)
+        row = ComponentPartsRecord(atl_fk=atl_id, **data)
+        if audit_account_id is not None:
+            await set_audit_fields(row, audit_account_id, is_create=True)
+        session.add(row)
+
+
 async def create_aircraft_technical_log(
     session: AsyncSession,
     data: AircraftTechnicalLogCreate,
     *,
     audit_account_id: Optional[int] = None,
 ) -> AircraftTechnicalLog:
-    """Create a new Aircraft Technical Log entry with optional gap-fill (skipped when first ATL for aircraft). Sequence numbers stored as number only (e.g. 001)."""
+    """Create a new Aircraft Technical Log entry with optional gap-fill (skipped when first ATL for aircraft). Sequence numbers stored as number only (e.g. 001). Persists auto_* via compute_auto_fields before insert."""
 
     sequence_no = _sequence_no_digits_only(data.sequence_no)
 
@@ -90,8 +219,10 @@ async def create_aircraft_technical_log(
             detail=f"Sequence No. {sequence_no} already exists. Please use a different Sequence No."
         )
 
-    # Prepare log data dictionary
+    # Prepare log data dictionary (server owns auto_*; always recomputed in persist)
     log_data = data.dict(exclude={'component_parts'})
+    for k in ATL_AUTO_FIELD_KEYS:
+        log_data.pop(k, None)
     # nature_of_flight: empty string or "" -> NULL in DB; otherwise preserve from payload
     nf = log_data.get('nature_of_flight')
     if nf is None or (isinstance(nf, str) and (not str(nf).strip() or str(nf).strip() == "-")):
@@ -139,6 +270,8 @@ async def create_aircraft_technical_log(
     entry = AircraftTechnicalLog(**{**log_data, 'sequence_no': sequence_no})
     # Persist NULL when empty/omitted; otherwise use validated value
     entry.nature_of_flight = data.nature_of_flight if data.nature_of_flight is not None else None
+    aircraft_row = await session.get(Aircraft, data.aircraft_fk)
+    await persist_atl_auto_fields_to_row(session, entry, aircraft_row)
     session.add(entry)
     await session.flush()
 
@@ -151,6 +284,7 @@ async def create_aircraft_technical_log(
         if missing_sequences:
             for seq_no in missing_sequences:
                 gap_entry = AircraftTechnicalLog(sequence_no=seq_no, aircraft_fk=data.aircraft_fk)
+                # await persist_atl_auto_fields_to_row(session, gap_entry, aircraft_row)
                 session.add(gap_entry)
                 await session.flush()
                 if audit_account_id is not None:
@@ -239,113 +373,58 @@ async def update_aircraft_technical_log(
     audit_account_id: Optional[int] = None,
     current_account: Optional[AccountInformation] = None,
 ) -> Optional[AircraftTechnicalLog]:
-    """Update an Aircraft Technical Log entry."""
+    """Update an Aircraft Technical Log entry. Re-persists auto_* via compute_auto_fields after field updates."""
     obj = await session.get(AircraftTechnicalLog, log_id)
     if not obj or obj.is_deleted:
         return None
 
-    # Update main fields
-    update_data = log_in.dict(exclude_unset=True, exclude={'component_parts'})
+    update_data = _atl_update_payload_from_schema(log_in)
+    update_data = _clean_atl_update_data(update_data)
 
-    # Store sequence_no as number only when updated
-    if 'sequence_no' in update_data and update_data['sequence_no']:
-        update_data['sequence_no'] = _sequence_no_digits_only(update_data['sequence_no'])
-
-    # nature_of_flight: empty string or "" -> NULL in DB
-    if 'nature_of_flight' in update_data:
-        nf = update_data['nature_of_flight']
-        if nf is None or (isinstance(nf, str) and (not str(nf).strip() or str(nf).strip() == "-")):
-            update_data['nature_of_flight'] = None
-        elif isinstance(nf, str):
-            update_data['nature_of_flight'] = TypeEnum(nf)
-
-    # work_status: coerce string to enum when present
-    if 'work_status' in update_data:
-        ws = update_data['work_status']
-        if ws is not None:
-            update_data['work_status'] = WorkStatus(ws) if isinstance(ws, str) else ws
-        # else keep None to clear or leave unchanged per API contract
-
-    target_aircraft_fk = update_data.get("aircraft_fk", obj.aircraft_fk)
-    target_sequence_no = update_data.get("sequence_no", obj.sequence_no)
-    should_refresh_meter_starts = (
-        target_aircraft_fk != obj.aircraft_fk
-        or target_sequence_no != obj.sequence_no
-        or obj.hobbs_meter_start is None
-        or obj.tachometer_start is None
+    await _validate_work_status_transition(
+        session=session,
+        obj=obj,
+        update_data=update_data,
+        current_account=current_account,
     )
-    if should_refresh_meter_starts and (
-        'hobbs_meter_start' not in update_data
-        or 'tachometer_start' not in update_data
-    ):
-        prev_hobbs_start, prev_tach_start = await _get_previous_meter_starts(
-            session,
-            target_aircraft_fk,
-            target_sequence_no,
-        )
-        if 'hobbs_meter_start' not in update_data:
-            update_data['hobbs_meter_start'] = prev_hobbs_start
-        if 'tachometer_start' not in update_data:
-            update_data['tachometer_start'] = prev_tach_start
+    await _apply_meter_start_defaults_if_needed(
+        session=session,
+        obj=obj,
+        update_data=update_data,
+    )
 
-        role_name = None
-        if current_account and current_account.role_id:
-            role = await session.get(Role, current_account.role_id)
-            if role and not role.is_deleted:
-                role_name = role.name
+    for field, value in update_data.items():
+        setattr(obj, field, value)
 
-        if not is_atl_work_status_transition_allowed(
-            role_name=role_name,
-            current_status=obj.work_status,
-            next_status=update_data['work_status'],
-        ):
-            current_value = obj.work_status.value if obj.work_status else "NULL"
-            next_value = (
-                update_data['work_status'].value
-                if update_data['work_status'] is not None
-                else "NULL"
-            )
-            raise HTTPException(
-                status_code=403,
-                detail=(
-                    f"Role '{role_name}' cannot change work_status "
-                    f"from '{current_value}' to '{next_value}'."
-                ),
-            )
+    aircraft_row = (
+        await session.get(Aircraft, obj.aircraft_fk) if obj.aircraft_fk is not None else None
+    )
+    await persist_atl_auto_fields_to_row(session, obj, aircraft_row)
 
-    for k, v in update_data.items():
-        setattr(obj, k, v)
-
-    # Handle component parts update if provided
     if log_in.component_parts is not None:
-        # Remove existing parts
-        existing_parts_result = await session.execute(
-            select(ComponentPartsRecord).where(
-                ComponentPartsRecord.atl_fk == log_id
-            )
+        await _replace_atl_component_parts(
+            session=session,
+            atl_id=log_id,
+            component_parts=log_in.component_parts,
+            audit_account_id=audit_account_id,
         )
-        existing_parts = existing_parts_result.scalars().all()
-        for part in existing_parts:
-            await session.delete(part)
 
-        # Add new parts
-        for part_data in log_in.component_parts:
-            part = ComponentPartsRecord(
-                atl_fk=log_id,
-                **part_data.dict()
-            )
-            session.add(part)
-            if audit_account_id is not None:
-                await set_audit_fields(part, audit_account_id, is_create=True)
-
-    session.add(obj)
     if audit_account_id is not None:
         await set_audit_fields(obj, audit_account_id, is_create=False)
+    session.add(obj)
     await session.commit()
-    await session.refresh(obj)
-    await session.refresh(obj, ['aircraft', 'component_parts'])
 
-    return obj
+    result = await session.execute(
+        select(AircraftTechnicalLog)
+        .options(
+            selectinload(AircraftTechnicalLog.aircraft),
+            selectinload(AircraftTechnicalLog.component_parts),
+        )
+        .where(AircraftTechnicalLog.id == log_id)
+        .where(AircraftTechnicalLog.is_deleted.is_(False))
+    )
+    reloaded = result.scalar_one_or_none()
+    return reloaded
 
 
 async def get_previous_atl(

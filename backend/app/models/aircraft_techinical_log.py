@@ -99,6 +99,19 @@ class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     life_time_limit_engine = Column(Float, nullable=True)
     life_time_limit_propeller = Column(Float, nullable=True)
 
+    # Persisted computed leg / cumulative times (aligned with atl_derived_times.compute_auto_fields)
+    auto_airframe_run_time = Column(Float, nullable=True)
+    auto_airframe_aftt = Column(Float, nullable=True)
+    auto_engine_run_time = Column(Float, nullable=True)
+    auto_run_time = Column(Float, nullable=True)
+    auto_engine_tsn = Column(Float, nullable=True)
+    auto_engine_tso = Column(Float, nullable=True)
+    auto_engine_tbo = Column(Float, nullable=True)
+    auto_propeller_run_time = Column(Float, nullable=True)
+    auto_propeller_tsn = Column(Float, nullable=True)
+    auto_propeller_tso = Column(Float, nullable=True)
+    auto_propeller_tbo = Column(Float, nullable=True)
+
     fuel_qty_left_uplift_qty = Column(Float)
     fuel_qty_right_uplift_qty = Column(Float)
 

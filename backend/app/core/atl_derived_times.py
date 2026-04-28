@@ -9,10 +9,7 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.schemas.aircraft_technical_log_schema import (
-    AircraftTechnicalLogRead,
-    ATLPagedItemWithAuto,
-)
+from app.schemas.aircraft_technical_log_schema import AircraftTechnicalLogRead
 
 if TYPE_CHECKING:
     from app.models.aircraft_techinical_log import AircraftTechnicalLog
@@ -187,6 +184,22 @@ def compute_auto_fields(
     return out
 
 
+# Persisted ORM columns on AircraftTechnicalLog (same keys as compute_auto_fields output).
+ATL_AUTO_FIELD_KEYS: tuple[str, ...] = (
+    "auto_airframe_run_time",
+    "auto_airframe_aftt",
+    "auto_engine_run_time",
+    "auto_run_time",
+    "auto_engine_tsn",
+    "auto_engine_tso",
+    "auto_engine_tbo",
+    "auto_propeller_run_time",
+    "auto_propeller_tsn",
+    "auto_propeller_tso",
+    "auto_propeller_tbo",
+)
+
+
 # Map shared computation to auto_comp_* names (GET /api/v1/aircraft/{id}/atl/paged).
 _AUTO_TO_COMP_KEYS: tuple[tuple[str, str], ...] = (
     ("auto_airframe_run_time", "auto_comp_airframe_run_time"),
@@ -241,7 +254,8 @@ async def aircraft_technical_log_read_with_computed(
     auto_fields = await resolve_auto_fields(session, entry, aircraft_obj)
     auto_fields = {k: round(v, 2) for k, v in auto_fields.items()}
     base = AircraftTechnicalLogRead.from_orm(entry)
-    merged = {**base.dict(), **canonical_time_fields_from_auto(auto_fields)}
+    auto_only = {k: auto_fields[k] for k in ATL_AUTO_FIELD_KEYS}
+    merged = {**base.dict(), **canonical_time_fields_from_auto(auto_fields), **auto_only}
     return AircraftTechnicalLogRead.parse_obj(merged)
 
 
@@ -274,19 +288,24 @@ async def resolve_auto_fields(
     return auto_fields
 
 
-async def atl_paged_item_with_computed(
+async def persist_atl_auto_fields_to_row(
     session: AsyncSession,
-    item: AircraftTechnicalLog,
-    aircraft_obj: Any,
-    memo: Optional[Dict[tuple[int, str], Dict[str, float]]] = None,
-) -> ATLPagedItemWithAuto:
-    """Single list row: standard fields + auto_* both reflect the same computation."""
-    auto_fields = await resolve_auto_fields(session, item, aircraft_obj, memo)
-    auto_fields = {k: round(v, 2) for k, v in auto_fields.items()}
-    base = AircraftTechnicalLogRead.from_orm(item)
-    merged = {
-        **base.dict(),
-        **canonical_time_fields_from_auto(auto_fields),
-        **auto_fields,
-    }
-    return ATLPagedItemWithAuto.parse_obj(merged)
+    entry: "AircraftTechnicalLog",
+    aircraft_obj: Optional[Any] = None,
+) -> None:
+    """Run compute_auto_fields / chain and set rounded auto_* columns on entry (create/update persist)."""
+    from app.models.aircraft import Aircraft
+    from app.repository.aircraft_technical_log import get_previous_atl
+
+    # Never access entry.aircraft (async lazy load); only explicit session.get.
+    if aircraft_obj is None and getattr(entry, "aircraft_fk", None) is not None:
+        aircraft_obj = await session.get(Aircraft, entry.aircraft_fk)
+    prev_atl = await get_previous_atl(session, entry.aircraft_fk, entry.sequence_no)
+    prev_auto_fields = None
+    if prev_atl is not None:
+        prev_auto_fields = await resolve_auto_fields(session, prev_atl, aircraft_obj)
+    auto_fields = compute_auto_fields(
+        entry, prev_atl, aircraft_obj, prev_auto_fields=prev_auto_fields
+    )
+    for k in ATL_AUTO_FIELD_KEYS:
+        setattr(entry, k, round(auto_fields[k], 2))
