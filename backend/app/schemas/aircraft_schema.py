@@ -35,18 +35,26 @@ class AircraftBase(BaseModel):
     engine_model: Optional[str]
     engine_serial_number: Optional[str]
     engine_life_time_limit: Optional[float] = None
-    engine_tsn: Optional[float] = Field(0, ge=0, description="Time Since New (hours)")
+    engine_tsn: Optional[float] = Field(None, ge=0, description="Time Since New (hours)")
     engine_tso: Optional[float] = Field(0, ge=0, description="Time Since Overhaul (hours)")
 
     # Propeller Information
     propeller_model: Optional[str]
     propeller_serial_number: Optional[str]
     propeller_life_time_limit: Optional[float] = None
-    propeller_tsn: Optional[float] = Field(0, ge=0, description="Time Since New (hours)")
+    propeller_tsn: Optional[float] = Field(None, ge=0, description="Time Since New (hours)")
     propeller_tso: Optional[float] = Field(0, ge=0, description="Time Since Overhaul (hours)")
 
     engine_arc: Optional[str] = None
     propeller_arc: Optional[str] = None
+
+    @validator("engine_tsn", "propeller_tsn", pre=True)
+    def empty_tsn_to_none(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str) and (not v.strip() or v.strip() == "-"):
+            return None
+        return v
 
 
 class AircraftCreate(AircraftBase):
@@ -139,14 +147,14 @@ class AircraftImportSchema(BaseModel):
     engine_serial_number: Optional[str] = None
     engine_arc: Optional[str] = None
     engine_life_time_limit: Optional[float] = None
-    engine_tsn: Optional[float] = Field(0, ge=0)
+    engine_tsn: Optional[float] = Field(None, ge=0)
     engine_tso: Optional[float] = Field(0, ge=0)
 
     propeller_model: Optional[str] = None
     propeller_serial_number: Optional[str] = None
     propeller_arc: Optional[str] = None
     propeller_life_time_limit: Optional[float] = None
-    propeller_tsn: Optional[float] = Field(0, ge=0)
+    propeller_tsn: Optional[float] = Field(None, ge=0)
     propeller_tso: Optional[float] = Field(0, ge=0)
 
     @validator("status", pre=True)

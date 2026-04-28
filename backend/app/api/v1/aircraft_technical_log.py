@@ -20,7 +20,6 @@ from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 from app.schemas import aircraft_technical_log_schema
 from app.core.atl_derived_times import (
     aircraft_technical_log_read_with_computed,
-    atl_paged_item_with_computed,
     resolve_auto_fields,
 )
 from app.repository.aircraft_technical_log import (
@@ -82,6 +81,44 @@ router = APIRouter(
 )
 
 
+def _atl_update_openapi_request_body() -> dict:
+    """OpenAPI requestBody for PUT: handler uses Request (JSON or multipart), so body is not auto-generated."""
+    return {
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": aircraft_technical_log_schema.AircraftTechnicalLogUpdate.schema()
+                },
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "description": "Send `data` or `json_data` as a JSON string of the same fields as application/json. Optional file fields white_atl, dfp.",
+                        "properties": {
+                            "data": {
+                                "type": "string",
+                                "description": "Stringified JSON object (AircraftTechnicalLogUpdate fields).",
+                            },
+                            "json_data": {
+                                "type": "string",
+                                "description": "Alias for `data`.",
+                            },
+                            "white_atl": {
+                                "type": "string",
+                                "format": "binary",
+                            },
+                            "dfp": {
+                                "type": "string",
+                                "format": "binary",
+                            },
+                        },
+                    }
+                },
+            }
+        }
+    }
+
+
 @router.get("/paged")
 async def api_list_paged(
     limit: int = Query(10, ge=1, le=100),
@@ -103,11 +140,7 @@ async def api_list_paged(
     session: AsyncSession = Depends(get_session),
     _current_account: AccountInformation = Depends(get_current_active_account),
 ):
-    """Get paginated list of Aircraft Technical Log entries with auto_* computed fields.
-    Previous row = last ATL by sequence_no (same aircraft). Airframe run time from ATL or tach delta;
-    engine/propeller run time match airframe; TSN/TSO use previous ATL or aircraft baseline when zero.
-    Optional work_status query param narrows results when provided.
-    """
+    """Get paginated list of Aircraft Technical Log entries. auto_* fields are read from persisted columns."""
     offset = (page - 1) * limit
     items, total = await list_aircraft_technical_logs(
         session=session,
@@ -120,14 +153,10 @@ async def api_list_paged(
     )
     pages = ceil(total / limit) if total else 0
 
-    result_items = []
-    auto_fields_memo = {}
-    for item in items:
-        aircraft_obj = getattr(item, "aircraft", None)
-        paged_item = await atl_paged_item_with_computed(
-            session, item, aircraft_obj, auto_fields_memo
-        )
-        result_items.append(paged_item.dict())
+    result_items = [
+        aircraft_technical_log_schema.ATLPagedItemWithAuto.from_orm(item).dict()
+        for item in items
+    ]
 
     return {
         "items": result_items,
@@ -274,7 +303,8 @@ async def _parse_update_payload(request: Request) -> aircraft_technical_log_sche
 
 @router.put(
     "/{log_id}",
-    response_model=aircraft_technical_log_schema.AircraftTechnicalLogRead
+    response_model=aircraft_technical_log_schema.AircraftTechnicalLogRead,
+    openapi_extra=_atl_update_openapi_request_body(),
 )
 async def api_update(
     log_id: int,
@@ -340,11 +370,7 @@ async def api_atl_list_paged(
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
 ):
-    """Get paginated list of Aircraft Technical Log entries with auto_* computed fields.
-    Previous row = last ATL by sequence_no (same aircraft). Airframe run time from ATL or tach delta;
-    engine/propeller run time match airframe; TSN/TSO use previous ATL or aircraft baseline when zero.
-    Optional work_status query param narrows results when provided.
-    """
+    """Get paginated list of Aircraft Technical Log entries (manage). auto_* from persisted columns."""
     offset = (page - 1) * limit
     items, total = await list_aircraft_technical_logs_manage(
         session=session,
@@ -358,14 +384,10 @@ async def api_atl_list_paged(
     )
     pages = ceil(total / limit) if total else 0
 
-    result_items = []
-    auto_fields_memo = {}
-    for item in items:
-        aircraft_obj = getattr(item, "aircraft", None)
-        paged_item = await atl_paged_item_with_computed(
-            session, item, aircraft_obj, auto_fields_memo
-        )
-        result_items.append(paged_item.dict())
+    result_items = [
+        aircraft_technical_log_schema.ATLPagedItemWithAuto.from_orm(item).dict()
+        for item in items
+    ]
 
     return {
         "items": result_items,

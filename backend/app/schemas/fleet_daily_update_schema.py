@@ -4,7 +4,7 @@ from typing import Optional
 from pydantic import BaseModel, Field, validator
 
 
-FLEET_DAILY_UPDATE_STATUS_VALUES = ["Running", "Ongoing Maintenance", "AOG"]
+FLEET_DAILY_UPDATE_STATUS_VALUES = ["Operational", "Ongoing Maintenance", "AOG"]
 
 
 class AircraftRef(BaseModel):
@@ -28,8 +28,8 @@ class FleetDailyUpdateBase(BaseModel):
     created_by: Optional[int] = Field(None, description="User ID who created the record")
     updated_by: Optional[int] = Field(None, description="User ID who last updated the record")
     status: Optional[str] = Field(
-        "Running",
-        description="Running, Ongoing Maintenance, AOG",
+        "Operational",
+        description="Operational, Ongoing Maintenance, AOG",
     )
     next_insp_due: Optional[float] = None
     tach_time_due: Optional[float] = None
@@ -56,7 +56,7 @@ class FleetDailyUpdateUpdate(BaseModel):
     """Schema for updating a Fleet Daily Update entry (all fields optional). Partial update: only send status and/or remarks to update those."""
     aircraft_fk: Optional[int] = None
     updated_by: Optional[int] = Field(None, description="User ID who performed the update")
-    status: Optional[str] = Field(None, description="Running, Ongoing Maintenance, AOG")
+    status: Optional[str] = Field(None, description="Operational, Ongoing Maintenance, AOG")
     next_insp_due: Optional[float] = None
     tach_time_due: Optional[float] = None
     tach_time_eod: Optional[float] = None
