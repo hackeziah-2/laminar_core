@@ -5,14 +5,15 @@ Used for API responses (standard fields + auto_*) and aircraft-scoped ATL paged 
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Dict, Optional, Tuple
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.schemas.aircraft_technical_log_schema import AircraftTechnicalLogRead
 
-if TYPE_CHECKING:
-    from app.models.aircraft_techinical_log import AircraftTechnicalLog
+from app.models.aircraft_techinical_log import AircraftTechnicalLog
 
 
 def float_or_zero(value: Any) -> float:
@@ -245,12 +246,29 @@ def canonical_time_fields_from_auto(auto_fields: Dict[str, float]) -> Dict[str, 
     }
 
 
+async def _atl_eager_for_read(
+    session: AsyncSession, entry: AircraftTechnicalLog
+) -> AircraftTechnicalLog:
+    """Reload ATL with relationships; Pydantic from_orm must not trigger async lazy loads."""
+    stmt = (
+        select(AircraftTechnicalLog)
+        .where(AircraftTechnicalLog.id == entry.id)
+        .options(
+            selectinload(AircraftTechnicalLog.aircraft),
+            selectinload(AircraftTechnicalLog.atl_batch),
+            selectinload(AircraftTechnicalLog.component_parts),
+        )
+    )
+    return (await session.execute(stmt)).scalar_one()
+
+
 async def aircraft_technical_log_read_with_computed(
     session: AsyncSession,
     entry: AircraftTechnicalLog,
 ) -> AircraftTechnicalLogRead:
     """Build AircraftTechnicalLogRead with standard time fields replaced by computed values."""
-    aircraft_obj = getattr(entry, "aircraft", None)
+    entry = await _atl_eager_for_read(session, entry)
+    aircraft_obj = entry.aircraft
     auto_fields = await resolve_auto_fields(session, entry, aircraft_obj)
     auto_fields = {k: round(v, 2) for k, v in auto_fields.items()}
     base = AircraftTechnicalLogRead.from_orm(entry)
@@ -263,16 +281,19 @@ async def resolve_auto_fields(
     session: AsyncSession,
     item: AircraftTechnicalLog,
     aircraft_obj: Any,
-    memo: Optional[Dict[tuple[int, str], Dict[str, float]]] = None,
+    memo: Optional[Dict[Tuple[int, str, Optional[int]], Dict[str, float]]] = None,
 ) -> Dict[str, float]:
     """Resolve cumulative auto_* values through the previous ATL chain."""
     from app.repository.aircraft_technical_log import get_previous_atl
 
-    key = (int(item.aircraft_fk), str(getattr(item, "sequence_no", "")))
+    batch_fk = getattr(item, "atl_batch_fk", None)
+    key = (int(item.aircraft_fk), str(getattr(item, "sequence_no", "")), batch_fk)
     if memo is not None and key in memo:
         return memo[key]
 
-    prev_atl = await get_previous_atl(session, item.aircraft_fk, item.sequence_no)
+    prev_atl = await get_previous_atl(
+        session, item.aircraft_fk, item.sequence_no, atl_batch_fk=batch_fk
+    )
     prev_auto_fields = None
     if prev_atl is not None:
         prev_auto_fields = await resolve_auto_fields(session, prev_atl, aircraft_obj, memo)
@@ -300,7 +321,12 @@ async def persist_atl_auto_fields_to_row(
     # Never access entry.aircraft (async lazy load); only explicit session.get.
     if aircraft_obj is None and getattr(entry, "aircraft_fk", None) is not None:
         aircraft_obj = await session.get(Aircraft, entry.aircraft_fk)
-    prev_atl = await get_previous_atl(session, entry.aircraft_fk, entry.sequence_no)
+    prev_atl = await get_previous_atl(
+        session,
+        entry.aircraft_fk,
+        entry.sequence_no,
+        atl_batch_fk=getattr(entry, "atl_batch_fk", None),
+    )
     prev_auto_fields = None
     if prev_atl is not None:
         prev_auto_fields = await resolve_auto_fields(session, prev_atl, aircraft_obj)

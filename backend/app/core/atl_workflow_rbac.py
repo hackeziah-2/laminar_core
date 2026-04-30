@@ -8,6 +8,7 @@ from app.models.aircraft_techinical_log import WorkStatus
 _ATL_ALLOWED_STATUS_TRANSITIONS_BY_ROLE: Dict[str, Set[Tuple[WorkStatus, WorkStatus]]] = {
     "Quality Manager": {
         (WorkStatus.PENDING, WorkStatus.COMPLETED),
+        (WorkStatus.PENDING, WorkStatus.REJECTED_QUALITY),
     },
 }
 

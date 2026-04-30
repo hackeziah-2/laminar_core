@@ -12,6 +12,7 @@ from fastapi import (
     status,
     Request,
 )
+from starlette.responses import Response
 from pydantic import ValidationError
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -133,6 +134,14 @@ async def api_list_paged(
             "REJECTED_QUALITY, PENDING, COMPLETED. Omit for no filter."
         ),
     ),
+    atl_batch: Optional[int] = Query(
+        None,
+        description="Filter by ATL batch id (same as atl_batch_fk).",
+    ),
+    atl_batch_fk: Optional[int] = Query(
+        None,
+        description="Filter by ATL batch id.",
+    ),
     sort: Optional[str] = Query(
         "",
         description="Example: -created_at,sequence_no"
@@ -142,12 +151,14 @@ async def api_list_paged(
 ):
     """Get paginated list of Aircraft Technical Log entries. auto_* fields are read from persisted columns."""
     offset = (page - 1) * limit
+    batch_filter = atl_batch_fk if atl_batch_fk is not None else atl_batch
     items, total = await list_aircraft_technical_logs(
         session=session,
         limit=limit,
         offset=offset,
         search=search,
         aircraft_fk=aircraft_fk,
+        atl_batch_fk=batch_filter,
         work_status=work_status,
         sort=sort,
     )
@@ -181,7 +192,7 @@ async def api_search_by_sequence(
     items = await search_atl_by_sequence_no(
         session, search=search.strip(), aircraft_fk=aircraft_id
     )
-    memo: Dict[Tuple[int, str], Dict[str, float]] = {}
+    memo: Dict[Tuple[int, str, Optional[int]], Dict[str, float]] = {}
     out: List[aircraft_technical_log_schema.ATLSearchItem] = []
     for item in items:
         aircraft_obj = getattr(item, "aircraft", None)
@@ -215,6 +226,64 @@ async def api_get_latest(
             detail="No Aircraft Technical Log entries found"
         )
     return await aircraft_technical_log_read_with_computed(session, obj)
+
+
+@router.get("/manage/paged")
+async def api_atl_list_paged(
+    limit: int = Query(10, ge=1, le=100),
+    page: int = Query(1, ge=1),
+    search: Optional[str] = None,
+    aircraft_fk: Optional[int] = Query(None, description="Filter by aircraft ID"),
+    work_status: Optional[WorkStatus] = Query(
+        None,
+        description=(
+            "Filter by work status (e.g. work_status=APPROVED). "
+            "Values: FOR_REVIEW, REJECTED_MAINTENANCE, APPROVED, AWAITING_ATTACHMENT, "
+            "REJECTED_QUALITY, PENDING, COMPLETED. Omit for no filter."
+        ),
+    ),
+    atl_batch: Optional[int] = Query(
+        None,
+        description="Filter by ATL batch id (same as atl_batch_fk).",
+    ),
+    atl_batch_fk: Optional[int] = Query(
+        None,
+        description="Filter by ATL batch id.",
+    ),
+    sort: Optional[str] = Query(
+        "",
+        description="Example: -created_at,sequence_no"
+    ),
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
+):
+    """Get paginated list of Aircraft Technical Log entries (manage). auto_* from persisted columns."""
+    offset = (page - 1) * limit
+    batch_filter = atl_batch_fk if atl_batch_fk is not None else atl_batch
+    items, total = await list_aircraft_technical_logs_manage(
+        session=session,
+        limit=limit,
+        offset=offset,
+        search=search,
+        aircraft_fk=aircraft_fk,
+        atl_batch_fk=batch_filter,
+        work_status=work_status,
+        sort=sort,
+        current_account=current_account,
+    )
+    pages = ceil(total / limit) if total else 0
+
+    result_items = [
+        aircraft_technical_log_schema.ATLPagedItemWithAuto.from_orm(item).dict()
+        for item in items
+    ]
+
+    return {
+        "items": result_items,
+        "total": total,
+        "page": page,
+        "pages": pages,
+    }
 
 
 @router.get(
@@ -333,7 +402,8 @@ async def api_update(
 
 @router.delete(
     "/{log_id}",
-    status_code=status.HTTP_204_NO_CONTENT
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
 )
 async def api_delete(
     log_id: int,
@@ -347,51 +417,4 @@ async def api_delete(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Aircraft Technical Log not found",
         )
-    return {"ok": True}
-
-@router.get("/manage/paged")
-async def api_atl_list_paged(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
-    search: Optional[str] = None,
-    aircraft_fk: Optional[int] = Query(None, description="Filter by aircraft ID"),
-    work_status: Optional[WorkStatus] = Query(
-        None,
-        description=(
-            "Filter by work status (e.g. work_status=APPROVED). "
-            "Values: FOR_REVIEW, REJECTED_MAINTENANCE, APPROVED, AWAITING_ATTACHMENT, "
-            "REJECTED_QUALITY, PENDING, COMPLETED. Omit for no filter."
-        ),
-    ),
-    sort: Optional[str] = Query(
-        "",
-        description="Example: -created_at,sequence_no"
-    ),
-    session: AsyncSession = Depends(get_session),
-    current_account: AccountInformation = Depends(get_current_active_account),
-):
-    """Get paginated list of Aircraft Technical Log entries (manage). auto_* from persisted columns."""
-    offset = (page - 1) * limit
-    items, total = await list_aircraft_technical_logs_manage(
-        session=session,
-        limit=limit,
-        offset=offset,
-        search=search,
-        aircraft_fk=aircraft_fk,
-        work_status=work_status,
-        sort=sort,
-        current_account=current_account,
-    )
-    pages = ceil(total / limit) if total else 0
-
-    result_items = [
-        aircraft_technical_log_schema.ATLPagedItemWithAuto.from_orm(item).dict()
-        for item in items
-    ]
-
-    return {
-        "items": result_items,
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
