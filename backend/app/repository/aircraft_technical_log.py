@@ -15,6 +15,7 @@ from app.models.aircraft_techinical_log import (
     TypeEnum,
     WorkStatus,
 )
+from app.models.atl_batch import AtlBatch
 from app.models.aircraft import Aircraft
 from app.models.account import AccountInformation
 from app.core.atl_workflow_rbac import is_atl_work_status_transition_allowed
@@ -57,9 +58,12 @@ async def _get_previous_meter_starts(
     session: AsyncSession,
     aircraft_fk: int,
     sequence_no: str,
+    atl_batch_fk: Optional[int] = None,
 ) -> tuple[float, float]:
-    """Return hobbs/tach start defaults from the previous ATL in sequence order."""
-    prev_atl = await get_previous_atl(session, aircraft_fk, sequence_no)
+    """Return hobbs/tach start defaults from the previous ATL in the same aircraft + batch stream."""
+    prev_atl = await get_previous_atl(
+        session, aircraft_fk, sequence_no, atl_batch_fk=atl_batch_fk
+    )
     if not prev_atl:
         return 0.0, 0.0
     return (
@@ -79,6 +83,38 @@ def _component_part_to_dict(part_data: ComponentPartsRecordCreate) -> dict:
     if hasattr(part_data, "model_dump"):
         return part_data.model_dump(exclude_unset=True)  # type: ignore[union-attr]
     return part_data.dict(exclude_unset=True)
+
+
+async def _validate_atl_batch_fk(
+    session: AsyncSession,
+    atl_batch_fk: Optional[int],
+) -> None:
+    if atl_batch_fk is None:
+        return
+    batch = await session.get(AtlBatch, atl_batch_fk)
+    if not batch or batch.is_deleted:
+        raise HTTPException(status_code=400, detail="ATL batch not found")
+
+
+async def _atl_exists_same_aircraft_sequence_batch(
+    session: AsyncSession,
+    *,
+    aircraft_fk: int,
+    sequence_no: str,
+    atl_batch_fk: Optional[int],
+) -> bool:
+    """True if a non-deleted ATL exists for this aircraft, sequence, and batch (NULL batch matches NULL only)."""
+    q = (
+        select(AircraftTechnicalLog.id)
+        .where(AircraftTechnicalLog.sequence_no == sequence_no)
+        .where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
+        .where(AircraftTechnicalLog.is_deleted.is_(False))
+    )
+    if atl_batch_fk is None:
+        q = q.where(AircraftTechnicalLog.atl_batch_fk.is_(None))
+    else:
+        q = q.where(AircraftTechnicalLog.atl_batch_fk == atl_batch_fk)
+    return (await session.scalar(q)) is not None
 
 
 def _clean_atl_update_data(update_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -164,10 +200,16 @@ async def _apply_meter_start_defaults_if_needed(
     need_tach = "tachometer_start" not in update_data
     if not need_hobbs and not need_tach:
         return
+    target_atl_batch_fk = (
+        update_data["atl_batch_fk"]
+        if "atl_batch_fk" in update_data
+        else obj.atl_batch_fk
+    )
     prev_hobbs_start, prev_tach_start = await _get_previous_meter_starts(
         session,
         target_aircraft_fk,
         str(target_sequence_no) if target_sequence_no is not None else "",
+        atl_batch_fk=target_atl_batch_fk,
     )
     if need_hobbs:
         update_data["hobbs_meter_start"] = prev_hobbs_start
@@ -202,21 +244,17 @@ async def create_aircraft_technical_log(
     *,
     audit_account_id: Optional[int] = None,
 ) -> AircraftTechnicalLog:
-    """Create a new Aircraft Technical Log entry with optional gap-fill (skipped when first ATL for aircraft). Sequence numbers stored as number only (e.g. 001). Persists auto_* via compute_auto_fields before insert."""
-
+    """Create a new Aircraft Technical Log entry with optional gap-fill (skipped when first ATL for aircraft/batch stream). Sequence numbers stored as number only (e.g. 001). Persists auto_* via compute_auto_fields before insert."""
     sequence_no = _sequence_no_digits_only(data.sequence_no)
-
-    # Check for duplicate sequence_no
-    existing = await session.scalar(
-        select(AircraftTechnicalLog)
-        .where(AircraftTechnicalLog.sequence_no == sequence_no)
-        .where(AircraftTechnicalLog.aircraft_fk == data.aircraft_fk)
-        .where(AircraftTechnicalLog.is_deleted.is_(False))
-    )
-    if existing:
+    if await _atl_exists_same_aircraft_sequence_batch(
+        session,
+        aircraft_fk=data.aircraft_fk,
+        sequence_no=sequence_no,
+        atl_batch_fk=data.atl_batch_fk,
+    ):
         raise HTTPException(
             status_code=400,
-            detail=f"Sequence No. {sequence_no} already exists. Please use a different Sequence No."
+            detail=f"Sequence No. {sequence_no} already exists for this aircraft and ATL batch. Please use a different Sequence No.",
         )
 
     # Prepare log data dictionary (server owns auto_*; always recomputed in persist)
@@ -244,14 +282,19 @@ async def create_aircraft_technical_log(
     else:
         log_data['work_status'] = WorkStatus.FOR_REVIEW
 
-    # Get latest ATL for this aircraft (for gap detection)
+    await _validate_atl_batch_fk(session, log_data.get("atl_batch_fk"))
+
+    # Latest sequence in the same aircraft + batch stream (NULL batch only groups NULL atl_batch_fk rows)
     latest_stmt = (
         select(AircraftTechnicalLog)
         .where(AircraftTechnicalLog.aircraft_fk == data.aircraft_fk)
         .where(AircraftTechnicalLog.is_deleted.is_(False))
-        .order_by(cast(AircraftTechnicalLog.sequence_no, Integer).desc())
-        .limit(1)
     )
+    if data.atl_batch_fk is None:
+        latest_stmt = latest_stmt.where(AircraftTechnicalLog.atl_batch_fk.is_(None))
+    else:
+        latest_stmt = latest_stmt.where(AircraftTechnicalLog.atl_batch_fk == data.atl_batch_fk)
+    latest_stmt = latest_stmt.order_by(cast(AircraftTechnicalLog.sequence_no, Integer).desc()).limit(1)
     latest_result = await session.execute(latest_stmt)
     latest_atl = latest_result.scalar_one_or_none()
     latest_sequence_no = latest_atl.sequence_no if latest_atl else None
@@ -259,7 +302,7 @@ async def create_aircraft_technical_log(
     # Auto-populate hobbs_meter_start and tachometer_start from the previous ATL by sequence_no.
     if log_data.get('hobbs_meter_start') is None or log_data.get('tachometer_start') is None:
         prev_hobbs_start, prev_tach_start = await _get_previous_meter_starts(
-            session, data.aircraft_fk, sequence_no
+            session, data.aircraft_fk, sequence_no, atl_batch_fk=data.atl_batch_fk
         )
         if log_data.get('hobbs_meter_start') is None:
             log_data['hobbs_meter_start'] = prev_hobbs_start
@@ -283,12 +326,29 @@ async def create_aircraft_technical_log(
             missing_sequences = []
         if missing_sequences:
             for seq_no in missing_sequences:
-                gap_entry = AircraftTechnicalLog(sequence_no=seq_no, aircraft_fk=data.aircraft_fk)
-                # await persist_atl_auto_fields_to_row(session, gap_entry, aircraft_row)
-                session.add(gap_entry)
-                await session.flush()
+                if await _atl_exists_same_aircraft_sequence_batch(
+                    session,
+                    aircraft_fk=data.aircraft_fk,
+                    sequence_no=seq_no,
+                    atl_batch_fk=data.atl_batch_fk,
+                ):
+                    continue
+                gap_entry = AircraftTechnicalLog(
+                    sequence_no=seq_no,
+                    aircraft_fk=data.aircraft_fk,
+                    atl_batch_fk=data.atl_batch_fk,
+                    work_status=WorkStatus.FOR_REVIEW,
+                )
+                prev_hobbs, prev_tach = await _get_previous_meter_starts(
+                    session, data.aircraft_fk, seq_no, atl_batch_fk=data.atl_batch_fk
+                )
+                gap_entry.hobbs_meter_start = prev_hobbs
+                gap_entry.tachometer_start = prev_tach
+                await persist_atl_auto_fields_to_row(session, gap_entry, aircraft_row)
                 if audit_account_id is not None:
                     await set_audit_fields(gap_entry, audit_account_id, is_create=True)
+                session.add(gap_entry)
+                await session.flush()
 
     # Create component parts if provided
     if data.component_parts:
@@ -333,7 +393,10 @@ async def search_atl_by_sequence_no(
     q = f"%{normalized}%"
     stmt = (
         select(AircraftTechnicalLog)
-        .options(selectinload(AircraftTechnicalLog.aircraft))
+        .options(
+            selectinload(AircraftTechnicalLog.aircraft),
+            selectinload(AircraftTechnicalLog.atl_batch),
+        )
         .where(AircraftTechnicalLog.is_deleted == False)
         .where(AircraftTechnicalLog.sequence_no.ilike(q))
         .order_by(cast(AircraftTechnicalLog.sequence_no, Integer).asc())
@@ -354,6 +417,7 @@ async def get_aircraft_technical_log(
         select(AircraftTechnicalLog)
         .options(
             selectinload(AircraftTechnicalLog.aircraft),
+            selectinload(AircraftTechnicalLog.atl_batch),
             selectinload(AircraftTechnicalLog.component_parts)
         )
         .where(AircraftTechnicalLog.id == id)
@@ -393,6 +457,9 @@ async def update_aircraft_technical_log(
         update_data=update_data,
     )
 
+    if "atl_batch_fk" in update_data:
+        await _validate_atl_batch_fk(session, update_data.get("atl_batch_fk"))
+
     for field, value in update_data.items():
         setattr(obj, field, value)
 
@@ -418,6 +485,7 @@ async def update_aircraft_technical_log(
         select(AircraftTechnicalLog)
         .options(
             selectinload(AircraftTechnicalLog.aircraft),
+            selectinload(AircraftTechnicalLog.atl_batch),
             selectinload(AircraftTechnicalLog.component_parts),
         )
         .where(AircraftTechnicalLog.id == log_id)
@@ -431,8 +499,10 @@ async def get_previous_atl(
     session: AsyncSession,
     aircraft_fk: int,
     sequence_no: str,
+    *,
+    atl_batch_fk: Optional[int] = None,
 ) -> Optional[AircraftTechnicalLog]:
-    """Get the previous ATL for the same aircraft: the row with the latest sequence_no that is less than the given sequence_no (immediate predecessor by sequence order). Used for auto_comp 'Previous' values. Excludes soft-deleted. sequence_no is normalized to number-only for comparison."""
+    """Immediate predecessor by sequence within the same aircraft and ATL batch stream (NULL batch matches NULL only)."""
     sequence_no = _sequence_no_digits_only(sequence_no)
     try:
         sequence_no_int = int(sequence_no)
@@ -443,9 +513,12 @@ async def get_previous_atl(
         .where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
         .where(cast(AircraftTechnicalLog.sequence_no, Integer) < sequence_no_int)
         .where(AircraftTechnicalLog.is_deleted.is_(False))
-        .order_by(cast(AircraftTechnicalLog.sequence_no, Integer).desc())
-        .limit(1)
     )
+    if atl_batch_fk is None:
+        stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk.is_(None))
+    else:
+        stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk == atl_batch_fk)
+    stmt = stmt.order_by(cast(AircraftTechnicalLog.sequence_no, Integer).desc()).limit(1)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 
@@ -465,6 +538,7 @@ async def list_atl_paged(
         select(AircraftTechnicalLog)
         .options(
             selectinload(AircraftTechnicalLog.aircraft),
+            selectinload(AircraftTechnicalLog.atl_batch),
             selectinload(AircraftTechnicalLog.component_parts)
         )
         .join(Aircraft, AircraftTechnicalLog.aircraft_fk == Aircraft.id)
@@ -517,6 +591,7 @@ async def list_atl_paged(
 def _build_aircraft_technical_logs_list_statements(
     search: Optional[str] = None,
     aircraft_fk: Optional[int] = None,
+    atl_batch_fk: Optional[int] = None,
     sort: Optional[str] = "",
 ) -> Tuple:
     """Build list/count statements shared by ATL paged endpoints."""
@@ -524,6 +599,7 @@ def _build_aircraft_technical_logs_list_statements(
         select(AircraftTechnicalLog)
         .options(
             selectinload(AircraftTechnicalLog.aircraft),
+            selectinload(AircraftTechnicalLog.atl_batch),
             selectinload(AircraftTechnicalLog.component_parts)
         )
         .where(AircraftTechnicalLog.is_deleted == False)
@@ -532,6 +608,9 @@ def _build_aircraft_technical_logs_list_statements(
     # Filter by aircraft
     if aircraft_fk:
         stmt = stmt.where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
+
+    if atl_batch_fk is not None:
+        stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk == atl_batch_fk)
 
     # Search functionality; sequence_no stored as number only, so strip ATL- from search for that field
     if search:
@@ -604,6 +683,11 @@ def _build_aircraft_technical_logs_list_statements(
             AircraftTechnicalLog.aircraft_fk == aircraft_fk
         )
 
+    if atl_batch_fk is not None:
+        count_stmt = count_stmt.where(
+            AircraftTechnicalLog.atl_batch_fk == atl_batch_fk
+        )
+
     if search:
         q = f"%{search}%"
         q_seq = f"%{_sequence_no_digits_only(search)}%"
@@ -631,6 +715,7 @@ async def list_aircraft_technical_logs(
     offset: int = 0,
     search: Optional[str] = None,
     aircraft_fk: Optional[int] = None,
+    atl_batch_fk: Optional[int] = None,
     work_status: Optional[WorkStatus] = None,
     sort: Optional[str] = "",
 ) -> Tuple[List[AircraftTechnicalLog], int]:
@@ -638,6 +723,7 @@ async def list_aircraft_technical_logs(
     stmt, count_stmt = _build_aircraft_technical_logs_list_statements(
         search=search,
         aircraft_fk=aircraft_fk,
+        atl_batch_fk=atl_batch_fk,
         sort=sort,
     )
 
@@ -661,6 +747,7 @@ async def list_aircraft_technical_logs_manage(
     offset: int = 0,
     search: Optional[str] = None,
     aircraft_fk: Optional[int] = None,
+    atl_batch_fk: Optional[int] = None,
     work_status: Optional[WorkStatus] = None,
     sort: Optional[str] = "",
     current_account: Optional[AccountInformation] = None,
@@ -669,6 +756,7 @@ async def list_aircraft_technical_logs_manage(
     stmt, count_stmt = _build_aircraft_technical_logs_list_statements(
         search=search,
         aircraft_fk=aircraft_fk,
+        atl_batch_fk=atl_batch_fk,
         sort=sort,
     )
     return stmt, count_stmt
@@ -683,6 +771,7 @@ async def get_latest_aircraft_technical_log(
         select(AircraftTechnicalLog)
         .options(
             selectinload(AircraftTechnicalLog.aircraft),
+            selectinload(AircraftTechnicalLog.atl_batch),
             selectinload(AircraftTechnicalLog.component_parts)
         )
         .where(AircraftTechnicalLog.is_deleted == False)

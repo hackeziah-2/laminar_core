@@ -43,6 +43,7 @@ class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     id = Column(Integer, primary_key=True, index=True)
 
     aircraft_fk = Column(Integer, ForeignKey("aircrafts.id"), nullable=False)
+    atl_batch_fk = Column(Integer, ForeignKey("atl_batch.id"), nullable=True)
     sequence_no = Column(String(50), nullable=False)
 
     nature_of_flight = Column(
@@ -151,6 +152,7 @@ class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     )
 
     aircraft = relationship("Aircraft", back_populates="atl_logs")
+    atl_batch = relationship("AtlBatch", back_populates="atl_logs")
     component_parts = relationship(
         "ComponentPartsRecord",
         back_populates="atl",

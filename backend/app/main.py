@@ -40,6 +40,7 @@ from app.api.v1 import (
     personnel_compliance as personnel_compliance_router,
     personnel_compliance_matrix_2 as personnel_compliance_matrix_2_router,
     advisory as advisory_router,
+    atl_batch as atl_batch_router,
 )
 from app.database import engine, Base
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
@@ -274,6 +275,7 @@ app.include_router(cpcp_monitoring_router.router)
 app.include_router(fleet_daily_update_router.router)
 app.include_router(aircraft_statutory_certificate_router.router)
 app.include_router(certificate_category_type_router.router)
+app.include_router(atl_batch_router.router)
 app.include_router(organizational_approval_router.router)
 app.include_router(organizational_approval_history_router.router)
 app.include_router(aircraft_statutory_certificate_history_router.router)

@@ -332,6 +332,61 @@ def test_quality_manager_can_update_pending_to_completed(client: TestClient):
     assert update_response.json()["work_status"] == WorkStatus.COMPLETED.value
 
 
+def test_quality_manager_can_update_pending_to_rejected_quality(client: TestClient):
+    """Quality Manager may change ATL work_status from PENDING to REJECTED_QUALITY."""
+
+    async def seed_role() -> int:
+        async with TestSessionLocal() as session:
+            role = Role(name="Quality Manager", description="workflow")
+            session.add(role)
+            await session.commit()
+            await session.refresh(role)
+            return role.id
+
+    qm_role_id = asyncio.run(seed_role())
+
+    async def override_account():
+        acc = type("Acc", (), {})()
+        acc.id = 8805
+        acc.status = True
+        acc.role_id = qm_role_id
+        return acc
+
+    app.dependency_overrides[get_current_active_account] = override_account
+
+    log_data = {
+        "aircraft_fk": 1,
+        "sequence_no": "ATL-QM-003",
+        "nature_of_flight": "TR",
+        "origin_station": "ORG",
+        "origin_date": "2025-01-17",
+        "origin_time": "10:00:00",
+        "destination_station": "DST",
+        "destination_date": "2025-01-17",
+        "destination_time": "12:00:00",
+        "number_of_landings": 1,
+        "hobbs_meter_start": 1.0,
+        "hobbs_meter_end": 2.0,
+        "hobbs_meter_total": 1.0,
+        "tachometer_start": 1.0,
+        "tachometer_end": 2.0,
+        "tachometer_total": 1.0,
+        "work_status": "PENDING",
+        "component_parts": [],
+    }
+
+    create_response = client.post("/api/v1/aircraft-technical-log/", json=log_data)
+    assert create_response.status_code == 201
+    log_id = create_response.json()["id"]
+
+    update_response = client.put(
+        f"/api/v1/aircraft-technical-log/{log_id}",
+        json={"work_status": "REJECTED_QUALITY"},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["work_status"] == WorkStatus.REJECTED_QUALITY.value
+
+
 def test_quality_manager_cannot_update_for_review_to_completed(client: TestClient):
     """Quality Manager may not skip directly from FOR_REVIEW to COMPLETED."""
     async def seed_role() -> int:

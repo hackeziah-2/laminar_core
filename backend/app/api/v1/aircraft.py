@@ -100,7 +100,7 @@ async def api_aircraft_atl_search(
     items = await search_atl_by_sequence_no(
         session, search=sequence_number.strip(), aircraft_fk=aircraft_id
     )
-    memo: Dict[Tuple[int, str], Dict[str, float]] = {}
+    memo: Dict[Tuple[int, str, Optional[int]], Dict[str, float]] = {}
     out: List[aircraft_technical_log_schema.ATLAircraftScopedSearchItem] = []
     for item in items:
         aircraft_obj = getattr(item, "aircraft", None)
