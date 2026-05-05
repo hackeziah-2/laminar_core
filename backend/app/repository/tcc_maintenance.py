@@ -4,6 +4,7 @@ from sqlalchemy import select, func, or_, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.database import set_audit_fields
 from app.models.tcc_maintenance import TCCMaintenance, MethodOfComplianceEnum, TCCCategoryEnum
 from app.models.aircraft_techinical_log import AircraftTechnicalLog
 from app.schemas.tcc_maintenance_schema import (
@@ -11,6 +12,33 @@ from app.schemas.tcc_maintenance_schema import (
     TCCMaintenanceUpdate,
     TCCMaintenanceRead,
 )
+from app.services.tcc_computation import (
+    CLIENT_REMAINING_OVERRIDE_KEYS,
+    COMPUTED_TCC_COLUMN_KEYS,
+    build_computed_tcc_field_values,
+    coerce_stored_remaining_override,
+)
+
+
+async def tcc_maintenance_to_read(
+    session: AsyncSession,
+    obj: TCCMaintenance,
+    *,
+    prefetched_latest_atl_tach_aftt: Optional[Tuple[Optional[float], Optional[float]]] = None,
+) -> TCCMaintenanceRead:
+    """ORM row to API read model with next_due_* and remaining_* recomputed from latest aircraft state."""
+    read = TCCMaintenanceRead.from_orm(obj)
+    computed = await build_computed_tcc_field_values(
+        session,
+        aircraft_fk=obj.aircraft_fk,
+        last_done_date=obj.last_done_date,
+        last_done_tach=obj.last_done_tach,
+        last_done_aftt=obj.last_done_aftt,
+        component_limit_hours=obj.component_limit_hours,
+        component_limit_years=obj.component_limit_years,
+        prefetched_latest_atl_tach_aftt=prefetched_latest_atl_tach_aftt,
+    )
+    return read.copy(update=computed)
 
 
 def _category_from_str(value: Optional[str]) -> Optional[TCCCategoryEnum]:
@@ -38,6 +66,8 @@ def _method_of_compliance_from_str(value: Optional[str]) -> Optional[MethodOfCom
 async def create_tcc_maintenance(
     session: AsyncSession,
     data: TCCMaintenanceCreate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> TCCMaintenanceRead:
     """Create a new TCC Maintenance entry."""
     payload = data.dict()
@@ -49,8 +79,28 @@ async def create_tcc_maintenance(
     payload["component_method_of_compliance"] = component_moc.value if component_moc else None
     payload["last_done_method_of_compliance"] = last_done_moc.value if last_done_moc else None
 
+    manual_remaining = {
+        k: payload.get(k)
+        for k in CLIENT_REMAINING_OVERRIDE_KEYS
+        if k in data.__fields_set__
+    }
+    computed = await build_computed_tcc_field_values(
+        session,
+        aircraft_fk=payload["aircraft_fk"],
+        last_done_date=payload.get("last_done_date"),
+        last_done_tach=payload.get("last_done_tach"),
+        last_done_aftt=payload.get("last_done_aftt"),
+        component_limit_hours=payload.get("component_limit_hours"),
+        component_limit_years=payload.get("component_limit_years"),
+    )
+    payload.update(computed)
+    for k, v in manual_remaining.items():
+        payload[k] = coerce_stored_remaining_override(k, v)
+
     obj = TCCMaintenance(**payload)
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=True)
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["aircraft", "atl"])
@@ -74,7 +124,7 @@ async def get_tcc_maintenance(
     obj = result.scalar_one_or_none()
     if not obj:
         return None
-    return TCCMaintenanceRead.from_orm(obj)
+    return await tcc_maintenance_to_read(session, obj)
 
 
 async def get_tcc_maintenance_by_aircraft(
@@ -96,7 +146,7 @@ async def get_tcc_maintenance_by_aircraft(
     obj = result.scalar_one_or_none()
     if not obj:
         return None
-    return TCCMaintenanceRead.from_orm(obj)
+    return await tcc_maintenance_to_read(session, obj)
 
 
 async def get_latest_tcc_by_aircraft_and_description(
@@ -236,6 +286,8 @@ async def update_tcc_maintenance(
     session: AsyncSession,
     maintenance_id: int,
     data: TCCMaintenanceUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[TCCMaintenanceRead]:
     """Update a TCC Maintenance entry."""
     result = await session.execute(
@@ -252,6 +304,11 @@ async def update_tcc_maintenance(
         return None
 
     update_data = data.dict(exclude_unset=True)
+    manual_remaining = {
+        k: update_data.pop(k)
+        for k in CLIENT_REMAINING_OVERRIDE_KEYS
+        if k in update_data
+    }
     if "category" in update_data:
         cat = _category_from_str(update_data["category"])
         update_data["category"] = cat.value if cat else None
@@ -262,10 +319,34 @@ async def update_tcc_maintenance(
         moc = _method_of_compliance_from_str(update_data["last_done_method_of_compliance"])
         update_data["last_done_method_of_compliance"] = moc.value if moc else None
 
+    for k in list(update_data.keys()):
+        if k in COMPUTED_TCC_COLUMN_KEYS:
+            del update_data[k]
+
     for k, v in update_data.items():
         setattr(obj, k, v)
 
+    computed = await build_computed_tcc_field_values(
+        session,
+        aircraft_fk=obj.aircraft_fk,
+        last_done_date=obj.last_done_date,
+        last_done_tach=obj.last_done_tach,
+        last_done_aftt=obj.last_done_aftt,
+        component_limit_hours=obj.component_limit_hours,
+        component_limit_years=obj.component_limit_years,
+    )
+    for k, v in computed.items():
+        if k in manual_remaining:
+            setattr(obj, k, coerce_stored_remaining_override(k, manual_remaining[k]))
+        else:
+            setattr(obj, k, v)
+    for k, v in manual_remaining.items():
+        if k not in computed:
+            setattr(obj, k, coerce_stored_remaining_override(k, v))
+
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["aircraft", "atl"])

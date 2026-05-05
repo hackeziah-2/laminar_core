@@ -6,6 +6,7 @@ import pandas as pd
 from pydantic import BaseModel, Field, validator, root_validator
 
 from app.models.aircraft_techinical_log import TypeEnum, WorkStatus
+from app.schemas.atl_batch_schema import AtlBatchBrief
 
 
 def normalize_datetime(value: Any) -> Any:
@@ -143,6 +144,7 @@ class ComponentPartsRecordRead(ComponentPartsRecordBase):
 # Only sequence_no and aircraft_fk are required; all other fields are optional.
 class AircraftTechnicalLogBase(BaseModel):
     aircraft_fk: int = Field(..., description="Aircraft ID (required).")
+    atl_batch_fk: Optional[int] = Field(None, description="Optional ATL batch grouping.")
     sequence_no: str = Field(..., max_length=50, description="ATL sequence number (required). Stored as number only (e.g. 001).")
 
     @validator("sequence_no", pre=True)
@@ -186,7 +188,12 @@ class AircraftTechnicalLogBase(BaseModel):
     engine_flight_time: Optional[float] = None
     engine_total_time: Optional[float] = None
     engine_run_time: Optional[float] = None
-    engine_tsn: Optional[str] = Field(None, max_length=100)
+    engine_tsn: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        alias="engineTsn",
+        description="Optional; omit or leave blank when unknown.",
+    )
     engine_tso: Optional[float] = None
     engine_tbo: Optional[float] = None
 
@@ -195,7 +202,11 @@ class AircraftTechnicalLogBase(BaseModel):
     propeller_flight_time: Optional[float] = None
     propeller_total_time: Optional[float] = None
     propeller_run_time: Optional[float] = None
-    propeller_tsn: Optional[float] = None
+    propeller_tsn: Optional[float] = Field(
+        default=None,
+        alias="propellerTsn",
+        description="Optional; omit or leave blank when unknown.",
+    )
     propeller_tso: Optional[float] = None
     propeller_tbo: Optional[float] = None
 
@@ -238,7 +249,28 @@ class AircraftTechnicalLogBase(BaseModel):
     updated_by: Optional[int] = None
     work_status: Optional[WorkStatus] = None
 
+    auto_airframe_run_time: Optional[float] = None
+    auto_airframe_aftt: Optional[float] = None
+    auto_engine_run_time: Optional[float] = None
+    auto_run_time: Optional[float] = None
+    auto_engine_tsn: Optional[float] = None
+    auto_engine_tso: Optional[float] = None
+    auto_engine_tbo: Optional[float] = None
+    auto_propeller_run_time: Optional[float] = None
+    auto_propeller_tsn: Optional[float] = None
+    auto_propeller_tso: Optional[float] = None
+    auto_propeller_tbo: Optional[float] = None
+
     component_parts: Optional[List[ComponentPartsRecordCreate]] = []
+
+    @validator("engine_tsn", "propeller_tsn", pre=True)
+    def empty_str_optional_tsn_fields(cls, v: Any) -> Any:
+        """TSN fields are optional; treat blank strings like omitted (no validation error)."""
+        if v is None:
+            return None
+        if isinstance(v, str) and not str(v).strip():
+            return None
+        return v
 
     @validator("nature_of_flight", pre=True)
     def empty_str_to_none_nature_of_flight(cls, v: Any) -> Any:
@@ -268,6 +300,9 @@ class AircraftTechnicalLogBase(BaseModel):
         if v is None:
             return None
         return parse_zulu_time_to_time(v)
+
+    class Config:
+        allow_population_by_field_name = True
 
 
 # ---------- Aircraft Technical Log Create Schema ----------
@@ -348,11 +383,13 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
 
     class Config:
         orm_mode = True
+        allow_population_by_field_name = True
 
 
 # ---------- Aircraft Technical Log Update Schema ----------
 class AircraftTechnicalLogUpdate(BaseModel):
     aircraft_fk: Optional[int] = None
+    atl_batch_fk: Optional[int] = None
     sequence_no: Optional[str] = Field(None, max_length=50, description="ATL sequence number; stored as number only when set.")
 
     @validator("sequence_no", pre=True)
@@ -396,7 +433,12 @@ class AircraftTechnicalLogUpdate(BaseModel):
     engine_flight_time: Optional[float] = None
     engine_total_time: Optional[float] = None
     engine_run_time: Optional[float] = None
-    engine_tsn: Optional[str] = Field(None, max_length=100)
+    engine_tsn: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        alias="engineTsn",
+        description="Optional; omit or leave blank when unknown.",
+    )
     engine_tso: Optional[float] = None
     engine_tbo: Optional[float] = None
 
@@ -405,7 +447,11 @@ class AircraftTechnicalLogUpdate(BaseModel):
     propeller_flight_time: Optional[float] = None
     propeller_total_time: Optional[float] = None
     propeller_run_time: Optional[float] = None
-    propeller_tsn: Optional[float] = None
+    propeller_tsn: Optional[float] = Field(
+        default=None,
+        alias="propellerTsn",
+        description="Optional; omit or leave blank when unknown.",
+    )
     propeller_tso: Optional[float] = None
     propeller_tbo: Optional[float] = None
 
@@ -448,7 +494,27 @@ class AircraftTechnicalLogUpdate(BaseModel):
     updated_by: Optional[int] = None
     work_status: Optional[WorkStatus] = None
 
+    auto_airframe_run_time: Optional[float] = None
+    auto_airframe_aftt: Optional[float] = None
+    auto_engine_run_time: Optional[float] = None
+    auto_run_time: Optional[float] = None
+    auto_engine_tsn: Optional[float] = None
+    auto_engine_tso: Optional[float] = None
+    auto_engine_tbo: Optional[float] = None
+    auto_propeller_run_time: Optional[float] = None
+    auto_propeller_tsn: Optional[float] = None
+    auto_propeller_tso: Optional[float] = None
+    auto_propeller_tbo: Optional[float] = None
+
     component_parts: Optional[List[ComponentPartsRecordCreate]] = None
+
+    @validator("engine_tsn", "propeller_tsn", pre=True)
+    def empty_str_optional_tsn_fields_update(cls, v: Any) -> Any:
+        if v is None:
+            return None
+        if isinstance(v, str) and not str(v).strip():
+            return None
+        return v
 
     @validator("nature_of_flight", pre=True)
     def empty_str_to_none_nature_of_flight_update(cls, v: Any) -> Any:
@@ -476,6 +542,9 @@ class AircraftTechnicalLogUpdate(BaseModel):
         """Accept Zulu time strings (HH:MM or HH:MM:SS) and convert to time."""
         return parse_zulu_time_to_time(v)
 
+    class Config:
+        allow_population_by_field_name = True
+
 
 # ---------- Aircraft Read Schema (for nested display) ----------
 class AircraftRead(BaseModel):
@@ -489,10 +558,15 @@ class AircraftRead(BaseModel):
 
 # ---------- ATL Search response (id for atl_ref, sequence_no + aircraft summary) ----------
 class ATLSearchItem(BaseModel):
-    """Minimal ATL search result for TCC ATL Reference dropdown / Sequence No. type-to-search. id is aircraft_technical_log.id (use as atl_ref). sequence_no is number only."""
+    """ATL sequence search (CPCP/TCC ATL Reference, etc.). id = atl_ref. search_display is CPCP label: sequence_no: TACH: … AFTT: … DATE: …"""
+
     id: int
     sequence_no: str
-    sequence_no_display: Optional[str] = None  # Same as sequence_no for dropdown label (number only)
+    tachometer_end: Optional[float] = None
+    auto_airframe_aftt: Optional[float] = None
+    origin_date: Optional[date] = None
+    search_display: Optional[str] = None
+    sequence_no_display: Optional[str] = None  # Same as sequence_no for legacy dropdown label (number only)
     aircraft: AircraftRead
 
     @validator("sequence_no_display", always=True)
@@ -502,14 +576,47 @@ class ATLSearchItem(BaseModel):
             return ""
         return str(seq).strip()
 
+    @root_validator
+    def set_search_display(cls, values: Any) -> Any:
+        """One-line label for Add/Edit forms (e.g. CPCP ATL Reference)."""
+        if not isinstance(values, dict):
+            return values
+        seq = str(values.get("sequence_no") or "").strip()
+
+        def fmt_num(v: Any) -> str:
+            if v is None:
+                return "—"
+            try:
+                return f"{float(v):.2f}"
+            except (TypeError, ValueError):
+                return "—"
+
+        od = values.get("origin_date")
+        date_s = od.isoformat() if isinstance(od, date) else "—"
+        tach = values.get("tachometer_end")
+        aftt = values.get("auto_airframe_aftt")
+        values["search_display"] = f"{seq}: TACH: {fmt_num(tach)} AFTT: {fmt_num(aftt)} DATE: {date_s}"
+        return values
+
     class Config:
         orm_mode = True
+
+
+class ATLAircraftScopedSearchItem(BaseModel):
+    """GET /api/v1/aircraft/{aircraft_id}/atl/?sequence_number= — sequence row with tach end, computed AFTT (same chain as auto_airframe_aftt / atl/paged), and origin date."""
+
+    id: int
+    sequence_no: str
+    tachometer_end: Optional[float] = None
+    auto_airframe_aftt: Optional[float] = None
+    origin_date: Optional[date] = None
 
 
 # ---------- Aircraft Technical Log Read Schema ----------
 class AircraftTechnicalLogRead(AircraftTechnicalLogBase):
     id: int
     aircraft: Optional[AircraftRead] = None
+    atl_batch: Optional[AtlBatchBrief] = None
     component_parts: List[ComponentPartsRecordRead] = []
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -547,21 +654,9 @@ class ATLPagedItem(AircraftTechnicalLogRead):
         orm_mode = True
 
 
-# ---------- ATL Paged response for /aircraft-technical-log/paged (Read + auto_* computed fields) ----------
+# ---------- ATL Paged response for /aircraft-technical-log/paged (Read + persisted auto_* columns) ----------
 class ATLPagedItemWithAuto(AircraftTechnicalLogRead):
-    """ATL read with auto_* computed fields for v1/aircraft-technical-log/paged. Previous = last ATL by sequence_no (same aircraft)."""
-
-    auto_airframe_run_time: Optional[float] = 0.0
-    auto_airframe_aftt: Optional[float] = 0.0
-    auto_engine_run_time: Optional[float] = 0.0
-    auto_run_time: Optional[float] = 0.0
-    auto_engine_tsn: Optional[float] = 0.0
-    auto_engine_tso: Optional[float] = 0.0
-    auto_engine_tbo: Optional[float] = 0.0
-    auto_propeller_run_time: Optional[float] = 0.0
-    auto_propeller_tsn: Optional[float] = 0.0
-    auto_propeller_tso: Optional[float] = 0.0
-    auto_propeller_tbo: Optional[float] = 0.0
+    """ATL read including auto_* from AircraftTechnicalLog persisted columns (same shape as list paged API)."""
 
     class Config:
         orm_mode = True

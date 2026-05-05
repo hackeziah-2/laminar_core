@@ -1,5 +1,5 @@
 from math import ceil
-from typing import List, Optional
+from typing import Optional, Set
 
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 
@@ -13,8 +13,14 @@ from app.repository.cpcp_monitoring import (
     update_cpcp_monitoring,
     soft_delete_cpcp_monitoring,
 )
-from app.repository.aircraft import get_aircraft
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
+from app.repository.aircraft import get_aircraft
+from app.services.cpcp_computation import (
+    fetch_latest_atl_metrics_by_aircraft_ids,
+    to_cpcp_monitoring_read_sync,
+)
 
 router = APIRouter(
     prefix="/api/v1/cpcp-monitoring",
@@ -48,8 +54,14 @@ async def api_list_paged(
         aircraft_id=aircraft_id,
     )
     pages = ceil(total / limit) if total else 0
+    aircraft_ids: Set[int] = {item.aircraft_id for item in items}
+    metrics = await fetch_latest_atl_metrics_by_aircraft_ids(session, aircraft_ids)
     items_schemas = [
-        cpcp_monitoring_schema.CPCPMonitoringRead.from_orm(item)
+        to_cpcp_monitoring_read_sync(
+            item,
+            tachometer_end=metrics[item.aircraft_id][0],
+            airframe_aftt=metrics[item.aircraft_id][1],
+        )
         for item in items
     ]
     return {
@@ -88,6 +100,7 @@ async def api_get(
 async def api_create(
     payload: cpcp_monitoring_schema.CPCPMonitoringCreate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new CPCP Monitoring entry. aircraft_id is required."""
     aircraft = await get_aircraft(session, payload.aircraft_id)
@@ -96,7 +109,9 @@ async def api_create(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Aircraft not found",
         )
-    return await create_cpcp_monitoring(session, payload)
+    return await create_cpcp_monitoring(
+        session, payload, audit_account_id=current_account.id
+    )
 
 
 @router.put(
@@ -108,6 +123,7 @@ async def api_update(
     entry_id: int,
     payload: cpcp_monitoring_schema.CPCPMonitoringUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update a CPCP Monitoring entry. If aircraft_id is provided, it must exist."""
     if payload.aircraft_id is not None:
@@ -117,7 +133,9 @@ async def api_update(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Aircraft not found",
             )
-    updated = await update_cpcp_monitoring(session, entry_id, payload)
+    updated = await update_cpcp_monitoring(
+        session, entry_id, payload, audit_account_id=current_account.id
+    )
     if not updated:
         raise HTTPException(
             status_code=404,

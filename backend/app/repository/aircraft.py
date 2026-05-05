@@ -1,4 +1,5 @@
 import os
+from typing import List, Optional, Tuple, Union
 
 from sqlalchemy import select, or_, cast, String
 from sqlalchemy.sql import func
@@ -10,7 +11,7 @@ from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 
 ensure_uploads_dir()
 
-from app.models.aircraft import Aircraft
+from app.models.aircraft import Aircraft, StatusEnum
 from app.models.fleet_daily_update import FleetDailyUpdate, FleetDailyUpdateStatusEnum
 from app.models.aircraft_logbook_entries import AircraftLogbookEntry
 from app.models.aircraft_techinical_log import AircraftTechnicalLog
@@ -26,7 +27,43 @@ from app.models.tcc_maintenance import TCCMaintenance
 from app.models.document_on_board import DocumentOnBoard
 from app.models.cpcp_monitoring import CPCPMonitoring
 from app.schemas.aircraft_schema import AircraftCreate, AircraftOut, AircraftUpdate
-from typing import List, Optional, Tuple, Union
+from app.database import set_audit_fields
+
+
+async def _sync_fleet_daily_update_when_aircraft_maintenance(
+    session: AsyncSession,
+    aircraft: Aircraft,
+    *,
+    audit_account_id: Optional[int] = None,
+) -> None:
+    """If aircraft is in Maintenance, align Fleet Daily Update status to Ongoing Maintenance."""
+    st = aircraft.status
+    st_val = st.value if hasattr(st, "value") else str(st)
+    if st_val != StatusEnum.MAINTENANCE.value:
+        return
+    fd_res = await session.execute(
+        select(FleetDailyUpdate).where(
+            FleetDailyUpdate.aircraft_fk == aircraft.id,
+            FleetDailyUpdate.is_deleted == False,
+        )
+    )
+    fd = fd_res.scalar_one_or_none()
+    if not fd:
+        return
+    fd_st = fd.status
+    fd_st_val = fd_st.value if hasattr(fd_st, "value") else str(fd_st)
+    if fd_st_val != FleetDailyUpdateStatusEnum.ONGOING_MAINTENANCE.value:
+        fd.status = FleetDailyUpdateStatusEnum.ONGOING_MAINTENANCE.value
+        if audit_account_id is not None:
+            await set_audit_fields(fd, audit_account_id, is_create=False)
+        session.add(fd)
+
+
+async def _persist_upload_file(upload_file: UploadFile) -> str:
+    file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
+    with open(file_path, "wb") as f:
+        f.write(await upload_file.read())
+    return file_path
 
 def _normalize_status(status: Optional[Union[str, object]]) -> Optional[str]:
     """Return a string status for filtering: 'all', 'active', 'inactive', 'maintenance', or None (treated as all)."""
@@ -141,13 +178,33 @@ async def list_aircraft(
     return items, total_count
 
 
-async def update_aircraft(session: AsyncSession, aircraft_id: int, aircraft_in: AircraftUpdate) -> Optional[Aircraft]:
+async def list_aircraft_minimal(session: AsyncSession) -> List[Aircraft]:
+    result = await session.execute(
+        select(Aircraft)
+        .where(Aircraft.is_deleted == False)
+        .order_by(Aircraft.registration.asc())
+    )
+    return result.scalars().all()
+
+
+async def update_aircraft(
+    session: AsyncSession,
+    aircraft_id: int,
+    aircraft_in: AircraftUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
+) -> Optional[Aircraft]:
     obj = await session.get(Aircraft, aircraft_id)
     if not obj:
         return None
     for k, v in aircraft_in.dict(exclude_unset=True).items():
         setattr(obj, k, v)
+    await _sync_fleet_daily_update_when_aircraft_maintenance(
+        session, obj, audit_account_id=audit_account_id
+    )
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     return obj
@@ -157,18 +214,16 @@ async def create_aircraft_with_file(
     data: AircraftCreate,
     engine_file: UploadFile = None,
     propeller_file: UploadFile = None,
+    *,
+    audit_account_id: Optional[int] = None,
 ):  
     engine_path = None
     if engine_file:
-        engine_path = os.path.join(str(UPLOAD_DIR), engine_file.filename)
-        with open(engine_path, "wb") as f:
-            f.write(await engine_file.read())
+        engine_path = await _persist_upload_file(engine_file)
 
     propeller_path = None
     if propeller_file:
-        propeller_path = os.path.join(str(UPLOAD_DIR), propeller_file.filename)
-        with open(propeller_path, "wb") as f:
-            f.write(await propeller_file.read())
+        propeller_path = await _persist_upload_file(propeller_file)
 
     aircraft_data = data.dict()
 
@@ -208,9 +263,13 @@ async def create_aircraft_with_file(
     # One-to-one: each aircraft has exactly one FleetDailyUpdate
     fleet_daily_update = FleetDailyUpdate(
         aircraft_fk=aircraft.id,
-        status=FleetDailyUpdateStatusEnum.RUNNING.value,
+        status=FleetDailyUpdateStatusEnum.OP.value,
     )
     session.add(fleet_daily_update)
+
+    if audit_account_id is not None:
+        await set_audit_fields(aircraft, audit_account_id, is_create=True)
+        await set_audit_fields(fleet_daily_update, audit_account_id, is_create=True)
 
     await session.commit()
     await session.refresh(aircraft)
@@ -222,6 +281,8 @@ async def update_aircraft_with_file(
     data: AircraftUpdate,
     engine_file: UploadFile = None,
     propeller_file: UploadFile = None,
+    *,
+    audit_account_id: Optional[int] = None,
 ):
     result = await session.execute(
         select(Aircraft).where(Aircraft.id == aircraft_id)
@@ -235,17 +296,11 @@ async def update_aircraft_with_file(
 
     # --- Handle engine file ---
     if engine_file:
-        engine_path = os.path.join(str(UPLOAD_DIR), engine_file.filename)
-        with open(engine_path, "wb") as f:
-            f.write(await engine_file.read())
-        update_data["engine_arc"] = engine_path
+        update_data["engine_arc"] = await _persist_upload_file(engine_file)
 
     # --- Handle propeller file ---
     if propeller_file:
-        propeller_path = os.path.join(str(UPLOAD_DIR), propeller_file.filename)
-        with open(propeller_path, "wb") as f:
-            f.write(await propeller_file.read())
-        update_data["propeller_arc"] = propeller_path
+        update_data["propeller_arc"] = await _persist_upload_file(propeller_file)
 
     # --- Uniqueness checks (exclude current aircraft) ---
     if "registration" in update_data:
@@ -271,7 +326,11 @@ async def update_aircraft_with_file(
     # --- Apply updates ---
     for key, value in update_data.items():
         setattr(aircraft, key, value)
-    print("newsss")
+    await _sync_fleet_daily_update_when_aircraft_maintenance(
+        session, aircraft, audit_account_id=audit_account_id
+    )
+    if audit_account_id is not None:
+        await set_audit_fields(aircraft, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(aircraft)
 

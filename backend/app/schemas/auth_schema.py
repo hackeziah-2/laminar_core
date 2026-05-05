@@ -1,7 +1,6 @@
 """Schemas for authentication API."""
-from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class Token(BaseModel):
@@ -23,16 +22,9 @@ class LoginResponse(BaseModel):
 
 class AccountMe(BaseModel):
     """Current account info (for /me endpoint)."""
-    id: int
-    username: str
-    email: Optional[str] = None
-    first_name: str
-    last_name: str
-    middle_name: Optional[str] = None
-    role_id: Optional[int] = None
-    status: bool
-    last_login: Optional[datetime] = None
-    created_at: Optional[datetime] = None
 
-    class Config:
-        orm_mode = True
+    full_name: str
+    role: Optional[str] = None
+    designation: Optional[str] = None
+    email: Optional[str] = None
+    username: str

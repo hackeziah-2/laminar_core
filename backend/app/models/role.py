@@ -1,9 +1,9 @@
 from sqlalchemy import Column, Integer, String, Text
 from sqlalchemy.orm import relationship
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
-class Role(Base, TimestampMixin, SoftDeleteMixin):
+class Role(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "roles"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -12,7 +12,8 @@ class Role(Base, TimestampMixin, SoftDeleteMixin):
 
     account_informations = relationship(
         "AccountInformation",
-        back_populates="role"
+        foreign_keys="[AccountInformation.role_id]",
+        back_populates="role",
     )
     permissions = relationship(
         "RolePermission",

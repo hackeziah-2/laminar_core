@@ -4,7 +4,8 @@ from sqlalchemy import select, func, func, case, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.aircraft import Aircraft
+from app.database import set_audit_fields
+from app.models.aircraft import Aircraft, StatusEnum
 from app.models.fleet_daily_update import FleetDailyUpdate, FleetDailyUpdateStatusEnum
 from app.schemas.fleet_daily_update_schema import (
     FleetDailyUpdateCreate,
@@ -26,10 +27,12 @@ def _status_from_str(value: Optional[str]) -> Optional[str]:
 async def create_fleet_daily_update(
     session: AsyncSession,
     data: FleetDailyUpdateCreate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> FleetDailyUpdate:
     """Create a new Fleet Daily Update entry. aircraft_fk must be unique (one-to-one). Returns ORM."""
     payload = data.dict(exclude_unset=True)
-    status_val = _status_from_str(payload.get("status")) or FleetDailyUpdateStatusEnum.RUNNING.value
+    status_val = _status_from_str(payload.get("status")) or FleetDailyUpdateStatusEnum.OP.value
     payload["status"] = status_val
 
     # Enforce one-to-one: one record per aircraft
@@ -47,6 +50,20 @@ async def create_fleet_daily_update(
 
     obj = FleetDailyUpdate(**payload)
     session.add(obj)
+    if payload["status"] == FleetDailyUpdateStatusEnum.ONGOING_MAINTENANCE.value:
+        ac_res = await session.execute(
+            select(Aircraft)
+            .where(Aircraft.id == payload["aircraft_fk"])
+            .where(Aircraft.is_deleted == False)
+        )
+        ac = ac_res.scalar_one_or_none()
+        if ac:
+            ac.status = StatusEnum.MAINTENANCE
+            if audit_account_id is not None:
+                await set_audit_fields(ac, audit_account_id, is_create=False)
+            session.add(ac)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=True)
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["aircraft"])
@@ -122,6 +139,7 @@ async def list_fleet_daily_updates(
     sortable_fields = {
         "id": FleetDailyUpdate.id,
         "aircraft_fk": FleetDailyUpdate.aircraft_fk,
+        "registration": Aircraft.registration,
         "status": FleetDailyUpdate.status,
         "created_at": FleetDailyUpdate.created_at,
         "updated_at": FleetDailyUpdate.updated_at,
@@ -149,6 +167,8 @@ async def update_fleet_daily_update(
     session: AsyncSession,
     update_id: int,
     data: FleetDailyUpdateUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[FleetDailyUpdate]:
     """Update a Fleet Daily Update entry. Returns ORM with aircraft loaded."""
     result = await session.execute(
@@ -170,7 +190,23 @@ async def update_fleet_daily_update(
         if hasattr(obj, k):
             setattr(obj, k, v)
 
+    if (
+        obj.aircraft
+        and obj.status == FleetDailyUpdateStatusEnum.ONGOING_MAINTENANCE.value
+    ):
+        ac_status = obj.aircraft.status
+        ac_status_val = (
+            ac_status.value if hasattr(ac_status, "value") else str(ac_status)
+        )
+        if ac_status_val != StatusEnum.MAINTENANCE.value:
+            obj.aircraft.status = StatusEnum.MAINTENANCE
+            if audit_account_id is not None:
+                await set_audit_fields(obj.aircraft, audit_account_id, is_create=False)
+            session.add(obj.aircraft)
+
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["aircraft"])
@@ -204,7 +240,7 @@ async def get_dashboard_counts(session: AsyncSession) -> dict:
 
             func.sum(
                 case(
-                    (FleetDailyUpdate.status == FleetDailyUpdateStatusEnum.RUNNING.value, 1),
+                    (FleetDailyUpdate.status == FleetDailyUpdateStatusEnum.OP.value, 1),
                     else_=0,
                 )
             ).label("total_aircraft_running"),

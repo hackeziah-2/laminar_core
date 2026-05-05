@@ -16,10 +16,15 @@ from app.repository.fleet_daily_update import (
     soft_delete_fleet_daily_update_by_aircraft,
 )
 from app.repository.aircraft import get_aircraft
-from app.repository.ldnd_monitoring import get_ldnd_latest_by_aircraft
+from app.repository.ldnd_monitoring import (
+    get_ldnd_latest_by_aircraft,
+    get_ldnd_latest_unfilled_by_aircraft,
+)
 from app.repository.aircraft_technical_log import get_latest_aircraft_technical_log
 from app.repository.tcc_maintenance import get_latest_tcc_by_aircraft_and_description
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
 
 router = APIRouter(
     prefix="/api/v1/fleet-daily-update",
@@ -35,13 +40,13 @@ router_aircraft_scoped = APIRouter(
 def _fleet_daily_update_item_with_aircraft(orm):
     """Build list item dict with aircraft: { id, registration }."""
     read = fleet_daily_update_schema.FleetDailyUpdateRead.from_orm(orm)
-    d = read.dict()
-    d["aircraft"] = (
+    data_item = read.dict()
+    data_item["aircraft"] = (
         {"id": orm.aircraft.id, "registration": orm.aircraft.registration}
         if orm.aircraft is not None
         else None
     )
-    return d
+    return data_item
 
 
 def _remaining_or_zero(value: Optional[float]) -> float:
@@ -55,17 +60,19 @@ def _round1(value: Optional[float]) -> Optional[float]:
 
 
 async def _enrich_item_with_ldnd(session, orm_item):
-    """Build list item with next_insp_due, tach_time_due from LDND latest, tach_time_eod from latest ATL,
+    """Build list item with next_insp_due / next_insp_due_unit from latest unfilled LDND row,
+    tach_time_due from LDND latest, tach_time_eod from latest ATL,
     and remaining_time_before_next_isp / remaining_time_before_engine / remaining_time_before_propeller."""
     base = _fleet_daily_update_item_with_aircraft(orm_item)
     aircraft_id = orm_item.aircraft_fk
+    ldnd_unfilled = await get_ldnd_latest_unfilled_by_aircraft(session, aircraft_id)
+    insp = ldnd_unfilled.inspection_type or ""
+    base["next_insp_due"] = (
+        insp if insp else "LDND IS NOT YET SET-UP"
+    )
+    unit = ldnd_unfilled.unit or ""
+    base["next_insp_due_unit"] = unit if unit else ""
     ldnd = await get_ldnd_latest_by_aircraft(session, aircraft_id)
-    # next_insp_due: from next_inspection_due + next_inspection_unit (e.g. "100 HRS")
-    if ldnd and ldnd.next_inspection_due is not None:
-        unit = ldnd.next_inspection_unit or ldnd.unit or "HRS"
-        base["next_insp_due"] = f"{ldnd.next_inspection_due} {unit}"
-    else:
-        base["next_insp_due"] = None
     # tach_time_due: from next_due_tach_hours (latest record), rounded to one decimal
     raw_tach_due = ldnd.next_due_tach_hours if ldnd else None
     base["tach_time_due"] = _round1(raw_tach_due)
@@ -117,18 +124,20 @@ async def api_list_fleet_daily_updates_paged(
     ),
     status: Optional[str] = Query(
         None,
-        description="Filter by status: Running, Ongoing Maintenance, AOG",
+        description="Filter by status: Operational, Ongoing Maintenance, AOG",
     ),
     aircraft_fk: Optional[int] = Query(None, description="Filter by aircraft ID"),
     sort: Optional[str] = Query(
         "",
-        description="Sort fields (comma-separated). Prefix '-' for descending. E.g. -created_at,status",
+        description="Sort fields (comma-separated). Prefix '-' for descending. E.g. registration, -created_at, status",
     ),
     session: AsyncSession = Depends(get_session),
 ):
     """Get paginated list of Fleet Daily Update entries. Search by aircraft registration; filter by status.
-    Each item includes next_insp_due and tach_time_due from api/v1/aircraft/{id}/ldnd-monitoring/latest,
-    and tach_time_eod from api/v1/aircraft-technical-log/latest?aircraft_fk={id} (tachometer_end)."""
+    Each item includes next_insp_due and next_insp_due_unit from the latest unfilled LDND row
+    (api/v1/aircraft/{id}/ldnd-monitoring/inspection_type/latest semantics), tach_time_due from
+    api/v1/aircraft/{id}/ldnd-monitoring/latest, and tach_time_eod from api/v1/aircraft-technical-log/latest
+    (tachometer_end)."""
     offset = (page - 1) * limit
     items, total = await list_fleet_daily_updates(
         session=session,
@@ -175,8 +184,11 @@ async def api_get_fleet_daily_update(
 async def api_create_fleet_daily_update(
     payload: fleet_daily_update_schema.FleetDailyUpdateCreate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
-    obj = await create_fleet_daily_update(session, payload)
+    obj = await create_fleet_daily_update(
+        session, payload, audit_account_id=current_account.id
+    )
     return _fleet_daily_update_item_with_aircraft(obj)
 
 
@@ -189,9 +201,12 @@ async def api_update_fleet_daily_update(
     update_id: int,
     payload: fleet_daily_update_schema.FleetDailyUpdateUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update any field; send only status and/or remarks to update just those."""
-    obj = await update_fleet_daily_update(session, update_id, payload)
+    obj = await update_fleet_daily_update(
+        session, update_id, payload, audit_account_id=current_account.id
+    )
     if not obj:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found")
     return _fleet_daily_update_item_with_aircraft(obj)
@@ -206,9 +221,12 @@ async def api_patch_fleet_daily_update(
     update_id: int,
     payload: fleet_daily_update_schema.FleetDailyUpdateUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Partial update: only provided fields are updated (e.g. status, remarks)."""
-    obj = await update_fleet_daily_update(session, update_id, payload)
+    obj = await update_fleet_daily_update(
+        session, update_id, payload, audit_account_id=current_account.id
+    )
     if not obj:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found")
     return _fleet_daily_update_item_with_aircraft(obj)
@@ -259,6 +277,7 @@ async def api_update_fleet_daily_update_by_aircraft_only(
     aircraft_id: int,
     payload: fleet_daily_update_schema.FleetDailyUpdateUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update status, remarks, etc. for the fleet daily update of this aircraft."""
     aircraft = await get_aircraft(session, aircraft_id)
@@ -267,7 +286,9 @@ async def api_update_fleet_daily_update_by_aircraft_only(
     record = await get_fleet_daily_update_by_aircraft(session, aircraft_id)
     if not record:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found for this aircraft")
-    obj = await update_fleet_daily_update(session, record.id, payload)
+    obj = await update_fleet_daily_update(
+        session, record.id, payload, audit_account_id=current_account.id
+    )
     if not obj:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found")
     return _fleet_daily_update_item_with_aircraft(obj)
@@ -282,6 +303,7 @@ async def api_patch_fleet_daily_update_by_aircraft(
     aircraft_id: int,
     payload: fleet_daily_update_schema.FleetDailyUpdateUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Partial update: only send status and/or remarks to update those."""
     aircraft = await get_aircraft(session, aircraft_id)
@@ -290,7 +312,9 @@ async def api_patch_fleet_daily_update_by_aircraft(
     record = await get_fleet_daily_update_by_aircraft(session, aircraft_id)
     if not record:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found for this aircraft")
-    obj = await update_fleet_daily_update(session, record.id, payload)
+    obj = await update_fleet_daily_update(
+        session, record.id, payload, audit_account_id=current_account.id
+    )
     if not obj:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found")
     return _fleet_daily_update_item_with_aircraft(obj)
@@ -299,7 +323,7 @@ async def api_patch_fleet_daily_update_by_aircraft(
 @router_aircraft_scoped.get(
     "/{aircraft_id}/fleet-daily-update/paged",
     summary="List Fleet Daily Update for aircraft (paginated; at most one)",
-    description="Paginated list filtered by aircraft_id. For one-to-one use GET .../fleet-daily-update to get the single record.",
+    description="Paginated list filtered by aircraft_id. Items use the same LDND enrichment as GET /fleet-daily-update/paged (next_insp_due, next_insp_due_unit, tach fields). For one-to-one use GET .../fleet-daily-update to get the single record.",
 )
 async def api_list_fleet_daily_updates_by_aircraft_paged(
     aircraft_id: int,
@@ -311,9 +335,12 @@ async def api_list_fleet_daily_updates_by_aircraft_paged(
     ),
     status: Optional[str] = Query(
         None,
-        description="Filter by status: Running, Ongoing Maintenance, AOG",
+        description="Filter by status: Operational, Ongoing Maintenance, AOG",
     ),
-    sort: Optional[str] = Query(""),
+    sort: Optional[str] = Query(
+        "",
+        description="Sort fields (comma-separated). Prefix '-' for descending. E.g. registration, -created_at",
+    ),
     session: AsyncSession = Depends(get_session),
 ):
     aircraft = await get_aircraft(session, aircraft_id)
@@ -351,6 +378,7 @@ async def api_create_fleet_daily_update_by_aircraft(
     aircraft_id: int,
     payload: fleet_daily_update_schema.FleetDailyUpdateCreate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     aircraft = await get_aircraft(session, aircraft_id)
     if not aircraft:
@@ -358,7 +386,9 @@ async def api_create_fleet_daily_update_by_aircraft(
     data = payload.dict(exclude_unset=True)
     data["aircraft_fk"] = aircraft_id
     create_payload = fleet_daily_update_schema.FleetDailyUpdateCreate(**data)
-    obj = await create_fleet_daily_update(session, create_payload)
+    obj = await create_fleet_daily_update(
+        session, create_payload, audit_account_id=current_account.id
+    )
     return _fleet_daily_update_item_with_aircraft(obj)
 
 
@@ -372,12 +402,15 @@ async def api_update_fleet_daily_update_by_aircraft(
     update_id: int,
     payload: fleet_daily_update_schema.FleetDailyUpdateUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update by explicit update_id; path must match the record’s aircraft. Prefer PUT /{aircraft_id}/fleet-daily-update when you only have aircraft_id."""
     existing = await get_fleet_daily_update_by_aircraft(session, aircraft_id)
     if not existing or existing.id != update_id:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found")
-    obj = await update_fleet_daily_update(session, update_id, payload)
+    obj = await update_fleet_daily_update(
+        session, update_id, payload, audit_account_id=current_account.id
+    )
     if not obj:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found")
     return _fleet_daily_update_item_with_aircraft(obj)

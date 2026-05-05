@@ -1,10 +1,13 @@
 from datetime import datetime, timezone
+import secrets
+import string
 from typing import Optional, List, Tuple
 
 from fastapi import HTTPException
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import set_audit_fields
 from app.models.account import AccountInformation
 from app.models.role import Role
 from app.schemas.account_schema import (
@@ -17,7 +20,10 @@ from app.core.security import get_password_hash
 
 async def create_account_information(
     session: AsyncSession,
-    data: AccountInformationCreate
+    data: AccountInformationCreate,
+    *,
+    audit_account_id: Optional[int] = None,
+    commit: bool = True,
 ) -> AccountInformationRead:
     """Create a new Account Information entry."""
     # Check for duplicate username (excluding soft-deleted)
@@ -78,7 +84,13 @@ async def create_account_information(
     try:
         account = AccountInformation(**account_data)
         session.add(account)
-        await session.commit()
+        if audit_account_id is not None:
+            await set_audit_fields(account, audit_account_id, is_create=True)
+        else:
+            await session.flush()
+            await set_audit_fields(account, account.id, is_create=True)
+        if commit:
+            await session.commit()
         await session.refresh(account)
     except Exception as e:
         await session.rollback()
@@ -105,10 +117,42 @@ async def get_account_information(
     return AccountInformationRead.from_orm(obj)
 
 
+def _escape_like(value: str) -> str:
+    """Escape % and _ for use in LIKE patterns."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+async def get_account_information_by_auth_stamp(
+    session: AsyncSession,
+    search: str,
+    limit: int = 10,
+) -> List[AccountInformation]:
+    """Match auth_stamp, first_name, or last_name (excludes soft-deleted). Case-insensitive partial LIKE; e.g. '001' matches 'AUTH-KPL-001', 'john' matches first name."""
+    if not search or not search.strip():
+        return []
+    raw = search.strip().lower()
+    pattern = f"%{_escape_like(raw)}%"
+    result = await session.execute(
+        select(AccountInformation)
+        .where(
+            or_(
+                func.lower(AccountInformation.auth_stamp).like(pattern, escape="\\"),
+                func.lower(AccountInformation.first_name).like(pattern, escape="\\"),
+                func.lower(AccountInformation.last_name).like(pattern, escape="\\"),
+            )
+        )
+        .where(AccountInformation.is_deleted == False)
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
 async def update_account_information(
     session: AsyncSession,
     account_id: int,
-    account_in: AccountInformationUpdate
+    account_in: AccountInformationUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[AccountInformationRead]:
     """Update an Account Information entry."""
     obj = await session.get(AccountInformation, account_id)
@@ -175,6 +219,8 @@ async def update_account_information(
 
     try:
         session.add(obj)
+        if audit_account_id is not None:
+            await set_audit_fields(obj, audit_account_id, is_create=False)
         await session.commit()
         await session.refresh(obj)
     except Exception as e:
@@ -187,11 +233,61 @@ async def update_account_information(
     return AccountInformationRead.from_orm(obj)
 
 
+def _generate_temporary_password(length: int = 12) -> str:
+    """Generate a readable temporary password with mixed character classes."""
+    if length < 8:
+        length = 8
+    alphabet = string.ascii_letters + string.digits
+    specials = "!@#$%^&*"
+    password_chars = [
+        secrets.choice(string.ascii_lowercase),
+        secrets.choice(string.ascii_uppercase),
+        secrets.choice(string.digits),
+        secrets.choice(specials),
+    ]
+    password_chars.extend(
+        secrets.choice(alphabet + specials) for _ in range(length - len(password_chars))
+    )
+    secrets.SystemRandom().shuffle(password_chars)
+    return "".join(password_chars)
+
+
+async def reset_account_password(
+    session: AsyncSession,
+    account_id: int,
+    *,
+    audit_account_id: Optional[int] = None,
+) -> Tuple[AccountInformation, str]:
+    """Generate and persist a new temporary password for an account."""
+    obj = await session.get(AccountInformation, account_id)
+    if not obj or obj.is_deleted:
+        raise HTTPException(status_code=404, detail="Account Information not found")
+
+    new_password = _generate_temporary_password()
+    obj.password = get_password_hash(new_password)
+
+    try:
+        session.add(obj)
+        if audit_account_id is not None:
+            await set_audit_fields(obj, audit_account_id, is_create=False)
+        await session.commit()
+        await session.refresh(obj)
+    except Exception as e:
+        await session.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to reset account password: {str(e)}"
+        )
+
+    return obj, new_password
+
+
 async def list_account_informations(
     session: AsyncSession,
     limit: int = 0,
     offset: int = 0,
     search: Optional[str] = None,
+    roles: Optional[List[str]] = None,
     sort: Optional[str] = "",
 ) -> Tuple[List[AccountInformation], int]:
     """List Account Information entries with pagination."""
@@ -199,11 +295,41 @@ async def list_account_informations(
         select(AccountInformation)
         .where(AccountInformation.is_deleted == False)
     )
+    count_stmt = (
+        select(func.count())
+        .select_from(AccountInformation)
+        .where(AccountInformation.is_deleted == False)
+    )
+
+    role_values = [role.strip() for role in (roles or []) if role and role.strip()]
+    if role_values:
+        role_filter = or_(*[Role.name.ilike(f"%{role}%") for role in role_values])
+        stmt = stmt.join(Role, AccountInformation.role_id == Role.id).where(
+            Role.is_deleted == False,
+            role_filter,
+        )
+        count_stmt = count_stmt.join(
+            Role, AccountInformation.role_id == Role.id
+        ).where(
+            Role.is_deleted == False,
+            role_filter,
+        )
 
     # Search functionality
     if search:
         q = f"%{search}%"
         stmt = stmt.where(
+            or_(
+                AccountInformation.username.ilike(q),
+                AccountInformation.email.ilike(q),
+                AccountInformation.first_name.ilike(q),
+                AccountInformation.last_name.ilike(q),
+                AccountInformation.middle_name.ilike(q),
+                AccountInformation.designation.ilike(q),
+                AccountInformation.license_no.ilike(q),
+            )
+        )
+        count_stmt = count_stmt.where(
             or_(
                 AccountInformation.username.ilike(q),
                 AccountInformation.email.ilike(q),
@@ -224,6 +350,7 @@ async def list_account_informations(
         "last_name": AccountInformation.last_name,
         "status": AccountInformation.status,
         "last_login": AccountInformation.last_login,
+        "auth_initial_doi": AccountInformation.auth_initial_doi,
         "created_at": AccountInformation.created_at,
         "updated_at": AccountInformation.updated_at,
     }
@@ -245,27 +372,6 @@ async def list_account_informations(
         # Default ordering
         stmt = stmt.order_by(AccountInformation.created_at.desc())
 
-    # Total count query (same filters, no ORDER BY)
-    count_stmt = (
-        select(func.count())
-        .select_from(AccountInformation)
-        .where(AccountInformation.is_deleted == False)
-    )
-
-    if search:
-        q = f"%{search}%"
-        count_stmt = count_stmt.where(
-            or_(
-                AccountInformation.username.ilike(q),
-                AccountInformation.email.ilike(q),
-                AccountInformation.first_name.ilike(q),
-                AccountInformation.last_name.ilike(q),
-                AccountInformation.middle_name.ilike(q),
-                AccountInformation.designation.ilike(q),
-                AccountInformation.license_no.ilike(q),
-            )
-        )
-
     total = (await session.execute(count_stmt)).scalar()
 
     # Pagination
@@ -280,21 +386,29 @@ async def list_account_informations(
 async def get_all_account_informations_list(
     session: AsyncSession,
     designation: Optional[List[str]] = None,
-    search: Optional[str] = None
+    role: Optional[List[str]] = None,
+    search: Optional[str] = None,
 ) -> List[AccountInformation]:
     """Get all Account Information entries (for list endpoint - no pagination)."""
     stmt = (
         select(AccountInformation)
         .where(AccountInformation.is_deleted == False)
     )
-    
+
+    role_values = [r for r in (role or []) if r]
+    if role_values:
+        stmt = stmt.join(Role, AccountInformation.role_id == Role.id).where(
+            Role.is_deleted == False,
+            or_(*[Role.name.ilike(f"%{name}%") for name in role_values]),
+        )
+
     # Filter by designation(s) if provided - match ANY of the provided designations (OR logic)
     if designation:
         designation_filters = []
         for desig in designation:
             if desig:  # Skip empty strings
                 designation_filters.append(AccountInformation.designation.ilike(f"%{desig}%"))
-        
+
         if designation_filters:
             # Use OR to match any of the designations
             stmt = stmt.where(or_(*designation_filters))

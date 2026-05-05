@@ -42,7 +42,9 @@ from app.repository.logbooks import (
     update_propeller_logbook,
     soft_delete_propeller_logbook,
 )
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
 
 router = APIRouter(
     prefix="/api/v1/logbooks",
@@ -61,6 +63,30 @@ def clean_parsed_data(parsed: dict) -> dict:
     return cleaned
 
 
+def _normalize_component_part_item(item):
+    """Normalize a single nested component part payload."""
+    if not isinstance(item, dict):
+        return item
+
+    normalized = dict(item)
+    nested_aliases = {
+        "removedPartNo": "removed_part_no",
+        "removedSerialNo": "removed_serial_no",
+        "installedPartNo": "installed_part_no",
+        "installedSerialNo": "installed_serial_no",
+        "ataChapter": "ata_chapter",
+    }
+
+    for alias, field_name in nested_aliases.items():
+        if alias in normalized and field_name not in normalized:
+            normalized[field_name] = normalized.pop(alias)
+
+    if normalized.get("id") == "":
+        normalized["id"] = None
+
+    return clean_parsed_data(normalized)
+
+
 def normalize_logbook_payload(parsed: dict) -> dict:
     """Parse component_parts if JSON string; support componentParts (camelCase)."""
     out = dict(parsed)
@@ -76,6 +102,12 @@ def normalize_logbook_payload(parsed: dict) -> dict:
             pass
     elif isinstance(cp, str) and not cp.strip():
         out["component_parts"] = []
+
+    if isinstance(out.get("component_parts"), list):
+        out["component_parts"] = [
+            _normalize_component_part_item(item)
+            for item in out["component_parts"]
+        ]
     return out
 
 
@@ -167,7 +199,8 @@ async def api_get_engine_logbook(
 async def api_create_engine_logbook(
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new Engine Logbook entry."""
     try:
@@ -178,7 +211,12 @@ async def api_create_engine_logbook(
         raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
-    return await create_engine_logbook(session, payload, upload_file)
+    return await create_engine_logbook(
+        session,
+        payload,
+        upload_file,
+        audit_account_id=current_account.id,
+    )
 
 
 @router.put(
@@ -194,6 +232,7 @@ async def api_update_engine_logbook(
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update an Engine Logbook entry."""
     try:
@@ -210,6 +249,7 @@ async def api_update_engine_logbook(
         logbook_id=logbook_id,
         logbook_in=logbook_in,
         upload_file=upload_file,
+        audit_account_id=current_account.id,
     )
 
     if not updated:
@@ -309,7 +349,8 @@ async def api_get_airframe_logbook(
 async def api_create_airframe_logbook(
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new Airframe Logbook entry."""
     try:
@@ -320,7 +361,12 @@ async def api_create_airframe_logbook(
         raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
-    return await create_airframe_logbook(session, payload, upload_file)
+    return await create_airframe_logbook(
+        session,
+        payload,
+        upload_file,
+        audit_account_id=current_account.id,
+    )
 
 
 @router.put(
@@ -332,6 +378,7 @@ async def api_update_airframe_logbook(
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update an Airframe Logbook entry."""
     try:
@@ -348,6 +395,7 @@ async def api_update_airframe_logbook(
         logbook_id=logbook_id,
         logbook_in=logbook_in,
         upload_file=upload_file,
+        audit_account_id=current_account.id,
     )
 
     if not updated:
@@ -442,7 +490,8 @@ async def api_get_avionics_logbook(
 async def api_create_avionics_logbook(
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new Avionics Logbook entry."""
     try:
@@ -453,7 +502,12 @@ async def api_create_avionics_logbook(
         raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
-    return await create_avionics_logbook(session, payload, upload_file)
+    return await create_avionics_logbook(
+        session,
+        payload,
+        upload_file,
+        audit_account_id=current_account.id,
+    )
 
 
 @router.put(
@@ -465,6 +519,7 @@ async def api_update_avionics_logbook(
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update an Avionics Logbook entry."""
     try:
@@ -481,6 +536,7 @@ async def api_update_avionics_logbook(
         logbook_id=logbook_id,
         logbook_in=logbook_in,
         upload_file=upload_file,
+        audit_account_id=current_account.id,
     )
 
     if not updated:
@@ -572,7 +628,8 @@ async def api_get_propeller_logbook(
 async def api_create_propeller_logbook(
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new Propeller Logbook entry."""
     try:
@@ -582,7 +639,12 @@ async def api_create_propeller_logbook(
         raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
-    return await create_propeller_logbook(session, payload, upload_file)
+    return await create_propeller_logbook(
+        session,
+        payload,
+        upload_file,
+        audit_account_id=current_account.id,
+    )
 
 
 @router.put(
@@ -594,6 +656,7 @@ async def api_update_propeller_logbook(
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update a Propeller Logbook entry."""
     try:
@@ -609,6 +672,7 @@ async def api_update_propeller_logbook(
         logbook_id=logbook_id,
         logbook_in=logbook_in,
         upload_file=upload_file,
+        audit_account_id=current_account.id,
     )
 
     if not updated:
@@ -637,5 +701,4 @@ async def api_delete_propeller_logbook(
             detail="Propeller Logbook not found",
         )
     return None
-
 

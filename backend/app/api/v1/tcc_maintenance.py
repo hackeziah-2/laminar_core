@@ -11,12 +11,16 @@ from app.repository.tcc_maintenance import (
     get_tcc_maintenance,
     get_tcc_maintenance_by_aircraft,
     list_tcc_maintenances,
+    tcc_maintenance_to_read,
     update_tcc_maintenance,
     soft_delete_tcc_maintenance,
     soft_delete_tcc_maintenance_by_aircraft,
 )
 from app.repository.aircraft import get_aircraft
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
+from app.services.tcc_computation import fetch_latest_atl_tach_aftt
 
 router = APIRouter(
     prefix="/api/v1/tcc-maintenance",
@@ -30,7 +34,10 @@ router_aircraft_scoped = APIRouter(
 )
 
 
-@router.get("/paged")
+@router.get(
+    "/paged",
+    response_model=tcc_maintenance_schema.TCCMaintenancePagedResponse,
+)
 async def api_list_tcc_maintenances_paged(
     limit: int = Query(10, ge=1, le=100, description="Number of items per page"),
     page: int = Query(1, ge=1, description="Page number (1-indexed)"),
@@ -58,15 +65,14 @@ async def api_list_tcc_maintenances_paged(
     )
     pages = ceil(total / limit) if total else 0
     items_schemas = [
-        tcc_maintenance_schema.TCCMaintenanceRead.from_orm(item)
-        for item in items
+        await tcc_maintenance_to_read(session, item) for item in items
     ]
-    return {
-        "items": items_schemas,
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+    return tcc_maintenance_schema.TCCMaintenancePagedResponse(
+        items=items_schemas,
+        total=total,
+        page=page,
+        pages=pages,
+    )
 
 
 @router.get(
@@ -99,9 +105,12 @@ async def api_get_tcc_maintenance(
 async def api_create_tcc_maintenance(
     payload: tcc_maintenance_schema.TCCMaintenanceCreate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new TCC Maintenance entry."""
-    return await create_tcc_maintenance(session, payload)
+    return await create_tcc_maintenance(
+        session, payload, audit_account_id=current_account.id
+    )
 
 
 @router.put(
@@ -114,9 +123,15 @@ async def api_update_tcc_maintenance(
     maintenance_id: int,
     payload: tcc_maintenance_schema.TCCMaintenanceUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update a TCC Maintenance entry."""
-    updated = await update_tcc_maintenance(session, maintenance_id, payload)
+    updated = await update_tcc_maintenance(
+        session,
+        maintenance_id,
+        payload,
+        audit_account_id=current_account.id,
+    )
     if not updated:
         raise HTTPException(
             status_code=404,
@@ -149,6 +164,7 @@ async def api_delete_tcc_maintenance(
 
 @router_aircraft_scoped.get(
     "/{aircraft_id}/tcc-maintenance/paged",
+    response_model=tcc_maintenance_schema.TCCMaintenancePagedResponse,
     summary="List TCC Maintenance for aircraft (paginated)",
     description="Get paginated list of TCC Maintenance entries for a specific aircraft. aircraft_id is required.",
 )
@@ -178,16 +194,21 @@ async def api_list_tcc_maintenances_by_aircraft_paged(
         sort=sort or "",
     )
     pages = ceil(total / limit) if total else 0
+    prefetched_tach_aftt = await fetch_latest_atl_tach_aftt(session, aircraft_id)
     items_schemas = [
-        tcc_maintenance_schema.TCCMaintenanceRead.from_orm(item)
+        await tcc_maintenance_to_read(
+            session,
+            item,
+            prefetched_latest_atl_tach_aftt=prefetched_tach_aftt,
+        )
         for item in items
     ]
-    return {
-        "items": items_schemas,
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+    return tcc_maintenance_schema.TCCMaintenancePagedResponse(
+        items=items_schemas,
+        total=total,
+        page=page,
+        pages=pages,
+    )
 
 
 @router_aircraft_scoped.get(
@@ -219,6 +240,7 @@ async def api_create_tcc_maintenance_by_aircraft(
     aircraft_id: int,
     payload: tcc_maintenance_schema.TCCMaintenanceCreate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new TCC Maintenance entry for a specific aircraft."""
     aircraft = await get_aircraft(session, aircraft_id)
@@ -228,7 +250,9 @@ async def api_create_tcc_maintenance_by_aircraft(
     data = payload.dict()
     data["aircraft_fk"] = aircraft_id
     create_payload = tcc_maintenance_schema.TCCMaintenanceCreate(**data)
-    return await create_tcc_maintenance(session, create_payload)
+    return await create_tcc_maintenance(
+        session, create_payload, audit_account_id=current_account.id
+    )
 
 
 @router_aircraft_scoped.put(
@@ -242,12 +266,18 @@ async def api_update_tcc_maintenance_by_aircraft(
     maintenance_id: int,
     payload: tcc_maintenance_schema.TCCMaintenanceUpdate,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update a TCC Maintenance entry for a specific aircraft. ATL Reference: use /api/v1/aircraft-technical-log/search?search={sequence_no} and set atl_ref to the chosen item id."""
     existing = await get_tcc_maintenance_by_aircraft(session, maintenance_id, aircraft_id)
     if not existing:
         raise HTTPException(status_code=404, detail="TCC Maintenance not found")
-    updated = await update_tcc_maintenance(session, maintenance_id, payload)
+    updated = await update_tcc_maintenance(
+        session,
+        maintenance_id,
+        payload,
+        audit_account_id=current_account.id,
+    )
     if not updated:
         raise HTTPException(status_code=404, detail="TCC Maintenance not found")
     return updated

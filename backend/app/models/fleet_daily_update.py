@@ -4,11 +4,11 @@ from sqlalchemy import Column, Integer, String, Float, Text, ForeignKey, UniqueC
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import ENUM as PGEnum
 
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
 FLEET_DAILY_UPDATE_STATUS_VALUES = (
-    "Running",
+    "Operational",
     "Ongoing Maintenance",
     "AOG",
 )
@@ -21,17 +21,15 @@ fleet_daily_update_status_enum = PGEnum(
 
 
 class FleetDailyUpdateStatusEnum(str, enum.Enum):
-    RUNNING = "Running"
+    OP = "Operational"
     ONGOING_MAINTENANCE = "Ongoing Maintenance"
     AOG = "AOG"
 
 
-class FleetDailyUpdate(Base, TimestampMixin, SoftDeleteMixin):
+class FleetDailyUpdate(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "fleet_daily_update"
 
     id = Column(Integer, primary_key=True, index=True)
-    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
-    updated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
 
     aircraft_fk = Column(
         Integer,
@@ -45,7 +43,7 @@ class FleetDailyUpdate(Base, TimestampMixin, SoftDeleteMixin):
     status = Column(
         fleet_daily_update_status_enum,
         nullable=False,
-        default=FleetDailyUpdateStatusEnum.RUNNING.value,
+        default=FleetDailyUpdateStatusEnum.OP.value,
     )
 
     next_insp_due = Column(Float, nullable=True)

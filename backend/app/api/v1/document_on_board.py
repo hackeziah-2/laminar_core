@@ -27,8 +27,10 @@ from app.repository.document_on_board import (
     soft_delete_document_on_board,
     soft_delete_document_on_board_by_aircraft,
 )
-from app.repository.aircraft import get_aircraft
+from app.api.deps import get_current_active_account
 from app.database import get_session
+from app.models.account import AccountInformation
+from app.repository.aircraft import get_aircraft
 
 router = APIRouter(
     prefix="/api/v1/documents-on-board",
@@ -160,13 +162,19 @@ async def api_get_document_on_board(
 async def api_create_document_on_board(
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new DocumentOnBoard entry."""
     try:
         parsed = json.loads(json_data)
         payload = document_on_board_schema.DocumentOnBoardCreate(**parsed)
-        return await create_document_on_board(session, payload, upload_file)
+        return await create_document_on_board(
+            session,
+            payload,
+            upload_file,
+            audit_account_id=current_account.id,
+        )
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
     except ValidationError as e:
@@ -193,6 +201,7 @@ async def api_update_document_on_board(
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update a DocumentOnBoard entry."""
     try:
@@ -204,6 +213,7 @@ async def api_update_document_on_board(
             document_id=document_id,
             document_in=document_in,
             upload_file=upload_file,
+            audit_account_id=current_account.id,
         )
 
         if not updated:
@@ -323,6 +333,7 @@ async def api_create_document_on_board_by_aircraft(
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new DocumentOnBoard entry for a specific aircraft."""
     aircraft = await get_aircraft(session, aircraft_id)
@@ -332,7 +343,12 @@ async def api_create_document_on_board_by_aircraft(
         parsed = json.loads(json_data)
         parsed["aircraft_id"] = aircraft_id  # Override with path aircraft_id
         payload = document_on_board_schema.DocumentOnBoardCreate(**parsed)
-        return await create_document_on_board(session, payload, upload_file)
+        return await create_document_on_board(
+            session,
+            payload,
+            upload_file,
+            audit_account_id=current_account.id,
+        )
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
     except ValidationError as e:
@@ -357,6 +373,7 @@ async def api_update_document_on_board_by_aircraft(
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update a DocumentOnBoard entry for a specific aircraft."""
     # Verify document belongs to aircraft
@@ -372,6 +389,7 @@ async def api_update_document_on_board_by_aircraft(
             document_id=document_id,
             document_in=document_in,
             upload_file=upload_file,
+            audit_account_id=current_account.id,
         )
         if not updated:
             raise HTTPException(status_code=404, detail="DocumentOnBoard not found")

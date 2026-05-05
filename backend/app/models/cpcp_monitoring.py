@@ -3,10 +3,10 @@ from datetime import date
 from sqlalchemy import Column, Integer, String, Text, Float, Date, ForeignKey
 from sqlalchemy.orm import relationship
 
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
-class CPCPMonitoring(Base, TimestampMixin, SoftDeleteMixin):
+class CPCPMonitoring(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     """CPCP (Continuing Program Compliance Program) Monitoring."""
 
     __tablename__ = "cpcp_monitoring"
@@ -23,6 +23,10 @@ class CPCPMonitoring(Base, TimestampMixin, SoftDeleteMixin):
     last_done_tach = Column(Float, nullable=True)
     last_done_aftt = Column(Float, nullable=True)
     last_done_date = Column(Date, nullable=True)
+
+    next_due_tach = Column(Float, nullable=True)
+    next_due_aftt = Column(Float, nullable=True)
+    next_due_date = Column(Date, nullable=True)
 
     atl_ref = Column(Integer, ForeignKey("aircraft_technical_log.id"), nullable=True, index=True)
 

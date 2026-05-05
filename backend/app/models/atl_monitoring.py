@@ -11,7 +11,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ENUM as PGEnum
 from sqlalchemy.orm import relationship
 
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
 class UnitEnum(str, enum.Enum):
@@ -19,7 +19,7 @@ class UnitEnum(str, enum.Enum):
     CYCLES = "CYCLES"
 
 
-class LDNDMonitoring(Base, TimestampMixin, SoftDeleteMixin):
+class LDNDMonitoring(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "ldnd_monitoring"
 
     id = Column(Integer, primary_key=True, index=True)

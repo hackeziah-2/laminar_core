@@ -13,7 +13,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import ENUM as PGEnum
-from app.database import Base, TimestampMixin, SoftDeleteMixin
+from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
 class TypeEnum(str, enum.Enum):
@@ -37,12 +37,13 @@ class WorkStatus(str, enum.Enum):
     COMPLETED = "COMPLETED"
 
 
-class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin):
+class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "aircraft_technical_log"
 
     id = Column(Integer, primary_key=True, index=True)
 
     aircraft_fk = Column(Integer, ForeignKey("aircrafts.id"), nullable=False)
+    atl_batch_fk = Column(Integer, ForeignKey("atl_batch.id"), nullable=True)
     sequence_no = Column(String(50), nullable=False)
 
     nature_of_flight = Column(
@@ -99,6 +100,19 @@ class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin):
     life_time_limit_engine = Column(Float, nullable=True)
     life_time_limit_propeller = Column(Float, nullable=True)
 
+    # Persisted computed leg / cumulative times (aligned with atl_derived_times.compute_auto_fields)
+    auto_airframe_run_time = Column(Float, nullable=True)
+    auto_airframe_aftt = Column(Float, nullable=True)
+    auto_engine_run_time = Column(Float, nullable=True)
+    auto_run_time = Column(Float, nullable=True)
+    auto_engine_tsn = Column(Float, nullable=True)
+    auto_engine_tso = Column(Float, nullable=True)
+    auto_engine_tbo = Column(Float, nullable=True)
+    auto_propeller_run_time = Column(Float, nullable=True)
+    auto_propeller_tsn = Column(Float, nullable=True)
+    auto_propeller_tso = Column(Float, nullable=True)
+    auto_propeller_tbo = Column(Float, nullable=True)
+
     fuel_qty_left_uplift_qty = Column(Float)
     fuel_qty_right_uplift_qty = Column(Float)
 
@@ -132,14 +146,13 @@ class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin):
     white_atl = Column(Text)
     dfp =  Column(Text)
 
-    created_by = Column(Integer, ForeignKey("account_information.id"), nullable=True)
-    updated_by = Column(Integer, ForeignKey("account_information.id"), nullable=True)
     work_status = Column(
         PGEnum(WorkStatus, name="work_status", create_type=False),
         nullable=True,
     )
 
     aircraft = relationship("Aircraft", back_populates="atl_logs")
+    atl_batch = relationship("AtlBatch", back_populates="atl_logs")
     component_parts = relationship(
         "ComponentPartsRecord",
         back_populates="atl",
@@ -151,7 +164,7 @@ class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin):
         return f"<ATL(seq='{self.sequence_no}')>"
 
 
-class ComponentPartsRecord(Base, TimestampMixin, SoftDeleteMixin):
+class ComponentPartsRecord(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "component_parts_record"
 
     id = Column(Integer, primary_key=True, index=True)

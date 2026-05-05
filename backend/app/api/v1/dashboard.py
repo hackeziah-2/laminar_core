@@ -14,7 +14,7 @@ router = APIRouter(
 @router.get(
     "/",
     summary="Dashboard counts by Fleet Daily Update status",
-    description="Returns total aircraft and counts by status (Running, Ongoing Maintenance, AOG) from Aircraft Fleet Daily Update.",
+    description="Returns total aircraft and counts by status (Operational, Ongoing Maintenance, AOG) from Aircraft Fleet Daily Update.",
 )
 async def api_dashboard(
     session: AsyncSession = Depends(get_session),

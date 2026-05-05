@@ -26,6 +26,21 @@ from app.api.v1 import (
     cpcp_monitoring as cpcp_monitoring_router,
     fleet_daily_update as fleet_daily_update_router,
     dashboard as dashboard_router,
+    aircraft_statutory_certificate as aircraft_statutory_certificate_router,
+    certificate_category_type as certificate_category_type_router,
+    organizational_approval as organizational_approval_router,
+    organizational_approval_history as organizational_approval_history_router,
+    aircraft_statutory_certificate_history as aircraft_statutory_certificate_history_router,
+    oem_item_type as oem_item_type_router,
+    oem_technical_publication as oem_technical_publication_router,
+    authorization_scope_cessna as authorization_scope_cessna_router,
+    authorization_scope_baron as authorization_scope_baron_router,
+    authorization_scope_others as authorization_scope_others_router,
+    personnel_authorization as personnel_authorization_router,
+    personnel_compliance as personnel_compliance_router,
+    personnel_compliance_matrix_2 as personnel_compliance_matrix_2_router,
+    advisory as advisory_router,
+    atl_batch as atl_batch_router,
 )
 from app.database import engine, Base
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
@@ -44,9 +59,14 @@ _default_origins = [
     "http://127.0.0.1:3000",
     "http://127.0.0.1:5173",
     "http://120.89.33.51:3000",   # dev frontend
-    "http://120.89.33.51:3011",   # uat frontend
+    "http://120.89.33.52:3011",   # uat frontend
     "http://120.89.33.51:3002",   # prod frontend
     "http://120.89.33.51:8000",
+    "http://120.89.33.52:8081",
+    "http://fleet.llibus.com",
+    "https://fleet.llibus.com",
+    "http://api.llibus.com",
+    "https://api.llibus.com",
 ]
 
 # Optional: still support old single-URL env like VITE_APP_URL
@@ -87,6 +107,19 @@ async def root():
 async def api_v1_root():
     """Health/connectivity check for API v1. Use this to verify backend is running and CORS allows the request."""
     return {"status": "ok", "version": "v1", "message": "Laminar API v1"}
+
+
+# Demo page: OEM Technical Publications list + CRUD with loading skeleton (same-origin API)
+_docs_dir = Path(__file__).resolve().parent.parent.parent / "docs"
+_oem_demo_path = _docs_dir / "oem_technical_publications_demo.html"
+
+
+@app.get("/demo/oem-technical-publications", tags=["demo"])
+async def demo_oem_technical_publications():
+    """Serve demo HTML for OEM Technical Publications (list view, CRUD, loading skeleton). Use same origin as API."""
+    if not _oem_demo_path.is_file():
+        raise HTTPException(status_code=404, detail="Demo file not found")
+    return FileResponse(_oem_demo_path, media_type="text/html")
 
 
 @app.get("/api/v1/health", tags=["health"])
@@ -218,15 +251,17 @@ async def upload_file(
 app.include_router(flights_router.router)
 app.include_router(auth_router.router)
 # Aircraft-scoped sub-routes first (longer paths) so /api/v1/aircraft/{id}/.../ is matched correctly
+app.include_router(aircraft_statutory_certificate_router.router_aircraft_scoped)
 app.include_router(document_on_board_router.router_aircraft_scoped)
 app.include_router(ldnd_monitoring_router.router_aircraft_scoped)
 app.include_router(ad_monitoring_router.router_aircraft_scoped)
 app.include_router(tcc_maintenance_router.router_aircraft_scoped)
 app.include_router(fleet_daily_update_router.router_aircraft_scoped)
+# ATL paged under /api/v1/aircraft/{id}/atl/paged before generic /{aircraft_id} routes
+app.include_router(atl_paged_router.router)
 app.include_router(aircraft_router.router)
 app.include_router(atl_router.router)
 app.include_router(atl_new_router.router)
-app.include_router(atl_paged_router.router)
 app.include_router(account_router.router)
 app.include_router(role_router.router)
 app.include_router(module_router.router)
@@ -238,6 +273,22 @@ app.include_router(ad_monitoring_router.router)
 app.include_router(ad_monitoring_router.router_work_order)
 app.include_router(cpcp_monitoring_router.router)
 app.include_router(fleet_daily_update_router.router)
+app.include_router(aircraft_statutory_certificate_router.router)
+app.include_router(certificate_category_type_router.router)
+app.include_router(atl_batch_router.router)
+app.include_router(organizational_approval_router.router)
+app.include_router(organizational_approval_history_router.router)
+app.include_router(aircraft_statutory_certificate_history_router.router)
+app.include_router(oem_item_type_router.router)
+app.include_router(oem_technical_publication_router.router)
+app.include_router(authorization_scope_cessna_router.router)
+app.include_router(authorization_scope_baron_router.router)
+app.include_router(authorization_scope_others_router.router)
+app.include_router(personnel_authorization_router.router)
+app.include_router(personnel_compliance_router.router)
+app.include_router(personnel_compliance_matrix_2_router.router)
+app.include_router(advisory_router.router)
+app.include_router(advisory_router.router_advisory)
 app.include_router(dashboard_router.router)
 app.include_router(excel_data_router.router)
 
@@ -255,4 +306,3 @@ async def startup():
     except Exception as e:
         print(f"Database connection warning: {e}")
         # Don't fail startup - migrations should handle table creation
-

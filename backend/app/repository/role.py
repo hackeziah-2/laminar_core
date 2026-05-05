@@ -5,6 +5,7 @@ from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.database import set_audit_fields
 from app.models.role import Role
 from app.models.role_permission import RolePermission
 from app.models.account import AccountInformation
@@ -19,7 +20,9 @@ from app.repository.module import get_module_by_name
 
 async def create_role(
     session: AsyncSession,
-    data: RoleCreate
+    data: RoleCreate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Role:
     """Create a new Role and optional permissions. Returns Role ORM with permissions loaded."""
     result = await session.execute(
@@ -52,10 +55,18 @@ async def create_role(
             role_id=role.id,
             module_id=module.id,
             can_read=perm.read,
-            can_write=perm.write,
+            can_write=perm.create or perm.update or perm.delete,
+            can_create=perm.create,
+            can_update=perm.update,
+            can_delete=perm.delete,
             can_approve=perm.approve,
         )
         session.add(rp)
+        if audit_account_id is not None:
+            await set_audit_fields(rp, audit_account_id, is_create=True)
+
+    if audit_account_id is not None:
+        await set_audit_fields(role, audit_account_id, is_create=True)
 
     await session.commit()
     await session.refresh(role)
@@ -95,7 +106,9 @@ async def get_role_with_permissions(
 async def update_role(
     session: AsyncSession,
     role_id: int,
-    role_in: RoleUpdate
+    role_in: RoleUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
 ) -> Optional[RoleRead]:
     """Update a Role and optionally replace its permissions."""
     obj = await session.get(Role, role_id)
@@ -144,16 +157,28 @@ async def update_role(
             if rp:
                 rp.is_deleted = False
                 rp.can_read = perm.get("read", False)
-                rp.can_write = perm.get("write", False)
+                c = perm.get("create", False)
+                u = perm.get("update", False)
+                d = perm.get("delete", False)
+                rp.can_create = c
+                rp.can_update = u
+                rp.can_delete = d
+                rp.can_write = c or u or d
                 rp.can_approve = perm.get("approve", False)
                 session.add(rp)
             else:
+                c = perm.get("create", False)
+                u = perm.get("update", False)
+                d = perm.get("delete", False)
                 session.add(
                     RolePermission(
                         role_id=role_id,
                         module_id=module.id,
                         can_read=perm.get("read", False),
-                        can_write=perm.get("write", False),
+                        can_write=c or u or d,
+                        can_create=c,
+                        can_update=u,
+                        can_delete=d,
                         can_approve=perm.get("approve", False),
                     )
                 )
@@ -164,6 +189,13 @@ async def update_role(
                 session.add(rp)
 
     session.add(obj)
+    if audit_account_id is not None:
+        await set_audit_fields(obj, audit_account_id, is_create=False)
+        rp_all = await session.execute(
+            select(RolePermission).where(RolePermission.role_id == role_id)
+        )
+        for rp in rp_all.scalars().all():
+            await set_audit_fields(rp, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
     return RoleRead.from_orm(obj)
