@@ -5,7 +5,7 @@ Use import_excel_generic() with your model, Pydantic schema, and unique field(s)
 Optional: column_mapping (Excel header -> schema field), integrity_error_messages (constraint -> user message),
 inject_fields (merge into each row before validation, e.g. aircraft_fk from endpoint).
 """
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional, Type, Union
 
 import pandas as pd
@@ -39,6 +39,43 @@ def _schema_field_names(schema: Type[BaseModel]) -> set:
 def _model_column_names(model: type) -> set:
     """Return set of column/attribute names that can be set on the model (persisted columns only)."""
     return {c.key for c in sa_inspect(model).mapper.column_attrs}
+
+
+def _parse_import_origin_date(v: Any) -> Any:
+    """Accept Excel/datetime values and strings like 'July 12, 2023'."""
+    if v is None:
+        return None
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    if hasattr(v, "date") and callable(getattr(v, "date", None)):
+        try:
+            return v.date()
+        except (ValueError, AttributeError, OSError):
+            pass
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return v
+        for fmt in ("%B %d, %Y", "%b %d, %Y"):
+            try:
+                return datetime.strptime(s, fmt).date()
+            except ValueError:
+                continue
+    return v
+
+
+def _normalize_import_nature_of_flight(v: Any) -> Any:
+    """Map spaced abbreviations (e.g. TR W PIREM -> TR_W_PIREM) to DB enum strings (TR_WITH_PIREM)."""
+    if v is None or not isinstance(v, str):
+        return v
+    if not v.strip():
+        return v
+    s = v.strip().upper().replace(" ", "_")
+    if s == "TR_W_PIREM":
+        return "TR_WITH_PIREM"
+    return v
 
 
 def _make_hashable(obj: Any) -> Any:
@@ -100,7 +137,16 @@ async def import_excel_generic(
 
         def _row_for_schema(row: Dict) -> Dict:
             merged = {**row, **inject_fields}
-            out = {k: merged[k] for k in schema_fields if k in merged}
+            out = {}
+            for k in schema_fields:
+                if k not in merged:
+                    continue
+                val = merged[k]
+                if k == "origin_date":
+                    val = _parse_import_origin_date(val)
+                elif k == "nature_of_flight":
+                    val = _normalize_import_nature_of_flight(val)
+                out[k] = val
 
             # Aircraft-specific created_at default
             if model.__name__ == "Aircraft" and "created_at" in schema_fields:
