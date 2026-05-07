@@ -92,15 +92,21 @@ def compute_auto_fields(
         pass
 
     try:
-        base_aftt = previous_computed_or_aircraft(
-            prev_auto_fields,
-            "auto_airframe_aftt",
-            prev_atl,
-            "airframe_aftt",
-            aircraft,
-            "airframe_aftt",
-        )
-        out["auto_airframe_aftt"] = base_aftt + out["auto_airframe_run_time"]
+        if prev_atl is None:
+            # First ATL in stream: start from aircraft baseline directly.
+            out["auto_airframe_aftt"] = float_or_zero(
+                getattr(aircraft, "airframe_aftt", None)
+            ) if aircraft else 0.0
+        else:
+            base_aftt = previous_computed_or_aircraft(
+                prev_auto_fields,
+                "auto_airframe_aftt",
+                prev_atl,
+                "airframe_aftt",
+                aircraft,
+                "airframe_aftt",
+            )
+            out["auto_airframe_aftt"] = base_aftt + out["auto_airframe_run_time"]
     except Exception:
         pass
 
@@ -112,28 +118,38 @@ def compute_auto_fields(
         pass
 
     try:
-        base_tsn = previous_computed_or_aircraft(
-            prev_auto_fields,
-            "auto_engine_tsn",
-            prev_atl,
-            "engine_tsn",
-            aircraft,
-            "engine_tsn",
-        )
-        out["auto_engine_tsn"] = base_tsn + out["auto_engine_run_time"]
+        if prev_atl is None:
+            out["auto_engine_tsn"] = float_or_zero(
+                getattr(aircraft, "engine_tsn", None)
+            ) if aircraft else 0.0
+        else:
+            base_tsn = previous_computed_or_aircraft(
+                prev_auto_fields,
+                "auto_engine_tsn",
+                prev_atl,
+                "engine_tsn",
+                aircraft,
+                "engine_tsn",
+            )
+            out["auto_engine_tsn"] = base_tsn + out["auto_engine_run_time"]
     except Exception:
         pass
 
     try:
-        base_tso = previous_computed_or_aircraft(
-            prev_auto_fields,
-            "auto_engine_tso",
-            prev_atl,
-            "engine_tso",
-            aircraft,
-            "engine_tso",
-        )
-        out["auto_engine_tso"] = base_tso + out["auto_engine_run_time"]
+        if prev_atl is None:
+            out["auto_engine_tso"] = float_or_zero(
+                getattr(aircraft, "engine_tso", None)
+            ) if aircraft else 0.0
+        else:
+            base_tso = previous_computed_or_aircraft(
+                prev_auto_fields,
+                "auto_engine_tso",
+                prev_atl,
+                "engine_tso",
+                aircraft,
+                "engine_tso",
+            )
+            out["auto_engine_tso"] = base_tso + out["auto_engine_run_time"]
     except Exception:
         pass
 
@@ -150,28 +166,38 @@ def compute_auto_fields(
         pass
 
     try:
-        base_ptsn = previous_computed_or_aircraft(
-            prev_auto_fields,
-            "auto_propeller_tsn",
-            prev_atl,
-            "propeller_tsn",
-            aircraft,
-            "propeller_tsn",
-        )
-        out["auto_propeller_tsn"] = base_ptsn + out["auto_propeller_run_time"]
+        if prev_atl is None:
+            out["auto_propeller_tsn"] = float_or_zero(
+                getattr(aircraft, "propeller_tsn", None)
+            ) if aircraft else 0.0
+        else:
+            base_ptsn = previous_computed_or_aircraft(
+                prev_auto_fields,
+                "auto_propeller_tsn",
+                prev_atl,
+                "propeller_tsn",
+                aircraft,
+                "propeller_tsn",
+            )
+            out["auto_propeller_tsn"] = base_ptsn + out["auto_propeller_run_time"]
     except Exception:
         pass
 
     try:
-        base_ptso = previous_computed_or_aircraft(
-            prev_auto_fields,
-            "auto_propeller_tso",
-            prev_atl,
-            "propeller_tso",
-            aircraft,
-            "propeller_tso",
-        )
-        out["auto_propeller_tso"] = base_ptso + out["auto_propeller_run_time"]
+        if prev_atl is None:
+            out["auto_propeller_tso"] = float_or_zero(
+                getattr(aircraft, "propeller_tso", None)
+            ) if aircraft else 0.0
+        else:
+            base_ptso = previous_computed_or_aircraft(
+                prev_auto_fields,
+                "auto_propeller_tso",
+                prev_atl,
+                "propeller_tso",
+                aircraft,
+                "propeller_tso",
+            )
+            out["auto_propeller_tso"] = base_ptso + out["auto_propeller_run_time"]
     except Exception:
         pass
 

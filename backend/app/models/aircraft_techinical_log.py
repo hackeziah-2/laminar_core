@@ -1,5 +1,4 @@
 import enum
-from xmlrpc.client import DateTime
 
 from sqlalchemy import (
     Column,
@@ -7,6 +6,7 @@ from sqlalchemy import (
     Float,
     String,
     Date,
+    DateTime,
     Time,
     Text,
     ForeignKey
@@ -143,6 +143,9 @@ class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     rts_date = Column(Date, nullable=True)
     rts_time = Column(Time(timezone=False), nullable=True)
 
+    date_time_reported = Column(DateTime(timezone=False), nullable=True)
+    date_time_released = Column(DateTime(timezone=False), nullable=True)
+
     white_atl = Column(Text)
     dfp =  Column(Text)
 
@@ -184,6 +187,10 @@ class ComponentPartsRecord(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
 
     part_description = Column(Text)
     ata_chapter = Column(String(50))
+
+    part_installed_remaining_time = Column(Text, nullable=True)
+    part_removed_remaining_time = Column(Text, nullable=True)
+    part_remark = Column(Text, nullable=True)
 
     atl = relationship("AircraftTechnicalLog", back_populates="component_parts")
     

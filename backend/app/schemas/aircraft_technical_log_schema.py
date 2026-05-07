@@ -115,6 +115,9 @@ class ComponentPartsRecordBase(BaseModel):
     installed_serial_no: Optional[str] = Field(None, max_length=100)
     part_description: Optional[str] = None
     ata_chapter: Optional[str] = Field(None, max_length=50)
+    part_installed_remaining_time: Optional[str] = None
+    part_removed_remaining_time: Optional[str] = None
+    part_remark: Optional[str] = None
 
 
 class ComponentPartsRecordCreate(ComponentPartsRecordBase):
@@ -131,6 +134,9 @@ class ComponentPartsRecordUpdate(BaseModel):
     installed_serial_no: Optional[str] = Field(None, max_length=100)
     part_description: Optional[str] = None
     ata_chapter: Optional[str] = Field(None, max_length=50)
+    part_installed_remaining_time: Optional[str] = None
+    part_removed_remaining_time: Optional[str] = None
+    part_remark: Optional[str] = None
 
 
 class ComponentPartsRecordRead(ComponentPartsRecordBase):
@@ -242,6 +248,9 @@ class AircraftTechnicalLogBase(BaseModel):
     rts_date: Optional[date] = None
     rts_time: Optional[time] = None
 
+    date_time_reported: Optional[datetime] = None
+    date_time_released: Optional[datetime] = None
+
     white_atl: Optional[str] = None
     dfp: Optional[str] = None
 
@@ -351,6 +360,19 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
         if v is None:
             return None
         return parse_zulu_time_to_time(v)
+
+    @validator("date_time_reported", "date_time_released", pre=True)
+    def excel_reported_released_datetime(cls, v: Any) -> Any:
+        v = _excel_empty_to_none(v)
+        if v is None or pd.isna(v):
+            return None
+        if isinstance(v, datetime):
+            return v
+        if isinstance(v, date) and not isinstance(v, datetime):
+            return datetime.combine(v, time.min)
+        if hasattr(v, "to_pydatetime"):
+            return v.to_pydatetime()
+        return v
 
     @validator(
         "number_of_landings",
@@ -486,6 +508,9 @@ class AircraftTechnicalLogUpdate(BaseModel):
     rts_signed_by: Optional[int] = None
     rts_date: Optional[date] = None
     rts_time: Optional[time] = None
+
+    date_time_reported: Optional[datetime] = None
+    date_time_released: Optional[datetime] = None
 
     white_atl: Optional[str] = None
     dfp: Optional[str] = None
