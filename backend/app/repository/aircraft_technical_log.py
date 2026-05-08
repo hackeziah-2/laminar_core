@@ -232,6 +232,7 @@ async def _replace_atl_component_parts(
     await session.flush()
     for part_data in component_parts:
         data = _component_part_to_dict(part_data)
+        data.pop("atl_fk", None)
         row = ComponentPartsRecord(atl_fk=atl_id, **data)
         if audit_account_id is not None:
             await set_audit_fields(row, audit_account_id, is_create=True)
@@ -353,10 +354,13 @@ async def create_aircraft_technical_log(
     # Create component parts if provided
     if data.component_parts:
         for part_data in data.component_parts:
-            part = ComponentPartsRecord(
-                atl_fk=entry.id,
-                **part_data.dict()
+            pdata = (
+                part_data.model_dump()
+                if hasattr(part_data, "model_dump")
+                else part_data.dict()
             )
+            pdata.pop("atl_fk", None)
+            part = ComponentPartsRecord(atl_fk=entry.id, **pdata)
             session.add(part)
             if audit_account_id is not None:
                 await set_audit_fields(part, audit_account_id, is_create=True)

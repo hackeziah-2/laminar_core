@@ -5,6 +5,7 @@ Use import_excel_generic() with your model, Pydantic schema, and unique field(s)
 Optional: column_mapping (Excel header -> schema field), integrity_error_messages (constraint -> user message),
 inject_fields (merge into each row before validation, e.g. aircraft_fk from endpoint).
 """
+import math
 from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional, Type, Union
 
@@ -21,6 +22,108 @@ from app.database import set_audit_fields
 from app.core.atl_derived_times import persist_atl_auto_fields_to_row
 from app.models.fleet_daily_update import FleetDailyUpdate, FleetDailyUpdateStatusEnum
 from app.models.aircraft import Aircraft
+from app.repository.aircraft_technical_log import _replace_atl_component_parts
+from app.schemas.aircraft_technical_log_schema import normalize_component_part_dict_for_import
+
+_ATL_IMPORT_PART_FLAT_KEYS = (
+    "removed_part_no",
+    "removed_serial_no",
+    "part_removed_remaining_time",
+    "part_installed_remaining_time",
+    "installed_part_no",
+    "installed_serial_no",
+    "part_description",
+    "part_remark",
+    "ata_chapter",
+)
+
+_ATL_IMPORT_PART_META_KEYS = (
+    "part_qty",
+    "part_unit",
+    "part_description",
+    "part_nomenclature",
+)
+
+
+def _atl_import_cell_nonempty(v: Any) -> bool:
+    if v is None:
+        return False
+    try:
+        if pd.isna(v):
+            return False
+    except (TypeError, ValueError):
+        pass
+    if isinstance(v, float) and (math.isnan(v) or not math.isfinite(v)):
+        return False
+    if isinstance(v, str) and not str(v).strip():
+        return False
+    return True
+
+
+def _atl_import_cell_as_optional_str(v: Any) -> Optional[str]:
+    if not _atl_import_cell_nonempty(v):
+        return None
+    if isinstance(v, float) and math.isfinite(v) and v == int(v):
+        return str(int(v))
+    if isinstance(v, str):
+        return str(v).strip() or None
+    return str(v)
+
+
+def _atl_row_attach_component_parts_from_flat(merged: Dict[str, Any]) -> None:
+    """If any part column is set, build one ComponentPartsRecord (normalized) and set merged['component_parts']. Pop flat/meta keys."""
+    part_vals = {k: merged.get(k) for k in _ATL_IMPORT_PART_FLAT_KEYS}
+    meta_vals = {k: merged.get(k) for k in _ATL_IMPORT_PART_META_KEYS}
+
+    has_part = any(_atl_import_cell_nonempty(part_vals[k]) for k in _ATL_IMPORT_PART_FLAT_KEYS)
+    has_meta = any(_atl_import_cell_nonempty(meta_vals[k]) for k in _ATL_IMPORT_PART_META_KEYS)
+    if not has_part and not has_meta:
+        for k in _ATL_IMPORT_PART_FLAT_KEYS:
+            merged.pop(k, None)
+        for k in _ATL_IMPORT_PART_META_KEYS:
+            merged.pop(k, None)
+        return
+
+    raw_cp: Dict[str, Any] = {}
+
+    iq = meta_vals.get("part_qty")
+    if _atl_import_cell_nonempty(iq):
+        try:
+            fq = float(str(iq).strip().replace(",", "")) if isinstance(iq, str) else float(iq)
+            if math.isfinite(fq):
+                raw_cp["qty"] = fq
+        except (TypeError, ValueError):
+            pass
+
+    uu = _atl_import_cell_as_optional_str(meta_vals.get("part_unit"))
+    if uu:
+        raw_cp["unit"] = uu[:20]
+
+    nm = _atl_import_cell_as_optional_str(meta_vals.get("part_nomenclature"))
+    if not nm:
+        nm = _atl_import_cell_as_optional_str(meta_vals.get("part_description"))
+    if nm:
+        raw_cp["nomenclature"] = nm[:255]
+
+    for k in _ATL_IMPORT_PART_FLAT_KEYS:
+        s = _atl_import_cell_as_optional_str(part_vals.get(k))
+        if k in (
+            "removed_part_no",
+            "removed_serial_no",
+            "installed_part_no",
+            "installed_serial_no",
+            "ata_chapter",
+        ):
+            raw_cp[k] = s[:100] if s else None
+        else:
+            raw_cp[k] = s
+
+    merged["component_parts"] = [normalize_component_part_dict_for_import(raw_cp)]
+
+    for k in _ATL_IMPORT_PART_FLAT_KEYS:
+        merged.pop(k, None)
+    for k in _ATL_IMPORT_PART_META_KEYS:
+        merged.pop(k, None)
 
 def _normalize_unique_fields(unique_fields: Union[str, List[str]]) -> List[str]:
     """Accept a single field name or a list of field names."""
@@ -132,11 +235,12 @@ async def import_excel_generic(
         df = df.rename(columns={k: v for k, v in column_mapping.items() if k in df.columns})
         df = df.where(pd.notnull(df), None)
         records = df.to_dict(orient="records")
-
         inject_fields = inject_fields or {}
 
         def _row_for_schema(row: Dict) -> Dict:
             merged = {**row, **inject_fields}
+            if model.__name__ == "AircraftTechnicalLog":
+                _atl_row_attach_component_parts_from_flat(merged)
             out = {}
             for k in schema_fields:
                 if k not in merged:
@@ -229,6 +333,16 @@ async def import_excel_generic(
                             existing, audit_account_id, is_create=False
                         )
 
+                    if model.__name__ == "AircraftTechnicalLog":
+                        parts = getattr(validated, "component_parts", None)
+                        if parts is not None:
+                            await _replace_atl_component_parts(
+                                session=session,
+                                atl_id=existing.id,
+                                component_parts=list(parts),
+                                audit_account_id=audit_account_id,
+                            )
+
                     if model.__name__ == "Aircraft":
                         aircraft_registrations.append(existing.registration)
 
@@ -245,6 +359,17 @@ async def import_excel_generic(
                     session.add(obj)
                     if audit_account_id is not None:
                         await set_audit_fields(obj, audit_account_id, is_create=True)
+
+                    if model.__name__ == "AircraftTechnicalLog":
+                        await session.flush()
+                        parts = getattr(validated, "component_parts", None)
+                        if parts is not None:
+                            await _replace_atl_component_parts(
+                                session=session,
+                                atl_id=obj.id,
+                                component_parts=list(parts),
+                                audit_account_id=audit_account_id,
+                            )
 
                     if model.__name__ == "Aircraft":
                         aircraft_registrations.append(obj.registration)
