@@ -350,7 +350,7 @@ async def create_aircraft_technical_log(
                 )
                 gap_entry.hobbs_meter_start = prev_hobbs
                 gap_entry.tachometer_start = prev_tach
-                await persist_atl_auto_fields_to_row(session, gap_entry, aircraft_row)
+                # await persist_atl_auto_fields_to_row(session, gap_entry, aircraft_row) Range auto complete
                 if audit_account_id is not None:
                     await set_audit_fields(gap_entry, audit_account_id, is_create=True)
                 session.add(gap_entry)
