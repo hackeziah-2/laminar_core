@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from datetime import date, time
 
 from fastapi import HTTPException
-from sqlalchemy import select, or_, cast, String, Integer, func
+from sqlalchemy import select, or_, cast, String, Numeric, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 
@@ -34,6 +34,11 @@ def _sequence_no_digits_only(sequence_no: str) -> str:
     if s.upper().startswith("ATL-"):
         s = s[4:].lstrip()
     return s
+
+
+def _sequence_no_as_numeric():
+    """SQL: sequence_no as Numeric for ORDER BY / comparisons. Handles '10001.0' (PostgreSQL INTEGER cast rejects it)."""
+    return cast(AircraftTechnicalLog.sequence_no, Numeric)
 
 
 def generate_range(start_id: str, end_id: str) -> list[str]:
@@ -232,6 +237,7 @@ async def _replace_atl_component_parts(
     await session.flush()
     for part_data in component_parts:
         data = _component_part_to_dict(part_data)
+        data.pop("atl_fk", None)
         row = ComponentPartsRecord(atl_fk=atl_id, **data)
         if audit_account_id is not None:
             await set_audit_fields(row, audit_account_id, is_create=True)
@@ -294,7 +300,7 @@ async def create_aircraft_technical_log(
         latest_stmt = latest_stmt.where(AircraftTechnicalLog.atl_batch_fk.is_(None))
     else:
         latest_stmt = latest_stmt.where(AircraftTechnicalLog.atl_batch_fk == data.atl_batch_fk)
-    latest_stmt = latest_stmt.order_by(cast(AircraftTechnicalLog.sequence_no, Integer).desc()).limit(1)
+    latest_stmt = latest_stmt.order_by(_sequence_no_as_numeric().desc()).limit(1)
     latest_result = await session.execute(latest_stmt)
     latest_atl = latest_result.scalar_one_or_none()
     latest_sequence_no = latest_atl.sequence_no if latest_atl else None
@@ -344,7 +350,7 @@ async def create_aircraft_technical_log(
                 )
                 gap_entry.hobbs_meter_start = prev_hobbs
                 gap_entry.tachometer_start = prev_tach
-                await persist_atl_auto_fields_to_row(session, gap_entry, aircraft_row)
+                # await persist_atl_auto_fields_to_row(session, gap_entry, aircraft_row) Range auto complete
                 if audit_account_id is not None:
                     await set_audit_fields(gap_entry, audit_account_id, is_create=True)
                 session.add(gap_entry)
@@ -353,10 +359,13 @@ async def create_aircraft_technical_log(
     # Create component parts if provided
     if data.component_parts:
         for part_data in data.component_parts:
-            part = ComponentPartsRecord(
-                atl_fk=entry.id,
-                **part_data.dict()
+            pdata = (
+                part_data.model_dump()
+                if hasattr(part_data, "model_dump")
+                else part_data.dict()
             )
+            pdata.pop("atl_fk", None)
+            part = ComponentPartsRecord(atl_fk=entry.id, **pdata)
             session.add(part)
             if audit_account_id is not None:
                 await set_audit_fields(part, audit_account_id, is_create=True)
@@ -399,7 +408,7 @@ async def search_atl_by_sequence_no(
         )
         .where(AircraftTechnicalLog.is_deleted == False)
         .where(AircraftTechnicalLog.sequence_no.ilike(q))
-        .order_by(cast(AircraftTechnicalLog.sequence_no, Integer).asc())
+        .order_by(_sequence_no_as_numeric().asc())
         .limit(limit)
     )
     if aircraft_fk is not None:
@@ -511,14 +520,14 @@ async def get_previous_atl(
     stmt = (
         select(AircraftTechnicalLog)
         .where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
-        .where(cast(AircraftTechnicalLog.sequence_no, Integer) < sequence_no_int)
+        .where(_sequence_no_as_numeric() < sequence_no_int)
         .where(AircraftTechnicalLog.is_deleted.is_(False))
     )
     if atl_batch_fk is None:
         stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk.is_(None))
     else:
         stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk == atl_batch_fk)
-    stmt = stmt.order_by(cast(AircraftTechnicalLog.sequence_no, Integer).desc()).limit(1)
+    stmt = stmt.order_by(_sequence_no_as_numeric().desc()).limit(1)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 
@@ -557,9 +566,9 @@ async def list_atl_paged(
         except ValueError:
             pass
     if sort_sequence.lower() == "desc":
-        stmt = stmt.order_by(cast(AircraftTechnicalLog.sequence_no, Integer).desc())
+        stmt = stmt.order_by(_sequence_no_as_numeric().desc())
     else:
-        stmt = stmt.order_by(cast(AircraftTechnicalLog.sequence_no, Integer).asc())
+        stmt = stmt.order_by(_sequence_no_as_numeric().asc())
 
     count_stmt = (
         select(func.count())
@@ -633,7 +642,7 @@ def _build_aircraft_technical_logs_list_statements(
     sortable_fields = {
         "created_at": AircraftTechnicalLog.created_at,
         "updated_at": AircraftTechnicalLog.updated_at,
-        "sequence_no": cast(AircraftTechnicalLog.sequence_no, Integer),
+        "sequence_no": _sequence_no_as_numeric(),
         "origin_date": AircraftTechnicalLog.origin_date,
         "destination_date": AircraftTechnicalLog.destination_date,
         "origin_station": AircraftTechnicalLog.origin_station,
@@ -668,7 +677,7 @@ def _build_aircraft_technical_logs_list_statements(
     else:
         # Default ordering: sequence number ascending so computed "previous" base follows ATL order.
         stmt = stmt.order_by(
-            cast(AircraftTechnicalLog.sequence_no, Integer).asc(),
+            _sequence_no_as_numeric().asc(),
         )
 
     # Total count query (same filters, no ORDER BY)
@@ -782,7 +791,7 @@ async def get_latest_aircraft_technical_log(
         stmt = stmt.where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
     
     # Order by sequence_no descending (numeric) to get the latest
-    stmt = stmt.order_by(cast(AircraftTechnicalLog.sequence_no, Integer).desc())
+    stmt = stmt.order_by(_sequence_no_as_numeric().desc())
     
     # Get the first result
     stmt = stmt.limit(1)

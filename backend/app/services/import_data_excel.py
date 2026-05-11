@@ -5,14 +5,16 @@ Use import_excel_generic() with your model, Pydantic schema, and unique field(s)
 Optional: column_mapping (Excel header -> schema field), integrity_error_messages (constraint -> user message),
 inject_fields (merge into each row before validation, e.g. aircraft_fk from endpoint).
 """
-from datetime import datetime, timezone
+import math
+import re
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Type, Union
 
 import pandas as pd
 from fastapi import HTTPException, UploadFile
 from io import BytesIO
 from pydantic import BaseModel
-from sqlalchemy import Integer, cast, select
+from sqlalchemy import Numeric, cast, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.inspection import inspect as sa_inspect
@@ -21,6 +23,11 @@ from app.database import set_audit_fields
 from app.core.atl_derived_times import persist_atl_auto_fields_to_row
 from app.models.fleet_daily_update import FleetDailyUpdate, FleetDailyUpdateStatusEnum
 from app.models.aircraft import Aircraft
+from app.repository.aircraft_technical_log import _replace_atl_component_parts
+from app.services.atl_import_normalize import (
+    merge_atl_continuation_records,
+    normalize_atl_import_row,
+)
 
 def _normalize_unique_fields(unique_fields: Union[str, List[str]]) -> List[str]:
     """Accept a single field name or a list of field names."""
@@ -39,6 +46,86 @@ def _schema_field_names(schema: Type[BaseModel]) -> set:
 def _model_column_names(model: type) -> set:
     """Return set of column/attribute names that can be set on the model (persisted columns only)."""
     return {c.key for c in sa_inspect(model).mapper.column_attrs}
+
+
+def _parse_import_origin_date(v: Any) -> Any:
+    """Accept Excel/datetime values and strings like 'July 12, 2023'."""
+    if v is None:
+        return None
+    if isinstance(v, float):
+        if math.isnan(v) or not math.isfinite(v):
+            return None
+        # Excel serial date (1900 system): day 1 = 1899-12-31, with leap-year bug -> use 1899-12-30.
+        if 1 <= v < 100000:
+            return (datetime(1899, 12, 30) + timedelta(days=int(v))).date()
+    if isinstance(v, int):
+        if 1 <= v < 100000:
+            return (datetime(1899, 12, 30) + timedelta(days=v)).date()
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    if hasattr(v, "date") and callable(getattr(v, "date", None)):
+        try:
+            return v.date()
+        except (ValueError, AttributeError, OSError):
+            pass
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return v
+        if re.fullmatch(r"\d+(?:\.0+)?", s):
+            try:
+                fv = float(s)
+                if 1 <= fv < 100000:
+                    return (datetime(1899, 12, 30) + timedelta(days=int(fv))).date()
+            except ValueError:
+                pass
+        for fmt in ("%B %d, %Y", "%b %d, %Y"):
+            try:
+                return datetime.strptime(s, fmt).date()
+            except ValueError:
+                continue
+    return v
+
+
+def _normalize_import_nature_of_flight(v: Any) -> Any:
+    """Normalize ATL import variants to allowed enum values."""
+    if v is None or not isinstance(v, str):
+        return v
+    raw = v.strip()
+    if not raw:
+        return v
+
+    cleaned = re.sub(r"[\./-]+", " ", raw.upper())
+    cleaned = " ".join(cleaned.split())
+
+    if cleaned in {"MISSING", "NO ENTRY"}:
+        return None
+
+    alias_map = {
+        "TR W PIREM": "TR_WITH_PIREM",
+        "ATL REPLENISHMENT": "ATL_REPL",
+        "ATL REPLENISHNMENT": "ATL_REPL",
+        "ATL REPLENISHMENTL": "ATL_REPL",
+        "ATL REPLENISHMENTLENISHNMENT": "ATL_REPL",
+        "ATL REP": "ATL_REPL",
+        "ATP REP": "ATL_REPL",
+        "MAINT ENTRY": "ME",
+        "MAINTENANCE ENTRY": "ME",
+        "PRF EGR": "PRF",
+        "PSF EGR": "PSF",
+        "ME": "ME",
+        "PST": "PSF",
+        "PRE": "PRF",
+    }
+    if cleaned in alias_map:
+        return alias_map[cleaned]
+
+    canonical = cleaned.replace(" ", "_")
+    if canonical in {"TR", "PSF", "PRF", "EGR", "ME", "TR_WITH_PIREM", "VOID", "ATL_REPL"}:
+        return canonical
+    return v
 
 
 def _make_hashable(obj: Any) -> Any:
@@ -95,12 +182,24 @@ async def import_excel_generic(
         df = df.rename(columns={k: v for k, v in column_mapping.items() if k in df.columns})
         df = df.where(pd.notnull(df), None)
         records = df.to_dict(orient="records")
-
+        if model.__name__ == "AircraftTechnicalLog":
+            records = merge_atl_continuation_records(records)
         inject_fields = inject_fields or {}
 
         def _row_for_schema(row: Dict) -> Dict:
             merged = {**row, **inject_fields}
-            out = {k: merged[k] for k in schema_fields if k in merged}
+            if model.__name__ == "AircraftTechnicalLog":
+                normalize_atl_import_row(merged)
+            out = {}
+            for k in schema_fields:
+                if k not in merged:
+                    continue
+                val = merged[k]
+                if k == "origin_date":
+                    val = _parse_import_origin_date(val)
+                elif k == "nature_of_flight":
+                    val = _normalize_import_nature_of_flight(val)
+                out[k] = val
 
             # Aircraft-specific created_at default
             if model.__name__ == "Aircraft" and "created_at" in schema_fields:
@@ -183,6 +282,16 @@ async def import_excel_generic(
                             existing, audit_account_id, is_create=False
                         )
 
+                    if model.__name__ == "AircraftTechnicalLog":
+                        parts = getattr(validated, "component_parts", None)
+                        if parts is not None:
+                            await _replace_atl_component_parts(
+                                session=session,
+                                atl_id=existing.id,
+                                component_parts=list(parts),
+                                audit_account_id=audit_account_id,
+                            )
+
                     if model.__name__ == "Aircraft":
                         aircraft_registrations.append(existing.registration)
 
@@ -199,6 +308,17 @@ async def import_excel_generic(
                     session.add(obj)
                     if audit_account_id is not None:
                         await set_audit_fields(obj, audit_account_id, is_create=True)
+
+                    if model.__name__ == "AircraftTechnicalLog":
+                        await session.flush()
+                        parts = getattr(validated, "component_parts", None)
+                        if parts is not None:
+                            await _replace_atl_component_parts(
+                                session=session,
+                                atl_id=obj.id,
+                                component_parts=list(parts),
+                                audit_account_id=audit_account_id,
+                            )
 
                     if model.__name__ == "Aircraft":
                         aircraft_registrations.append(obj.registration)
@@ -217,7 +337,7 @@ async def import_excel_generic(
                 select(model)
                 .where(model.aircraft_fk == aid)
                 .where(model.is_deleted.is_(False))
-                .order_by(cast(model.sequence_no, Integer).asc())
+                .order_by(cast(model.sequence_no, Numeric).asc())
             )
             for atl_row in (await session.execute(stmt)).scalars().all():
                 await persist_atl_auto_fields_to_row(session, atl_row, ac)

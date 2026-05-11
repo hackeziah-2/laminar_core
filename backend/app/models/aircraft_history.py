@@ -1,3 +1,5 @@
+from typing import Optional
+
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -21,7 +23,7 @@ class AircraftHistory(Base):
     changed_by_user = relationship("AccountInformation", foreign_keys=[changed_by])
 
     @property
-    def changed_by_name(self) -> str | None:
+    def changed_by_name(self) -> Optional[str]:
         if not self.changed_by_user:
             return None
         return self.changed_by_user.full_name

@@ -1,6 +1,7 @@
 import math
-from datetime import date, time, datetime
-from typing import Optional, List, Any
+import re
+from datetime import date, time, datetime, timedelta
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from pydantic import BaseModel, Field, validator, root_validator
@@ -13,6 +14,22 @@ def normalize_datetime(value: Any) -> Any:
     """Coerce pandas NA/NaN to None; extract date() from datetime/timestamp."""
     if pd.isna(value):
         return None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if isinstance(value, float) and (math.isnan(value) or not math.isfinite(value)):
+            return None
+        if 1 <= float(value) < 100000:
+            # Excel serial date (1900 system)
+            return (datetime(1899, 12, 30) + timedelta(days=int(float(value)))).date()
+        return value
+    if isinstance(value, str):
+        s = value.strip()
+        if re.fullmatch(r"\d+(?:\.0+)?", s):
+            try:
+                fv = float(s)
+                if 1 <= fv < 100000:
+                    return (datetime(1899, 12, 30) + timedelta(days=int(fv))).date()
+            except ValueError:
+                return value
     if hasattr(value, "date"):
         return value.date()
     return value
@@ -31,6 +48,89 @@ def _excel_empty_to_none(value: Any) -> Any:
         if not s or s == "-":
             return None
     return value
+
+
+def _import_scalar_clean(value: Any) -> Any:
+    """Like _excel_empty_to_none but also treats pandas NA as None (nested part cells)."""
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return _excel_empty_to_none(value)
+
+
+def normalize_component_part_dict_for_import(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize one ComponentPartsRecord row from Excel/CSV before ComponentPartsRecordCreate validation."""
+    d = dict(raw)
+
+    q = _import_scalar_clean(d.get("qty"))
+    if q is None:
+        d["qty"] = 1.0
+    elif isinstance(q, str):
+        s = q.strip().replace(",", "")
+        try:
+            d["qty"] = float(s)
+        except ValueError:
+            d["qty"] = 1.0
+    elif isinstance(q, (int, float)):
+        if isinstance(q, float) and (math.isnan(q) or not math.isfinite(q)):
+            d["qty"] = 1.0
+        else:
+            d["qty"] = float(q)
+    else:
+        d["qty"] = 1.0
+
+    unit = _import_scalar_clean(d.get("unit"))
+    d["unit"] = (str(unit).strip()[:20] if unit is not None and str(unit).strip() else "EA")
+
+    nom = _import_scalar_clean(d.get("nomenclature"))
+    if nom is not None:
+        nom = str(nom).strip()[:255]
+    if not nom:
+        pd_ = _import_scalar_clean(d.get("part_description"))
+        if pd_ is not None:
+            nom = str(pd_).strip()[:255]
+    if not nom:
+        for alt in ("installed_part_no", "removed_part_no"):
+            pn = _import_scalar_clean(d.get(alt))
+            if pn is not None:
+                nom = str(pn).strip()[:255]
+                break
+    d["nomenclature"] = nom or ""
+
+    for key in (
+        "removed_part_no",
+        "removed_serial_no",
+        "installed_part_no",
+        "installed_serial_no",
+        "ata_chapter",
+    ):
+        v = _import_scalar_clean(d.get(key))
+        if v is None:
+            d[key] = None
+        elif isinstance(v, float) and math.isfinite(v) and v == int(v):
+            d[key] = str(int(v))[:100]
+        else:
+            s = str(v).strip()
+            d[key] = s[:100] if s else None
+
+    for key in (
+        "part_description",
+        "part_remark",
+        "part_installed_remaining_time",
+        "part_removed_remaining_time",
+    ):
+        v = _import_scalar_clean(d.get(key))
+        if v is None:
+            d[key] = None
+        elif isinstance(v, float) and math.isfinite(v) and v == int(v):
+            d[key] = str(int(v))
+        else:
+            s = str(v).strip()
+            d[key] = s if s else None
+
+    return d
 
 
 def normalize_sequence_no_digits_only(value: str) -> str:
@@ -104,6 +204,66 @@ def parse_zulu_time_to_time(value: Any) -> Optional[time]:
     return None
 
 
+def parse_import_reported_released_datetime(value: Any) -> Any:
+    """Parse import strings for date_time_reported / date_time_released.
+
+    Accepts: ``01-Mar-24 0738Z``, ``01-Mar-24 0738``, ``01-Mar-24`` (midnight),
+    plus Excel timestamps and existing datetime/date objects.
+    """
+    v = _excel_empty_to_none(value)
+    if v is None:
+        return None
+    try:
+        if pd.isna(v):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(v, datetime):
+        return v
+    if isinstance(v, date) and not isinstance(v, datetime):
+        return datetime.combine(v, time.min)
+    if hasattr(v, "to_pydatetime"):
+        try:
+            return v.to_pydatetime()
+        except Exception:
+            pass
+    if not isinstance(v, str):
+        return v
+    s = v.strip()
+    if not s:
+        return None
+
+    m = re.fullmatch(
+        r"(\d{2})-([A-Za-z]{3})-(\d{2})(?:\s+(\d{3,6})(Z)?)?",
+        s,
+        flags=re.IGNORECASE,
+    )
+    if m:
+        day_s, mon_s, yr_s, hhmm_s, _z = m.groups()
+        date_s = f"{day_s}-{mon_s.capitalize()}-{yr_s}"
+        try:
+            d = datetime.strptime(date_s, "%d-%b-%y").date()
+        except ValueError:
+            return v
+        if not hhmm_s:
+            return datetime.combine(d, time.min)
+        t_digits = hhmm_s
+        if len(t_digits) == 3:
+            t_digits = "0" + t_digits
+        try:
+            if len(t_digits) == 4:
+                tm = datetime.strptime(t_digits, "%H%M").time()
+            elif len(t_digits) == 6:
+                tm = datetime.strptime(t_digits, "%H%M%S").time()
+            else:
+                return v
+        except ValueError:
+            return v
+        return datetime.combine(d, tm)
+
+    return v
+
+
 # ---------- Component Parts Record Schemas ----------
 class ComponentPartsRecordBase(BaseModel):
     qty: float
@@ -115,6 +275,9 @@ class ComponentPartsRecordBase(BaseModel):
     installed_serial_no: Optional[str] = Field(None, max_length=100)
     part_description: Optional[str] = None
     ata_chapter: Optional[str] = Field(None, max_length=50)
+    part_installed_remaining_time: Optional[str] = None
+    part_removed_remaining_time: Optional[str] = None
+    part_remark: Optional[str] = None
 
 
 class ComponentPartsRecordCreate(ComponentPartsRecordBase):
@@ -131,6 +294,9 @@ class ComponentPartsRecordUpdate(BaseModel):
     installed_serial_no: Optional[str] = Field(None, max_length=100)
     part_description: Optional[str] = None
     ata_chapter: Optional[str] = Field(None, max_length=50)
+    part_installed_remaining_time: Optional[str] = None
+    part_removed_remaining_time: Optional[str] = None
+    part_remark: Optional[str] = None
 
 
 class ComponentPartsRecordRead(ComponentPartsRecordBase):
@@ -242,6 +408,9 @@ class AircraftTechnicalLogBase(BaseModel):
     rts_date: Optional[date] = None
     rts_time: Optional[time] = None
 
+    date_time_reported: Optional[datetime] = None
+    date_time_released: Optional[datetime] = None
+
     white_atl: Optional[str] = None
     dfp: Optional[str] = None
 
@@ -316,12 +485,36 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
     Coerces Excel NaN, empty, '-' and float-integer values to None so empty cells validate.
     """
 
+    # None = row did not specify parts (import keeps existing DB children); list = replace parts for that ATL.
+    component_parts: Optional[List[ComponentPartsRecordCreate]] = Field(default=None)
+
     @root_validator(pre=True)
     def excel_empty_and_dash_to_none(cls, values: Any) -> Any:
         """Coerce empty string and '-' to None for every field in import row."""
         if not isinstance(values, dict):
             return values
-        return {k: _excel_empty_to_none(v) for k, v in values.items()}
+        return {
+            k: v if k == "component_parts" else _excel_empty_to_none(v)
+            for k, v in values.items()
+        }
+
+    @validator("component_parts", pre=True)
+    def normalize_nested_component_parts(cls, v: Any) -> Any:
+        """Clean NaN/Excel sentinels in each part dict; required fields get safe defaults."""
+        if v is None:
+            return None
+        if not isinstance(v, list):
+            return v
+        out: List[Dict[str, Any]] = []
+        for item in v:
+            if item is None:
+                continue
+            if hasattr(item, "dict") and callable(getattr(item, "dict")):
+                item = item.dict()
+            if not isinstance(item, dict):
+                continue
+            out.append(normalize_component_part_dict_for_import(item))
+        return out if out else None
 
     @validator(
         "destination_date",
@@ -351,6 +544,47 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
         if v is None:
             return None
         return parse_zulu_time_to_time(v)
+
+    @validator("date_time_reported", "date_time_released", pre=True)
+    def excel_reported_released_datetime(cls, v: Any) -> Any:
+        return parse_import_reported_released_datetime(v)
+
+    @validator("sequence_no", pre=True)
+    def sequence_no_numeric_excel(cls, v: Any) -> Any:
+        """Coerce SEQ NO. exported as Excel float (e.g. 10001.0) before base normalizer."""
+        if v is None or (isinstance(v, str) and not str(v).strip()):
+            return v
+        try:
+            if pd.isna(v):
+                return None
+        except (TypeError, ValueError):
+            pass
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            if isinstance(v, float):
+                if math.isnan(v) or not math.isfinite(v):
+                    return None
+                if v == int(v):
+                    v = int(v)
+            return str(v)
+        return v
+
+    @validator("engine_tsn", pre=True)
+    def engine_tsn_numeric_excel_to_str(cls, v: Any) -> Any:
+        """Fleet exports store Engine TSN as numbers; model column is string."""
+        if v is None:
+            return None
+        try:
+            if pd.isna(v):
+                return None
+        except (TypeError, ValueError):
+            pass
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            if isinstance(v, float) and (math.isnan(v) or not math.isfinite(v)):
+                return None
+            if isinstance(v, float) and v == int(v):
+                return str(int(v))
+            return str(v)
+        return v
 
     @validator(
         "number_of_landings",
@@ -486,6 +720,9 @@ class AircraftTechnicalLogUpdate(BaseModel):
     rts_signed_by: Optional[int] = None
     rts_date: Optional[date] = None
     rts_time: Optional[time] = None
+
+    date_time_reported: Optional[datetime] = None
+    date_time_released: Optional[datetime] = None
 
     white_atl: Optional[str] = None
     dfp: Optional[str] = None

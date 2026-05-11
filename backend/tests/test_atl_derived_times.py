@@ -4,7 +4,7 @@ import asyncio
 import json
 
 from fastapi.testclient import TestClient
-from sqlalchemy import Integer, cast, select
+from sqlalchemy import Numeric, cast, select
 
 from app.core.atl_derived_times import persist_atl_auto_fields_to_row
 from app.models.aircraft import Aircraft
@@ -20,7 +20,7 @@ async def _persist_auto_columns_for_all_atl_rows(aircraft_id: int) -> None:
             select(AircraftTechnicalLog)
             .where(AircraftTechnicalLog.aircraft_fk == aircraft_id)
             .where(AircraftTechnicalLog.is_deleted.is_(False))
-            .order_by(cast(AircraftTechnicalLog.sequence_no, Integer).asc())
+            .order_by(cast(AircraftTechnicalLog.sequence_no, Numeric).asc())
         )
         rows = (await session.execute(stmt)).scalars().all()
         for row in rows:
