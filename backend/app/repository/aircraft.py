@@ -95,7 +95,20 @@ async def list_aircraft(
     status: Optional[str] = "all",
     sort: Optional[str] = "",
 ):
-    stmt = select(Aircraft).where(Aircraft.is_deleted == False)
+    atl_count_subquery = (
+        select(func.count(AircraftTechnicalLog.id))
+        .where(
+            AircraftTechnicalLog.aircraft_fk == Aircraft.id,
+            AircraftTechnicalLog.is_deleted == False,
+        )
+        .correlate(Aircraft)
+        .scalar_subquery()
+    )
+
+    stmt = (
+        select(Aircraft, atl_count_subquery.label("atl_count"))
+        .where(Aircraft.is_deleted == False)
+    )
 
     # Search
     if search:
@@ -173,7 +186,11 @@ async def list_aircraft(
     stmt = stmt.limit(limit).offset(offset)
 
     result = await session.execute(stmt)
-    items = result.scalars().all()
+    rows = result.all()
+    items = []
+    for aircraft, atl_count in rows:
+        setattr(aircraft, "atl_count", int(atl_count or 0))
+        items.append(aircraft)
 
     return items, total_count
 

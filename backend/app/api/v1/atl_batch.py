@@ -81,6 +81,7 @@ async def api_create(
 
 
 @router.put("/{batch_id}", response_model=AtlBatchRead)
+@router.patch("/{batch_id}", response_model=AtlBatchRead)
 async def api_update(
     batch_id: int,
     payload: AtlBatchUpdate,
