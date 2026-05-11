@@ -1,6 +1,6 @@
 from typing import Optional, List, Tuple
 
-from sqlalchemy import select, func, func, case, or_
+from sqlalchemy import select, func, case, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -145,13 +145,21 @@ async def list_fleet_daily_updates(
         "updated_at": FleetDailyUpdate.updated_at,
     }
     if sort:
+        order_clauses = []
         for field in sort.split(","):
-            desc_order = field.startswith("-")
-            field_name = field.lstrip("-")
+            part = field.strip()
+            if not part:
+                continue
+            desc_order = part.startswith("-")
+            field_name = part.lstrip("-").strip()
             column = sortable_fields.get(field_name)
             if column is None:
                 continue
-            stmt = stmt.order_by(column.desc() if desc_order else column.asc())
+            order_clauses.append(column.desc() if desc_order else column.asc())
+        if order_clauses:
+            stmt = stmt.order_by(*order_clauses)
+        else:
+            stmt = stmt.order_by(FleetDailyUpdate.created_at.desc())
     else:
         stmt = stmt.order_by(FleetDailyUpdate.created_at.desc())
 

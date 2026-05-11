@@ -1,6 +1,6 @@
 import math
 import re
-from datetime import date, time, datetime
+from datetime import date, time, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -14,6 +14,22 @@ def normalize_datetime(value: Any) -> Any:
     """Coerce pandas NA/NaN to None; extract date() from datetime/timestamp."""
     if pd.isna(value):
         return None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if isinstance(value, float) and (math.isnan(value) or not math.isfinite(value)):
+            return None
+        if 1 <= float(value) < 100000:
+            # Excel serial date (1900 system)
+            return (datetime(1899, 12, 30) + timedelta(days=int(float(value)))).date()
+        return value
+    if isinstance(value, str):
+        s = value.strip()
+        if re.fullmatch(r"\d+(?:\.0+)?", s):
+            try:
+                fv = float(s)
+                if 1 <= fv < 100000:
+                    return (datetime(1899, 12, 30) + timedelta(days=int(fv))).date()
+            except ValueError:
+                return value
     if hasattr(value, "date"):
         return value.date()
     return value
@@ -81,7 +97,7 @@ def normalize_component_part_dict_for_import(raw: Dict[str, Any]) -> Dict[str, A
             if pn is not None:
                 nom = str(pn).strip()[:255]
                 break
-    d["nomenclature"] = nom or "COMPONENT"
+    d["nomenclature"] = nom or ""
 
     for key in (
         "removed_part_no",

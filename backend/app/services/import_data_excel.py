@@ -6,14 +6,15 @@ Optional: column_mapping (Excel header -> schema field), integrity_error_message
 inject_fields (merge into each row before validation, e.g. aircraft_fk from endpoint).
 """
 import math
-from datetime import date, datetime, timezone
+import re
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Type, Union
 
 import pandas as pd
 from fastapi import HTTPException, UploadFile
 from io import BytesIO
 from pydantic import BaseModel
-from sqlalchemy import Integer, cast, select
+from sqlalchemy import Numeric, cast, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.inspection import inspect as sa_inspect
@@ -23,107 +24,10 @@ from app.core.atl_derived_times import persist_atl_auto_fields_to_row
 from app.models.fleet_daily_update import FleetDailyUpdate, FleetDailyUpdateStatusEnum
 from app.models.aircraft import Aircraft
 from app.repository.aircraft_technical_log import _replace_atl_component_parts
-from app.schemas.aircraft_technical_log_schema import normalize_component_part_dict_for_import
-
-_ATL_IMPORT_PART_FLAT_KEYS = (
-    "removed_part_no",
-    "removed_serial_no",
-    "part_removed_remaining_time",
-    "part_installed_remaining_time",
-    "installed_part_no",
-    "installed_serial_no",
-    "part_description",
-    "part_remark",
-    "ata_chapter",
+from app.services.atl_import_normalize import (
+    merge_atl_continuation_records,
+    normalize_atl_import_row,
 )
-
-_ATL_IMPORT_PART_META_KEYS = (
-    "part_qty",
-    "part_unit",
-    "part_description",
-    "part_nomenclature",
-)
-
-
-def _atl_import_cell_nonempty(v: Any) -> bool:
-    if v is None:
-        return False
-    try:
-        if pd.isna(v):
-            return False
-    except (TypeError, ValueError):
-        pass
-    if isinstance(v, float) and (math.isnan(v) or not math.isfinite(v)):
-        return False
-    if isinstance(v, str) and not str(v).strip():
-        return False
-    return True
-
-
-def _atl_import_cell_as_optional_str(v: Any) -> Optional[str]:
-    if not _atl_import_cell_nonempty(v):
-        return None
-    if isinstance(v, float) and math.isfinite(v) and v == int(v):
-        return str(int(v))
-    if isinstance(v, str):
-        return str(v).strip() or None
-    return str(v)
-
-
-def _atl_row_attach_component_parts_from_flat(merged: Dict[str, Any]) -> None:
-    """If any part column is set, build one ComponentPartsRecord (normalized) and set merged['component_parts']. Pop flat/meta keys."""
-    part_vals = {k: merged.get(k) for k in _ATL_IMPORT_PART_FLAT_KEYS}
-    meta_vals = {k: merged.get(k) for k in _ATL_IMPORT_PART_META_KEYS}
-
-    has_part = any(_atl_import_cell_nonempty(part_vals[k]) for k in _ATL_IMPORT_PART_FLAT_KEYS)
-    has_meta = any(_atl_import_cell_nonempty(meta_vals[k]) for k in _ATL_IMPORT_PART_META_KEYS)
-    if not has_part and not has_meta:
-        for k in _ATL_IMPORT_PART_FLAT_KEYS:
-            merged.pop(k, None)
-        for k in _ATL_IMPORT_PART_META_KEYS:
-            merged.pop(k, None)
-        return
-
-    raw_cp: Dict[str, Any] = {}
-
-    iq = meta_vals.get("part_qty")
-    if _atl_import_cell_nonempty(iq):
-        try:
-            fq = float(str(iq).strip().replace(",", "")) if isinstance(iq, str) else float(iq)
-            if math.isfinite(fq):
-                raw_cp["qty"] = fq
-        except (TypeError, ValueError):
-            pass
-
-    uu = _atl_import_cell_as_optional_str(meta_vals.get("part_unit"))
-    if uu:
-        raw_cp["unit"] = uu[:20]
-
-    nm = _atl_import_cell_as_optional_str(meta_vals.get("part_nomenclature"))
-    if not nm:
-        nm = _atl_import_cell_as_optional_str(meta_vals.get("part_description"))
-    if nm:
-        raw_cp["nomenclature"] = nm[:255]
-
-    for k in _ATL_IMPORT_PART_FLAT_KEYS:
-        s = _atl_import_cell_as_optional_str(part_vals.get(k))
-        if k in (
-            "removed_part_no",
-            "removed_serial_no",
-            "installed_part_no",
-            "installed_serial_no",
-            "ata_chapter",
-        ):
-            raw_cp[k] = s[:100] if s else None
-        else:
-            raw_cp[k] = s
-
-    merged["component_parts"] = [normalize_component_part_dict_for_import(raw_cp)]
-
-    for k in _ATL_IMPORT_PART_FLAT_KEYS:
-        merged.pop(k, None)
-    for k in _ATL_IMPORT_PART_META_KEYS:
-        merged.pop(k, None)
 
 def _normalize_unique_fields(unique_fields: Union[str, List[str]]) -> List[str]:
     """Accept a single field name or a list of field names."""
@@ -148,6 +52,15 @@ def _parse_import_origin_date(v: Any) -> Any:
     """Accept Excel/datetime values and strings like 'July 12, 2023'."""
     if v is None:
         return None
+    if isinstance(v, float):
+        if math.isnan(v) or not math.isfinite(v):
+            return None
+        # Excel serial date (1900 system): day 1 = 1899-12-31, with leap-year bug -> use 1899-12-30.
+        if 1 <= v < 100000:
+            return (datetime(1899, 12, 30) + timedelta(days=int(v))).date()
+    if isinstance(v, int):
+        if 1 <= v < 100000:
+            return (datetime(1899, 12, 30) + timedelta(days=v)).date()
     if isinstance(v, datetime):
         return v.date()
     if isinstance(v, date):
@@ -161,6 +74,13 @@ def _parse_import_origin_date(v: Any) -> Any:
         s = v.strip()
         if not s:
             return v
+        if re.fullmatch(r"\d+(?:\.0+)?", s):
+            try:
+                fv = float(s)
+                if 1 <= fv < 100000:
+                    return (datetime(1899, 12, 30) + timedelta(days=int(fv))).date()
+            except ValueError:
+                pass
         for fmt in ("%B %d, %Y", "%b %d, %Y"):
             try:
                 return datetime.strptime(s, fmt).date()
@@ -170,14 +90,41 @@ def _parse_import_origin_date(v: Any) -> Any:
 
 
 def _normalize_import_nature_of_flight(v: Any) -> Any:
-    """Map spaced abbreviations (e.g. TR W PIREM -> TR_W_PIREM) to DB enum strings (TR_WITH_PIREM)."""
+    """Normalize ATL import variants to allowed enum values."""
     if v is None or not isinstance(v, str):
         return v
-    if not v.strip():
+    raw = v.strip()
+    if not raw:
         return v
-    s = v.strip().upper().replace(" ", "_")
-    if s == "TR_W_PIREM":
-        return "TR_WITH_PIREM"
+
+    cleaned = re.sub(r"[\./-]+", " ", raw.upper())
+    cleaned = " ".join(cleaned.split())
+
+    if cleaned in {"MISSING", "NO ENTRY"}:
+        return None
+
+    alias_map = {
+        "TR W PIREM": "TR_WITH_PIREM",
+        "ATL REPLENISHMENT": "ATL_REPL",
+        "ATL REPLENISHNMENT": "ATL_REPL",
+        "ATL REPLENISHMENTL": "ATL_REPL",
+        "ATL REPLENISHMENTLENISHNMENT": "ATL_REPL",
+        "ATL REP": "ATL_REPL",
+        "ATP REP": "ATL_REPL",
+        "MAINT ENTRY": "ME",
+        "MAINTENANCE ENTRY": "ME",
+        "PRF EGR": "PRF",
+        "PSF EGR": "PSF",
+        "ME": "ME",
+        "PST": "PSF",
+        "PRE": "PRF",
+    }
+    if cleaned in alias_map:
+        return alias_map[cleaned]
+
+    canonical = cleaned.replace(" ", "_")
+    if canonical in {"TR", "PSF", "PRF", "EGR", "ME", "TR_WITH_PIREM", "VOID", "ATL_REPL"}:
+        return canonical
     return v
 
 
@@ -235,12 +182,14 @@ async def import_excel_generic(
         df = df.rename(columns={k: v for k, v in column_mapping.items() if k in df.columns})
         df = df.where(pd.notnull(df), None)
         records = df.to_dict(orient="records")
+        if model.__name__ == "AircraftTechnicalLog":
+            records = merge_atl_continuation_records(records)
         inject_fields = inject_fields or {}
 
         def _row_for_schema(row: Dict) -> Dict:
             merged = {**row, **inject_fields}
             if model.__name__ == "AircraftTechnicalLog":
-                _atl_row_attach_component_parts_from_flat(merged)
+                normalize_atl_import_row(merged)
             out = {}
             for k in schema_fields:
                 if k not in merged:
@@ -388,7 +337,7 @@ async def import_excel_generic(
                 select(model)
                 .where(model.aircraft_fk == aid)
                 .where(model.is_deleted.is_(False))
-                .order_by(cast(model.sequence_no, Integer).asc())
+                .order_by(cast(model.sequence_no, Numeric).asc())
             )
             for atl_row in (await session.execute(stmt)).scalars().all():
                 await persist_atl_auto_fields_to_row(session, atl_row, ac)

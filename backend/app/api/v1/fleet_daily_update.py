@@ -139,6 +139,7 @@ async def api_list_fleet_daily_updates_paged(
     api/v1/aircraft/{id}/ldnd-monitoring/latest, and tach_time_eod from api/v1/aircraft-technical-log/latest
     (tachometer_end)."""
     offset = (page - 1) * limit
+    sort_param = (sort.strip() if (sort and isinstance(sort, str)) else None) or ""
     items, total = await list_fleet_daily_updates(
         session=session,
         limit=limit,
@@ -146,7 +147,7 @@ async def api_list_fleet_daily_updates_paged(
         search=search.strip() if search and search.strip() else None,
         aircraft_fk=aircraft_fk,
         status=status,
-        sort=sort or "",
+        sort=sort_param,
     )
     pages = ceil(total / limit) if total else 0
     enriched = []
@@ -347,6 +348,7 @@ async def api_list_fleet_daily_updates_by_aircraft_paged(
     if not aircraft:
         raise HTTPException(status_code=404, detail="Aircraft not found")
     offset = (page - 1) * limit
+    sort_param = (sort.strip() if (sort and isinstance(sort, str)) else None) or ""
     items, total = await list_fleet_daily_updates(
         session=session,
         limit=limit,
@@ -354,7 +356,7 @@ async def api_list_fleet_daily_updates_by_aircraft_paged(
         search=search.strip() if search and search.strip() else None,
         aircraft_fk=aircraft_id,
         status=status,
-        sort=sort or "",
+        sort=sort_param,
     )
     pages = ceil(total / limit) if total else 0
     enriched = []
