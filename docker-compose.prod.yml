@@ -1,23 +1,23 @@
 name: laminar_core_prod
 
 services:
-  db:
-    image: postgres:15-alpine
-    container_name: laminar_db_prod
-    env_file:
-      - .env.prod
-    volumes:
-      - pgdata_prod:/var/lib/postgresql/data
-      - ./backend/docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d
-    # Do not expose DB port for security
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - laminar_network_prod
+  # db: 
+  #   image: postgres:15-alpine
+  #   container_name: laminar_db_prod
+  #   env_file:
+  #     - .env.prod
+  #   volumes:
+  #     - pgdata_prod:/var/lib/postgresql/data
+  #     - ./backend/docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d
+  #   # Do not expose DB port for security
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   networks:
+  #     - laminar_network_prod
 
   redis:
     image: redis:7-alpine
