@@ -61,6 +61,7 @@ _default_origins = [
     "http://120.89.33.51:3000",   # dev frontend
     "http://120.89.33.52:3011",   # uat frontend
     "http://120.89.33.51:3002",   # prod frontend
+    "http://35.247.149.93:3002",  # prod frontend (alternate host)
     "http://120.89.33.51:8000",
     "http://120.89.33.52:8081",
     "http://fleet.llibus.com",
@@ -84,7 +85,7 @@ else:
     origins = _default_origins
 
 # Allow deployment IP on any port (e.g. frontend on :80 or :3000) and localhost
-_origin_regex = r"^https?://(localhost|127\.0\.0\.1|120\.89\.33\.51)(:\d+)?$"
+_origin_regex = r"^https?://(localhost|127\.0\.0\.1|120\.89\.33\.51|35\.247\.149\.93)(:\d+)?$"
 
 app.add_middleware(
     CORSMiddleware,
