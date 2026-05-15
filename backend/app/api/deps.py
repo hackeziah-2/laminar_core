@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +15,10 @@ from app.models.user_permission import UserPermission
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+oauth2_scheme_optional = OAuth2PasswordBearer(
+    tokenUrl="/api/v1/auth/login",
+    auto_error=False,
+)
 
 
 async def get_current_account(
@@ -52,6 +58,49 @@ async def get_current_active_account(
     account: AccountInformation = Depends(get_current_account),
 ) -> AccountInformation:
     """Require active account (status=True)."""
+    if not account.status:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is inactive",
+        )
+    return account
+
+
+async def get_current_active_account_optional(
+    token: Optional[str] = Depends(oauth2_scheme_optional),
+    session: AsyncSession = Depends(get_session),
+) -> Optional[AccountInformation]:
+    """JWT when Authorization is sent; None when omitted (e.g. seed/bootstrap POST).
+
+    Missing header returns None. Invalid or inactive account raises like strict auth.
+    """
+    if not token:
+        return None
+    payload = decode_access_token(token)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+        )
+    account_id = payload.get("sub")
+    if account_id is None or account_id == "":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+        )
+    try:
+        account_pk = int(account_id)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+        )
+    account = await get_account_by_id(session, account_pk)
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Account not found",
+        )
     if not account.status:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

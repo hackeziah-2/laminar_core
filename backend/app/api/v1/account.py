@@ -26,7 +26,7 @@ from app.repository.account import (
     soft_delete_account_information,
     get_all_account_informations_list,
 )
-from app.api.deps import get_current_active_account
+from app.api.deps import get_current_active_account, get_current_active_account_optional
 from app.database import get_session
 from app.models.account import AccountInformation
 
@@ -150,13 +150,20 @@ async def api_get(
 async def api_create(
     payload: account_schema.AccountInformationCreate,
     session: AsyncSession = Depends(get_session),
-    current_account: AccountInformation = Depends(get_current_active_account),
+    current_account: Optional[AccountInformation] = Depends(
+        get_current_active_account_optional
+    ),
 ):
-    """Create a new Account Information entry."""
+    """Create a new Account Information entry.
+
+    JWT optional: omit Authorization for bootstrap seeding; when a valid token is
+    sent, audit fields record that account as the actor.
+    """
+    audit_id = current_account.id if current_account else None
     return await create_account_information(
         session,
         payload,
-        audit_account_id=current_account.id,
+        audit_account_id=audit_id,
     )
 
 
