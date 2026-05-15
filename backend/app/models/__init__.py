@@ -8,6 +8,7 @@ from .user_permission import UserPermission
 from .aircraft_logbook_entries import AircraftLogbookEntry
 from .aircraft_techinical_log import AircraftTechnicalLog, ComponentPartsRecord
 from .atl_batch import AtlBatch
+from .atl_excel_import_job import AtlExcelImportJob
 from .atl_monitoring import LDNDMonitoring
 from .account import AccountInformation
 from .fleet_daily_update import FleetDailyUpdate

@@ -1,21 +1,27 @@
 import asyncio
-import os
 import json
 from datetime import date
+from pathlib import Path
+
+import httpx
+from httpx import ASGITransport
 from sqlalchemy import select
+
 from app.database import AsyncSessionLocal
-from app.models import Role, Module, AccountInformation
+from app.main import app
+from app.models import Role, Module
 from app.models.role_permission import RolePermission
 
+SEED_DIR = Path(__file__).resolve().parent
+# Seed JSON processing order: roles depend on modules; account_information API needs committed roles.
+SEED_DB_JSON_FILES = ("module.json", "roles.json")
 
-SEED_FOLDER = "seeds"
 MODEL_MAP = {
     "roles": Role,
     "module": Module,
-    "account_information": AccountInformation
 }
 
-# Keys that should be parsed as date when loading from JSON (for account_information)
+# Keys parsed as date when loading account_information JSON
 ACCOUNT_DATE_KEYS = ("auth_initial_doi",)
 
 
@@ -33,6 +39,17 @@ def _coerce_account_information_record(record):
         if key in out and out[key] is not None:
             out[key] = _parse_date_value(out[key])
     return out
+
+
+def _account_record_to_json(record):
+    """Build JSON body for POST /api/v1/account-information/ (dates as ISO strings)."""
+    payload = {}
+    for k, v in record.items():
+        if isinstance(v, date):
+            payload[k] = v.isoformat()
+        else:
+            payload[k] = v
+    return payload
 
 
 def _perm_flags(p):
@@ -111,36 +128,87 @@ async def _seed_roles(db, records):
                 db.add(rp)
 
 
+async def _seed_db_table(db, table_name, model, records):
+    if table_name == "roles":
+        await _seed_roles(db, records)
+        return
+    for record in records:
+        filter_record = dict(record)
+        conditions = [getattr(model, k) == v for k, v in filter_record.items()]
+        stmt = select(model).where(*conditions)
+        result = await db.execute(stmt)
+        existing = result.scalar_one_or_none()
+        if not existing:
+            db.add(model(**record))
+
+
+def _asgi_transport():
+    """ASGITransport with lifespan when supported (runs FastAPI startup on same loop)."""
+    try:
+        return ASGITransport(app=app, lifespan="on")
+    except TypeError:
+        return ASGITransport(app=app)
+
+
+async def _seed_account_information_via_api(records):
+    """POST each row to /api/v1/account-information/ (no auth), same stack as production.
+
+    Uses async httpx + ASGITransport so asyncpg runs on the same event loop as
+    ``asyncio.run(seed())``. Starlette ``TestClient`` uses a different loop and breaks.
+    """
+    transport = _asgi_transport()
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://seed.local",
+    ) as client:
+        for raw in records:
+            record = _coerce_account_information_record(raw)
+            payload = _account_record_to_json(record)
+            resp = await client.post("/api/v1/account-information/", json=payload)
+            if resp.status_code == 201:
+                continue
+            if resp.status_code == 400:
+                try:
+                    body = resp.json()
+                except Exception:
+                    body = {}
+                detail = body.get("detail", "")
+                if "already exists" in str(detail).lower():
+                    print(
+                        f"  Skip account_information (duplicate username/email): "
+                        f"{payload.get('username')!r}"
+                    )
+                    continue
+            resp.raise_for_status()
+
+
 async def seed():
     async with AsyncSessionLocal() as db:
-        for file in os.listdir(SEED_FOLDER):
-            if not file.endswith(".json"):
+        for fname in SEED_DB_JSON_FILES:
+            path = SEED_DIR / fname
+            if not path.is_file():
+                print(f"Missing seed file (skipped): {path}")
                 continue
-            table_name = file.replace(".json", "")
+            table_name = fname.replace(".json", "")
             model = MODEL_MAP.get(table_name)
             if not model:
                 print(f"No model mapping for {table_name}")
                 continue
-            path = os.path.join(SEED_FOLDER, file)
             with open(path) as f:
                 records = json.load(f)
-            if table_name == "roles":
-                await _seed_roles(db, records)
-                print(f"Seeded {table_name}")
-                continue
-            for record in records:
-                if table_name == "account_information":
-                    record = _coerce_account_information_record(record)
-                # Build WHERE clause from record (exclude password for lookup)
-                filter_record = {k: v for k, v in record.items() if k != "password"}
-                conditions = [getattr(model, k) == v for k, v in filter_record.items()]
-                stmt = select(model).where(*conditions)
-                result = await db.execute(stmt)
-                existing = result.scalar_one_or_none()
-                if not existing:
-                    db.add(model(**record))
+            await _seed_db_table(db, table_name, model, records)
             print(f"Seeded {table_name}")
         await db.commit()
+
+    acc_path = SEED_DIR / "account_information.json"
+    if acc_path.is_file():
+        with open(acc_path) as f:
+            acc_records = json.load(f)
+        await _seed_account_information_via_api(acc_records)
+        print("Seeded account_information (POST /api/v1/account-information/)")
+    else:
+        print(f"Missing seed file (skipped): {acc_path}")
+
 
 if __name__ == "__main__":
     asyncio.run(seed())
