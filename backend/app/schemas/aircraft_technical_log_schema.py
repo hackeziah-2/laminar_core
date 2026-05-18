@@ -578,12 +578,28 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
                 return None
         except (TypeError, ValueError):
             pass
+        if isinstance(v, str) and str(v).strip().upper() == "UNK":
+            return None
         if isinstance(v, (int, float)) and not isinstance(v, bool):
             if isinstance(v, float) and (math.isnan(v) or not math.isfinite(v)):
                 return None
             if isinstance(v, float) and v == int(v):
                 return str(int(v))
             return str(v)
+        return v
+
+    @validator("propeller_tsn", pre=True)
+    def propeller_tsn_excel_unk_to_none(cls, v: Any) -> Any:
+        """Treat Excel sentinel UNK as unknown (NULL); column is float."""
+        if v is None:
+            return None
+        try:
+            if pd.isna(v):
+                return None
+        except (TypeError, ValueError):
+            pass
+        if isinstance(v, str) and str(v).strip().upper() == "UNK":
+            return None
         return v
 
     @validator(

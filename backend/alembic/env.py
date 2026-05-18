@@ -21,6 +21,7 @@ from app.models.user import User
 from app.models.aircraft_logbook_entries import AircraftLogbookEntry
 from app.models.aircraft_techinical_log import AircraftTechnicalLog, ComponentPartsRecord
 from app.models.atl_batch import AtlBatch
+from app.models.atl_excel_import_job import AtlExcelImportJob
 from app.models.atl_monitoring import LDNDMonitoring
 from app.models.account import AccountInformation
 from app.models.logbooks import EngineLogbook, AirframeLogbook, AvionicsLogbook, PropellerLogbook
