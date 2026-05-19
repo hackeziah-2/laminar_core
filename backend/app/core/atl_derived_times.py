@@ -50,6 +50,15 @@ def previous_value_or_aircraft(
     return float_or_zero(getattr(aircraft, aircraft_attr, None)) if aircraft else 0.0
 
 
+# Manual ATL field -> persisted auto_* column used when the manual field is zero.
+_PREV_ATTR_TO_AUTO_COL: Dict[str, str] = {
+    "engine_tsn": "auto_engine_tsn",
+    "engine_tso": "auto_engine_tso",
+    "propeller_tsn": "auto_propeller_tsn",
+    "propeller_tso": "auto_propeller_tso",
+}
+
+
 def previous_computed_or_aircraft(
     prev_auto_fields: Optional[Dict[str, float]],
     prev_auto_key: str,
@@ -58,12 +67,20 @@ def previous_computed_or_aircraft(
     aircraft,
     aircraft_attr: str,
 ) -> float:
-    """Previous computed total when available; otherwise fall back to raw previous/aircraft baseline."""
-    if prev_auto_fields is not None:
-        prev_val = float_or_zero(prev_auto_fields.get(prev_auto_key))
-        if prev_val != 0.0:
-            return prev_val
-    return previous_value_or_aircraft(prev_atl, prev_attr, aircraft, aircraft_attr)
+    """Previous cumulative total: persisted auto_* on prev row, else in-memory chain, else aircraft."""
+    prev_raw = float_or_zero(getattr(prev_atl, prev_attr, None)) if prev_atl else 0.0
+    if prev_raw != 0.0:
+        return prev_raw
+
+    # Raw zero: use persisted cumulative on the previous row when backfilled; otherwise aircraft
+    # baseline (do not use in-memory prev_auto_fields so a SQL-seeded prior leg does not skew the next).
+    auto_col = _PREV_ATTR_TO_AUTO_COL.get(prev_attr)
+    if prev_atl and auto_col:
+        persisted = float_or_zero(getattr(prev_atl, auto_col, None))
+        if persisted != 0.0:
+            return persisted
+
+    return float_or_zero(getattr(aircraft, aircraft_attr, None)) if aircraft else 0.0
 
 
 def compute_auto_fields(
@@ -93,20 +110,18 @@ def compute_auto_fields(
 
     try:
         if prev_atl is None:
-            # First ATL in stream: start from aircraft baseline directly.
-            out["auto_airframe_aftt"] = float_or_zero(
+            base_aftt = float_or_zero(
                 getattr(aircraft, "airframe_aftt", None)
             ) if aircraft else 0.0
         else:
-            base_aftt = previous_computed_or_aircraft(
-                prev_auto_fields,
-                "auto_airframe_aftt",
+            # Prefer the previous row's stored cumulative AFTT (manual entry), then aircraft baseline.
+            base_aftt = previous_value_or_aircraft(
                 prev_atl,
                 "airframe_aftt",
                 aircraft,
                 "airframe_aftt",
             )
-            out["auto_airframe_aftt"] = base_aftt + out["auto_airframe_run_time"]
+        out["auto_airframe_aftt"] = base_aftt + out["auto_airframe_run_time"]
     except Exception:
         pass
 
@@ -119,9 +134,10 @@ def compute_auto_fields(
 
     try:
         if prev_atl is None:
-            out["auto_engine_tsn"] = float_or_zero(
+            base_tsn = float_or_zero(
                 getattr(aircraft, "engine_tsn", None)
             ) if aircraft else 0.0
+            out["auto_engine_tsn"] = base_tsn + out["auto_engine_run_time"]
         else:
             base_tsn = previous_computed_or_aircraft(
                 prev_auto_fields,
@@ -137,9 +153,10 @@ def compute_auto_fields(
 
     try:
         if prev_atl is None:
-            out["auto_engine_tso"] = float_or_zero(
+            base_tso = float_or_zero(
                 getattr(aircraft, "engine_tso", None)
             ) if aircraft else 0.0
+            out["auto_engine_tso"] = base_tso + out["auto_engine_run_time"]
         else:
             base_tso = previous_computed_or_aircraft(
                 prev_auto_fields,
@@ -167,9 +184,10 @@ def compute_auto_fields(
 
     try:
         if prev_atl is None:
-            out["auto_propeller_tsn"] = float_or_zero(
+            base_ptsn = float_or_zero(
                 getattr(aircraft, "propeller_tsn", None)
             ) if aircraft else 0.0
+            out["auto_propeller_tsn"] = base_ptsn + out["auto_propeller_run_time"]
         else:
             base_ptsn = previous_computed_or_aircraft(
                 prev_auto_fields,
@@ -185,9 +203,10 @@ def compute_auto_fields(
 
     try:
         if prev_atl is None:
-            out["auto_propeller_tso"] = float_or_zero(
+            base_ptso = float_or_zero(
                 getattr(aircraft, "propeller_tso", None)
             ) if aircraft else 0.0
+            out["auto_propeller_tso"] = base_ptso + out["auto_propeller_run_time"]
         else:
             base_ptso = previous_computed_or_aircraft(
                 prev_auto_fields,

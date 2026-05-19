@@ -10,28 +10,36 @@ def test_rbac_maintenance_planner_statuses():
     allowed = allowed_work_statuses_for_atl_paged_list("Maintenance Planner")
     assert set(allowed) == {
         WorkStatus.FOR_REVIEW,
-        WorkStatus.AWAITING_ATTACHMENT,
-        WorkStatus.COMPLETED,
-        WorkStatus.PENDING,
         WorkStatus.APPROVED,
         WorkStatus.REJECTED_MAINTENANCE,
-        WorkStatus.REJECTED_QUALITY,
     }
 
 
 def test_rbac_maintenance_manager_statuses():
     allowed = allowed_work_statuses_for_atl_paged_list("Maintenance Manager")
-    assert set(allowed) == {WorkStatus.FOR_REVIEW, WorkStatus.APPROVED}
+    assert set(allowed) == {
+        WorkStatus.FOR_REVIEW,
+        WorkStatus.APPROVED,
+        WorkStatus.REJECTED_MAINTENANCE,
+    }
 
 
 def test_rbac_technical_publication_statuses():
     allowed = allowed_work_statuses_for_atl_paged_list("Technical Publication")
-    assert set(allowed) == {WorkStatus.AWAITING_ATTACHMENT, WorkStatus.PENDING}
+    assert set(allowed) == {
+        WorkStatus.AWAITING_ATTACHMENT,
+        WorkStatus.PENDING,
+        WorkStatus.REJECTED_QUALITY,
+    }
 
 
 def test_rbac_quality_manager_statuses():
     allowed = allowed_work_statuses_for_atl_paged_list("Quality Manager")
-    assert set(allowed) == {WorkStatus.PENDING, WorkStatus.COMPLETED}
+    assert set(allowed) == {
+        WorkStatus.PENDING,
+        WorkStatus.COMPLETED,
+        WorkStatus.REJECTED_QUALITY,
+    }
 
 
 def test_rbac_unknown_role_returns_empty():

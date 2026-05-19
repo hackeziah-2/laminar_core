@@ -109,6 +109,52 @@ async def get_current_active_account_optional(
     return account
 
 
+async def ensure_account_permission(
+    session: AsyncSession,
+    account: AccountInformation,
+    module_name: str,
+    action: str,
+) -> None:
+    """Raise HTTPException if account lacks permission on module."""
+    result = await session.execute(
+        select(Module).where(Module.name == module_name, Module.is_deleted == False)
+    )
+    module = result.scalar_one_or_none()
+    if not module:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Module '{module_name}' not found",
+        )
+
+    up_result = await session.execute(
+        select(UserPermission).where(
+            UserPermission.account_id == account.id,
+            UserPermission.module_id == module.id,
+            UserPermission.is_deleted == False,
+        )
+    )
+    user_perm = up_result.scalar_one_or_none()
+    if user_perm and getattr(user_perm, action, False):
+        return
+
+    if account.role_id:
+        rp_result = await session.execute(
+            select(RolePermission).where(
+                RolePermission.role_id == account.role_id,
+                RolePermission.module_id == module.id,
+                RolePermission.is_deleted == False,
+            )
+        )
+        role_perm = rp_result.scalar_one_or_none()
+        if role_perm and getattr(role_perm, action, False):
+            return
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=f"Permission denied: {action} on {module_name}",
+    )
+
+
 def require_permission(module_name: str, action: str):
     """
     Dependency factory: require account to have permission on module.
@@ -119,47 +165,7 @@ def require_permission(module_name: str, action: str):
         account: AccountInformation = Depends(get_current_active_account),
         session: AsyncSession = Depends(get_session),
     ) -> AccountInformation:
-        # Load role and user_permissions
-
-
-        result = await session.execute(
-            select(Module).where(Module.name == module_name, Module.is_deleted == False)
-        )
-        module = result.scalar_one_or_none()
-        if not module:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Module '{module_name}' not found",
-            )
-
-        # Check user override permission
-        up_result = await session.execute(
-            select(UserPermission).where(
-                UserPermission.account_id == account.id,
-                UserPermission.module_id == module.id,
-                UserPermission.is_deleted == False,
-            )
-        )
-        user_perm = up_result.scalar_one_or_none()
-        if user_perm and getattr(user_perm, action, False):
-            return account
-
-        # Check role permission
-        if account.role_id:
-            rp_result = await session.execute(
-                select(RolePermission).where(
-                    RolePermission.role_id == account.role_id,
-                    RolePermission.module_id == module.id,
-                    RolePermission.is_deleted == False,
-                )
-            )
-            role_perm = rp_result.scalar_one_or_none()
-            if role_perm and getattr(role_perm, action, False):
-                return account
-
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Permission denied: {action} on {module_name}",
-        )
+        await ensure_account_permission(session, account, module_name, action)
+        return account
 
     return _check

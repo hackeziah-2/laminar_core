@@ -73,11 +73,28 @@ pytest -m "not integration"
 
 ## Test Structure
 
-- `conftest.py` - Shared fixtures and test configuration
-- `test_aircraft.py` - Aircraft endpoint tests
-- `test_aircraft_technical_log.py` - Aircraft Technical Log endpoint tests
-- `test_models.py` - SQLAlchemy model tests
-- `test_auth.py` - Authentication endpoint tests
+Enterprise layout (see [AI_RULES.md](../AI_RULES.md) **Testing Rules**):
+
+```text
+tests/
+  conftest.py              # db session, TestClient, httpx AsyncClient, auth fixtures
+  factories/               # RBAC seeds, CSV bytes (no assertions)
+  api/                     # HTTP: auth, RBAC, status codes
+  services/                # business orchestration
+  repositories/            # SQLAlchemy persistence
+  test_*.py                # legacy top-level tests (keep when stable)
+```
+
+- `conftest.py` — Shared fixtures: `db_session`, `client`, `async_client`, RBAC auth overrides
+- `factories/rbac.py` — Seed module/role/account for permission tests
+- `factories/import_files.py` — Sample CSV bytes for Excel import
+- `api/test_data_import_api.py` — Excel import endpoints
+- `services/test_excel_import_service.py` — Import orchestration
+- `repositories/test_excel_import_repository.py` — Upsert / soft-delete restore
+- `test_aircraft.py` — Aircraft endpoint tests
+- `test_aircraft_technical_log.py` — Aircraft Technical Log endpoint tests
+- `test_models.py` — SQLAlchemy model tests
+- `test_auth.py` — Authentication endpoint tests
 
 ## Test Database
 
@@ -102,13 +119,15 @@ pytest
    - `test_aircraft_data` - Sample aircraft data
    - `test_aircraft_technical_log_data` - Sample ATL data
 
-3. Example test:
+3. Prefer `httpx.AsyncClient` for new API tests:
 ```python
 @pytest.mark.asyncio
-async def test_my_endpoint(client: AsyncClient):
-    response = client.get("/api/v1/my-endpoint")
+async def test_my_endpoint(async_client: AsyncClient):
+    response = await async_client.get("/api/v1/my-endpoint")
     assert response.status_code == 200
 ```
+
+4. Cover success, validation, 404, 403 RBAC, 401 unauthorized, and transaction/edge cases per feature (see AI_RULES.md).
 
 ## Coverage Reports
 

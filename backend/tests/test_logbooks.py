@@ -616,7 +616,6 @@ async def _create_test_aircraft(session: AsyncSession) -> int:
     aircraft = Aircraft(
         registration="REPO-TEST-001",
         manufacturer="Test",
-        type="Test",
         model="Test",
         msn="REPO-MSN-001",
         base="Base",

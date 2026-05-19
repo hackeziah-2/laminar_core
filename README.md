@@ -2,6 +2,8 @@ Flight Management API
 This scaffold contains a modular FastAPI backend ready for PostgreSQL, Redis, and Celery.  
 Run locally with Docker Compose.
 
+**Backend conventions (for humans and AI):** see [AI_RULES.md](AI_RULES.md) for layer boundaries, RBAC, audit fields, and how to add new APIs or Excel imports.
+
 ---
 
 ## How to run the server (every environment)
@@ -26,6 +28,44 @@ Full steps, one-line commands, and troubleshooting: **[DEPLOYMENT.md](DEPLOYMENT
 2. `docker-compose -f docker-compose.dev.yml --env-file .env.dev up --build -d`
 3. `docker-compose -f docker-compose.dev.yml exec backend alembic upgrade head`
 4. API docs: http://localhost:8000/docs
+
+---
+
+## How to use the app
+
+### 1. Start the API
+
+Follow [Quick start](#quick-start-development-only) or [How to run the server](#how-to-run-the-server-every-environment). When the backend is up, open:
+
+- **Swagger UI:** http://localhost:8000/docs
+- **Health check:** http://localhost:8000/api/v1/health
+
+### 2. Authenticate
+
+Most endpoints require a JWT.
+
+1. **Register** (if needed): `POST /api/v1/auth/register` with username, password, and related fields.
+2. **Login:** `POST /api/v1/auth/token` (OAuth2 form: `username`, `password`).
+3. Copy `access_token` from the response.
+4. In Swagger, click **Authorize** and enter: `Bearer <your_token>`  
+   Or send the header: `Authorization: Bearer <your_token>`.
+
+### 3. Call endpoints
+
+- Browse routes by tag in `/docs` (e.g. `aircraft`, `excel-data`, `atl-batch`).
+- Protected routes return **401** without a token and **403** if your role lacks permission on that module.
+- RBAC module names match seed data (e.g. `General Information`, `Maintenance`) — see `backend/seeds/module.json`.
+
+### 4. Typical workflows
+
+| Task | Where to start |
+|------|----------------|
+| Manage aircraft | `/api/v1/aircraft/` |
+| Import from Excel | `POST /api/v1/excel-data/{target_key}/import` — list targets at `GET /api/v1/excel-data/targets`. Variable names (API, form fields, columns): **[AI_RULES.md § Excel / CSV import](AI_RULES.md#readable-variables-api-registry-spreadsheet)** |
+| ATL batch + import | `/api/v1/atl-batch/` then Excel import or `/api/v1/import-excel` |
+| Account / roles | `/api/v1/auth/`, `/api/v1/account/`, `/api/v1/role/` |
+
+More backend rules: **[AI_RULES.md](AI_RULES.md)**.
 
 ---
 
