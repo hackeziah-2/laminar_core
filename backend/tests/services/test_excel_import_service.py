@@ -11,7 +11,13 @@ from app.schemas.aircraft_schema import AircraftImportSchema
 from app.services.excel_import.config import ExcelImportConfig
 from app.services.excel_import.reader import read_upload_records
 from app.services.excel_import_service import ExcelImportService
-from app.services.excel_import.parsers import parse_import_date, parse_import_origin_date
+from app.services.excel_import.parsers import (
+    coerce_import_float,
+    is_spreadsheet_empty,
+    parse_import_date,
+    parse_import_origin_date,
+    sanitize_spreadsheet_value,
+)
 from tests.factories.import_files import aircraft_csv_bytes
 
 
@@ -129,3 +135,18 @@ def test_parse_import_date_string_formats():
 
     assert parse_import_date("17-Aug-23") == date(2023, 8, 17)
     assert parse_import_date("8/17/2023") == date(2023, 8, 17)
+
+
+def test_spreadsheet_empty_sentinels():
+    """pandas NaT/NaN from Excel must not reach the database layer."""
+    import math
+
+    import pandas as pd
+
+    assert is_spreadsheet_empty(pd.NaT) is True
+    assert is_spreadsheet_empty(float("nan")) is True
+    assert sanitize_spreadsheet_value(pd.NaT) is None
+    assert coerce_import_float(float("nan")) is None
+    assert parse_import_date(pd.NaT) is None
+    assert parse_import_date(float("nan")) is None
+    assert not math.isnan(coerce_import_float(12.0) or 0)

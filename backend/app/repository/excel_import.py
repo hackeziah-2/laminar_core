@@ -26,7 +26,7 @@ def normalize_unique_fields(unique_fields: Union[str, Sequence[str]]) -> List[st
 
 def validated_to_dict(validated: BaseModel) -> Dict[str, Any]:
     if hasattr(validated, "model_dump"):
-        return validated.model_dump()
+        return validated.model_dump(exclude_unset=False, exclude_none=False)
     return validated.dict()
 
 
@@ -58,9 +58,27 @@ async def upsert_validated_row(
 ) -> tuple[Any, bool]:
     """
     Insert or update one row. Returns (entity, created).
+    When fields is empty, always inserts (no upsert).
     Raises nothing on duplicate unique conflict — caller should check conflict first.
     """
     model_columns = model_column_names(model)
+    if not fields:
+        data = validated_to_dict(validated)
+        payload = {k: data[k] for k in model_columns if k in data}
+        obj = model(**payload)
+        session.add(obj)
+        if audit_account_id is not None:
+            await set_audit_fields(obj, audit_account_id, is_create=True)
+        await hook.after_upsert(
+            session,
+            validated=validated,
+            existing=None,
+            obj=obj,
+            audit_account_id=audit_account_id,
+        )
+        await session.flush()
+        return obj, True
+
     existing = await find_by_unique_fields(session, model, validated, fields)
 
     data = validated_to_dict(validated)
@@ -101,8 +119,6 @@ async def upsert_validated_row(
     session.add(obj)
     if audit_account_id is not None:
         await set_audit_fields(obj, audit_account_id, is_create=True)
-    if not existing:
-        await session.flush()
     await hook.after_upsert(
         session,
         validated=validated,
@@ -110,6 +126,7 @@ async def upsert_validated_row(
         obj=obj,
         audit_account_id=audit_account_id,
     )
+    await session.flush()
     return obj, True
 
 

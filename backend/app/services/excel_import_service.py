@@ -50,11 +50,13 @@ class ExcelImportService:
         config: ExcelImportConfig,
     ) -> Dict[str, Any]:
         fields = normalize_unique_fields(config.unique_fields)
-        for scope_field in ("aircraft_fk", "ad_monitoring_fk"):
-            if scope_field in config.inject_fields and scope_field not in fields:
-                fields = [scope_field, *fields]
-        if not fields:
-            raise AppValidationError("At least one unique field is required")
+        insert_only = len(fields) == 0
+        if not insert_only:
+            for scope_field in ("aircraft_fk", "ad_monitoring_fk"):
+                if scope_field in config.inject_fields and scope_field not in fields:
+                    fields = [scope_field, *fields]
+            if not fields:
+                raise AppValidationError("At least one unique field is required")
 
         hook = get_import_hook(config.hook_key)
         schema_fields = schema_field_names(config.schema)
@@ -81,13 +83,16 @@ class ExcelImportService:
                     hook=hook,
                 )
                 validated = config.schema(**row_data)
-                existing = await find_by_unique_fields(
-                    session, config.model, validated, fields
-                )
-                if existing:
-                    updated += 1
-                else:
+                if insert_only:
                     inserted += 1
+                else:
+                    existing = await find_by_unique_fields(
+                        session, config.model, validated, fields
+                    )
+                    if existing:
+                        updated += 1
+                    else:
+                        inserted += 1
             except Exception as exc:
                 errors.append({"row": excel_row, "error": format_row_error(exc)})
 

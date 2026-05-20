@@ -1,7 +1,7 @@
 """Resolve aircraft / ATL batch context before import (repository layer)."""
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,7 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import NotFoundError, ValidationError
 from app.models.ad_monitoring import ADMonitoring
 from app.models.aircraft import Aircraft
+from app.models.aircraft_techinical_log import AircraftTechnicalLog
 from app.models.atl_batch import AtlBatch
+from app.schemas.aircraft_technical_log_schema import normalize_sequence_no_digits_only
 
 
 async def resolve_aircraft_id(
@@ -61,6 +63,47 @@ async def resolve_ad_monitoring_id(
     if result.scalar_one_or_none() is None:
         raise NotFoundError("AD monitoring record not found")
     return ad_monitoring_id
+
+
+def _sequence_no_from_import_value(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, float):
+        if value != value or not value:  # NaN or zero-ish empty
+            return None
+        if value.is_integer():
+            return str(int(value))
+        return str(value).strip()
+    if isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
+    s = str(value).strip()
+    if not s or s.upper() in ("-", "NA", "N/A"):
+        return None
+    return s
+
+
+async def resolve_atl_id_by_sequence_no(
+    session: AsyncSession,
+    *,
+    aircraft_fk: int,
+    sequence_no: Any,
+) -> Optional[int]:
+    """Return first matching ``aircraft_technical_log.id`` by aircraft + sequence_no."""
+    raw = _sequence_no_from_import_value(sequence_no)
+    if raw is None:
+        return None
+    normalized = normalize_sequence_no_digits_only(raw)
+    if not normalized:
+        return None
+    result = await session.execute(
+        select(AircraftTechnicalLog)
+        .where(AircraftTechnicalLog.is_deleted.is_(False))
+        .where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
+        .where(AircraftTechnicalLog.sequence_no == normalized)
+        .limit(1)
+    )
+    row = result.scalar_one_or_none()
+    return row.id if row is not None else None
 
 
 async def ensure_atl_batch_exists(session: AsyncSession, batch_id: int) -> None:

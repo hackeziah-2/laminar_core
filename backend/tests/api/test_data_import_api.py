@@ -9,8 +9,10 @@ from tests.factories.import_files import (
     ad_csv_bytes,
     ad_work_order_csv_bytes,
     aircraft_csv_bytes,
+    cpcp_csv_bytes,
     invalid_extension_bytes,
     ldnd_csv_bytes,
+    tcc_csv_bytes,
 )
 
 
@@ -30,6 +32,8 @@ def test_list_import_targets(
     assert "maintenance-ldnd" in keys
     assert "maintenance-ad" in keys
     assert "maintenance-ad-work-orders" in keys
+    assert "maintenance-tcc" in keys
+    assert "maintenance-cpcp" in keys
 
 
 @pytest.mark.asyncio
@@ -666,6 +670,343 @@ def test_ldnd_import_dry_run_success(
     body = response.json()
     assert body["status"] == "dry-run"
     assert body["inserted"] >= 1
+    assert body["errors"] == []
+
+
+# --- TCC import (/api/v1/excel-data/maintenance-tcc/import) ---
+
+
+def test_tcc_import_missing_aircraft_context(
+    client_with_maintenance_import_auth: TestClient,
+):
+    """Validation — aircraft_id or registration required."""
+    response = client_with_maintenance_import_auth.post(
+        "/api/v1/excel-data/maintenance-tcc/import",
+        files={"file": ("tcc.csv", tcc_csv_bytes(), "text/csv")},
+    )
+    assert response.status_code == 400
+    assert "aircraft" in response.json()["detail"].lower()
+
+
+def test_tcc_import_dry_run_success(
+    client_with_maintenance_import_auth: TestClient,
+):
+    """Dry run validates TCC rows for a seeded aircraft."""
+    import asyncio
+
+    from app.models.aircraft import Aircraft
+    from tests.conftest import TestSessionLocal
+
+    async def _seed_aircraft() -> int:
+        async with TestSessionLocal() as session:
+            ac = Aircraft(
+                registration="TCC-IMP-AC",
+                manufacturer="Cessna",
+                model="172",
+                msn="TCC-MSN-1",
+                base="Base",
+                ownership="Owner",
+                status="Active",
+            )
+            session.add(ac)
+            await session.commit()
+            await session.refresh(ac)
+            return ac.id
+
+    aircraft_pk = asyncio.run(_seed_aircraft())
+
+    response = client_with_maintenance_import_auth.post(
+        "/api/v1/excel-data/maintenance-tcc/import?dry_run=true",
+        data={"aircraft_id": str(aircraft_pk)},
+        files={"file": ("tcc.csv", tcc_csv_bytes(), "text/csv")},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "dry-run"
+    assert body["inserted"] >= 1
+    assert body["updated"] == 0
+    assert body["errors"] == []
+
+
+def test_tcc_import_dry_run_sequence_no_column_maps_to_atl_sequence(
+    client_with_maintenance_import_auth: TestClient,
+):
+    """Excel column 'Sequence No.' maps to the same field as ATL Ref (sequence → atl_ref on save)."""
+    import asyncio
+
+    from app.models.aircraft import Aircraft
+    from tests.conftest import TestSessionLocal
+
+    async def _seed_aircraft() -> int:
+        async with TestSessionLocal() as session:
+            ac = Aircraft(
+                registration="TCC-SEQ-COL-AC",
+                manufacturer="Cessna",
+                model="172",
+                msn="TCC-SEQ-MSN",
+                base="Base",
+                ownership="Owner",
+                status="Active",
+            )
+            session.add(ac)
+            await session.commit()
+            await session.refresh(ac)
+            return ac.id
+
+    aircraft_pk = asyncio.run(_seed_aircraft())
+    rows = [
+        {
+            "Category": "AIRFRAME",
+            "Part Number": "PN-SEQ",
+            "Description": "Row with Sequence No. header",
+            "Sequence No.": "10001",
+        }
+    ]
+    response = client_with_maintenance_import_auth.post(
+        "/api/v1/excel-data/maintenance-tcc/import?dry_run=true",
+        data={"aircraft_id": str(aircraft_pk)},
+        files={"file": ("tcc.csv", tcc_csv_bytes(rows), "text/csv")},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["errors"] == []
+
+
+def test_tcc_import_inspection_servicing_category_alias(
+    client_with_maintenance_import_auth: TestClient,
+):
+    """Category INSPECTION/SERVICING normalizes to Inspection Servicing."""
+    import asyncio
+
+    from app.models.aircraft import Aircraft
+    from tests.conftest import TestSessionLocal
+
+    async def _seed_aircraft() -> int:
+        async with TestSessionLocal() as session:
+            ac = Aircraft(
+                registration="TCC-CAT-AC",
+                manufacturer="Cessna",
+                model="172",
+                msn="TCC-CAT-MSN",
+                base="Base",
+                ownership="Owner",
+                status="Active",
+            )
+            session.add(ac)
+            await session.commit()
+            await session.refresh(ac)
+            return ac.id
+
+    aircraft_pk = asyncio.run(_seed_aircraft())
+    rows = [
+        {
+            "Category": "INSPECTION/SERVICING",
+            "Part Number": "PN-1",
+            "Description": "Test item",
+        }
+    ]
+
+    response = client_with_maintenance_import_auth.post(
+        "/api/v1/excel-data/maintenance-tcc/import?dry_run=true",
+        data={"aircraft_id": str(aircraft_pk)},
+        files={"file": ("tcc.csv", tcc_csv_bytes(rows), "text/csv")},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["errors"] == []
+
+
+def test_tcc_import_persist_without_part_number(
+    client_with_maintenance_import_auth: TestClient,
+):
+    """Persist import rows when part_number is blank (NOT NULL column uses empty string)."""
+    import asyncio
+
+    from sqlalchemy import select
+
+    from app.models.aircraft import Aircraft
+    from app.models.tcc_maintenance import TCCMaintenance
+    from tests.conftest import TestSessionLocal
+
+    async def _seed_aircraft() -> int:
+        async with TestSessionLocal() as session:
+            ac = Aircraft(
+                registration="TCC-PERSIST-AC",
+                manufacturer="Cessna",
+                model="172",
+                msn="TCC-PERSIST-MSN",
+                base="Base",
+                ownership="Owner",
+                status="Active",
+            )
+            session.add(ac)
+            await session.commit()
+            await session.refresh(ac)
+            return ac.id
+
+    aircraft_pk = asyncio.run(_seed_aircraft())
+    rows = [{"Category": "AIRFRAME", "Description": "Wing"}]
+
+    response = client_with_maintenance_import_auth.post(
+        "/api/v1/excel-data/maintenance-tcc/import",
+        data={"aircraft_id": str(aircraft_pk)},
+        files={"file": ("tcc.csv", tcc_csv_bytes(rows), "text/csv")},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "success"
+    assert body["inserted"] == 1
+    assert body["errors"] == []
+
+    async def _assert_row() -> None:
+        async with TestSessionLocal() as session:
+            result = await session.execute(
+                select(TCCMaintenance).where(TCCMaintenance.aircraft_fk == aircraft_pk)
+            )
+            items = result.scalars().all()
+            assert len(items) == 1
+            assert items[0].part_number == ""
+            assert items[0].description == "Wing"
+
+    asyncio.run(_assert_row())
+
+
+def test_tcc_import_schema_sanitizes_pandas_nat_and_nan():
+    """Empty Excel date/number cells (NaT/nan) must become None, not DB errors."""
+    import math
+
+    import pandas as pd
+
+    from app.schemas.tcc_maintenance_schema import TCCMaintenanceImportSchema
+
+    row = TCCMaintenanceImportSchema(
+        aircraft_fk=1,
+        category="POWERPLANT",
+        part_number="PN-1",
+        description="Fuel hose",
+        last_done_date=pd.NaT,
+        last_done_tach=float("nan"),
+        last_done_aftt=float("nan"),
+        component_limit_hours=float("nan"),
+    )
+    assert row.last_done_date is None
+    assert row.last_done_tach is None
+    assert row.last_done_aftt is None
+    assert row.component_limit_hours is None
+    assert not (row.component_limit_years is not None and math.isnan(row.component_limit_years))
+
+
+# --- CPCP import (/api/v1/excel-data/maintenance-cpcp/import) ---
+
+
+def test_cpcp_import_missing_aircraft_context(
+    client_with_maintenance_import_auth: TestClient,
+):
+    """Validation — aircraft_id or registration required."""
+    response = client_with_maintenance_import_auth.post(
+        "/api/v1/excel-data/maintenance-cpcp/import",
+        files={"file": ("cpcp.csv", cpcp_csv_bytes(), "text/csv")},
+    )
+    assert response.status_code == 400
+    assert "aircraft" in response.json()["detail"].lower()
+
+
+def test_cpcp_import_dry_run_success(
+    client_with_maintenance_import_auth: TestClient,
+):
+    """Dry run validates CPCP rows for a seeded aircraft."""
+    import asyncio
+
+    from app.models.aircraft import Aircraft
+    from tests.conftest import TestSessionLocal
+
+    async def _seed_aircraft() -> int:
+        async with TestSessionLocal() as session:
+            ac = Aircraft(
+                registration="CPCP-IMP-AC",
+                manufacturer="Cessna",
+                model="172",
+                msn="CPCP-MSN-1",
+                base="Base",
+                ownership="Owner",
+                status="Active",
+            )
+            session.add(ac)
+            await session.commit()
+            await session.refresh(ac)
+            return ac.id
+
+    aircraft_pk = asyncio.run(_seed_aircraft())
+
+    response = client_with_maintenance_import_auth.post(
+        "/api/v1/excel-data/maintenance-cpcp/import?dry_run=true",
+        data={"aircraft_id": str(aircraft_pk)},
+        files={"file": ("cpcp.csv", cpcp_csv_bytes(), "text/csv")},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "dry-run"
+    assert body["inserted"] >= 1
+    assert body["updated"] == 0
+    assert body["errors"] == []
+
+
+def test_cpcp_import_dry_run_date_formats(
+    client_with_maintenance_import_auth: TestClient,
+):
+    """Dates accept M/D/YYYY and DD-Mon-YY string formats."""
+    import asyncio
+
+    from app.models.aircraft import Aircraft
+    from tests.conftest import TestSessionLocal
+
+    async def _seed_aircraft() -> int:
+        async with TestSessionLocal() as session:
+            ac = Aircraft(
+                registration="CPCP-DATE-AC",
+                manufacturer="Cessna",
+                model="172",
+                msn="CPCP-DATE-MSN",
+                base="Base",
+                ownership="Owner",
+                status="Active",
+            )
+            session.add(ac)
+            await session.commit()
+            await session.refresh(ac)
+            return ac.id
+
+    aircraft_pk = asyncio.run(_seed_aircraft())
+    rows = [
+        {
+            "Inspection Operation": "Wing spar inspection",
+            "Description": "First row",
+            "Interval Hours": "120",
+            "Interval Months": "6",
+            "Last Done Tach": "1000.0",
+            "Last Done AFTT": "1002.0",
+            "Last Done Date": "6/5/2023",
+            "Sequence No.": "10001",
+        },
+        {
+            "Inspection Operation": "Tail section inspection",
+            "Description": "Second row",
+            "Interval Hours": "200",
+            "Interval Months": "12",
+            "Last Done Tach": "1200.5",
+            "Last Done AFTT": "1201.0",
+            "Last Done Date": "23-Jul-23",
+            "Sequence No.": "10002",
+        },
+    ]
+
+    response = client_with_maintenance_import_auth.post(
+        "/api/v1/excel-data/maintenance-cpcp/import?dry_run=true",
+        data={"aircraft_id": str(aircraft_pk)},
+        files={"file": ("cpcp.csv", cpcp_csv_bytes(rows), "text/csv")},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "dry-run"
+    assert body["inserted"] == 2
     assert body["errors"] == []
 
 

@@ -75,6 +75,35 @@ def ad_work_order_csv_bytes(rows: Optional[List[Dict[str, Any]]] = None) -> byte
     return buf.getvalue().encode("utf-8")
 
 
+def tcc_csv_bytes(rows: Optional[List[Dict[str, Any]]] = None) -> bytes:
+    """Minimal valid TCC maintenance import CSV (friendly headers as in production mapping)."""
+    default_row = {
+        "Category": "POWERPLANT",
+        "Part Number": "O-320-E2D",
+        "Serial Number": "L-20134-27A",
+        "Description": "Engine",
+        "Component Method of Compliance": "Overhaul",
+        "Last Done Date": "6/5/2023",
+        "Last Done Tach": "6345.6",
+        "Last Done AFTT": "6346.2",
+        "Last Done Method of Compliance": "Overhaul",
+        "Component Limit Years": "12",
+        "Component Limit Hours": "2000",
+        "Atl Ref": "10001",
+    }
+    data = rows if rows is not None else [default_row]
+    fieldnames: List[str] = []
+    for row in data:
+        for key in row:
+            if key not in fieldnames:
+                fieldnames.append(key)
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerows(data)
+    return buf.getvalue().encode("utf-8")
+
+
 def ldnd_csv_bytes(rows: Optional[List[Dict[str, Any]]] = None) -> bytes:
     """Minimal valid LDND import CSV (friendly headers as in production mapping)."""
     default_row = {
@@ -88,6 +117,31 @@ def ldnd_csv_bytes(rows: Optional[List[Dict[str, Any]]] = None) -> bytes:
     }
     data = rows if rows is not None else [default_row]
     fieldnames = list(data[0].keys())
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerows(data)
+    return buf.getvalue().encode("utf-8")
+
+
+def cpcp_csv_bytes(rows: Optional[List[Dict[str, Any]]] = None) -> bytes:
+    """Minimal valid CPCP monitoring import CSV (friendly headers as in production mapping)."""
+    default_row = {
+        "Inspection Operation": "Fuselage skin check",
+        "Description": "CPCP visual inspection",
+        "Interval Hours": "250",
+        "Interval Months": "12",
+        "Last Done Tach": "6345.6",
+        "Last Done AFTT": "6346.2",
+        "Last Done Date": "6/5/2023",
+        "Sequence No.": "10001",
+    }
+    data = rows if rows is not None else [default_row]
+    fieldnames: List[str] = []
+    for row in data:
+        for key in row:
+            if key not in fieldnames:
+                fieldnames.append(key)
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=fieldnames)
     writer.writeheader()

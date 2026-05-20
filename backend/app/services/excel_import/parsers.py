@@ -4,7 +4,51 @@ from __future__ import annotations
 import math
 import re
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import Any, Optional
+
+
+def is_spreadsheet_empty(value: Any) -> bool:
+    """True for None, pandas NaT/NaN, non-finite floats, and blank strings."""
+    if value is None:
+        return True
+    try:
+        import pandas as pd
+
+        if pd.isna(value):
+            return True
+    except (TypeError, ValueError, ImportError):
+        pass
+    if isinstance(value, float) and (math.isnan(value) or not math.isfinite(value)):
+        return True
+    if isinstance(value, str) and not value.strip():
+        return True
+    return False
+
+
+def sanitize_spreadsheet_value(value: Any) -> Any:
+    """Convert pandas NaT/NaN and similar sentinels to None for DB-bound payloads."""
+    if is_spreadsheet_empty(value):
+        return None
+    return value
+
+
+def coerce_import_float(value: Any) -> Optional[float]:
+    """Parse optional numeric spreadsheet cells; NaN/NaT/blank → None."""
+    if is_spreadsheet_empty(value):
+        return None
+    if isinstance(value, str):
+        s = value.strip().replace(",", "")
+        if not s or s in ("-", "NA", "N/A"):
+            return None
+        try:
+            x = float(s)
+        except ValueError:
+            return None
+    elif isinstance(value, (int, float)) and not isinstance(value, bool):
+        x = float(value)
+    else:
+        return None
+    return x if math.isfinite(x) else None
 
 
 def make_hashable(obj: Any) -> Any:
@@ -31,7 +75,7 @@ def _excel_serial_to_date(value: float | int) -> date | None:
 
 def parse_import_date(v: Any) -> Any:
     """Parse spreadsheet date values (Excel serial, datetime, common string formats)."""
-    if v is None:
+    if is_spreadsheet_empty(v):
         return None
     if isinstance(v, float):
         parsed = _excel_serial_to_date(v)

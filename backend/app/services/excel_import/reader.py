@@ -8,6 +8,7 @@ import pandas as pd
 from fastapi import UploadFile
 
 from app.core.exceptions import ValidationError as AppValidationError
+from app.services.excel_import.parsers import sanitize_spreadsheet_value
 
 
 ALLOWED_EXTENSIONS = (".xlsx", ".xls", ".csv")
@@ -49,4 +50,7 @@ async def read_upload_records(
     mapping = normalize_column_mapping(column_mapping)
     df = df.rename(columns={k: v for k, v in mapping.items() if k in df.columns})
     df = df.where(pd.notnull(df), None)
-    return df.to_dict(orient="records")
+    return [
+        {k: sanitize_spreadsheet_value(v) for k, v in row.items()}
+        for row in df.to_dict(orient="records")
+    ]
