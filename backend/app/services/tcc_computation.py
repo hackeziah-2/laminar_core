@@ -62,22 +62,21 @@ def days_between(a: date, b: date) -> int:
     return int((tb - ta) / _MS_PER_DAY)
 
 
-def add_calendar_years(d: date, years: int) -> date:
-    if years == 0:
+def add_calendar_years(d: date, years: int | float) -> date:
+    """Add whole calendar years; `years` may be a float from Excel (e.g. 12.0)."""
+    whole_years = int(years)
+    if whole_years == 0:
         return d
-    y = d.year + years
-    try:
-        return date(y, d.month, d.day)
-    except ValueError:
-        last_day = calendar.monthrange(y, d.month)[1]
-        return date(y, d.month, min(d.day, last_day))
+    y = d.year + whole_years
+    day = min(d.day, calendar.monthrange(y, d.month)[1])
+    return date(y, d.month, day)
 
 
 def compute_next_due_date(
     last_done_date: Optional[date],
     limit_years: Optional[float],
 ) -> Optional[date]:
-    if last_done_date is None:
+    if last_done_date is None or limit_years in (None, ""):
         return None
     ly = as_finite_float(limit_years)
     if ly is None:

@@ -1,0 +1,10 @@
+"""RBAC module display names (must match `modules.name` in the database)."""
+
+DASHBOARD_MODULE = "Dashboard"
+DAILY_UPDATE_MODULE = "Daily Update"
+GENERAL_INFORMATION_MODULE = "General Information"
+LOGBOOK_MODULE = "Logbook"
+MAINTENANCE_MODULE = "Maintenance"
+OPERATION_MODULE = "Operation"
+REGULATORY_COMPLIANCE_MODULE = "Regulatory Compliance"
+SYSTEM_SETTINGS_MODULE = "System Settings"

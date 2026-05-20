@@ -69,6 +69,7 @@ def test_login_user(client: TestClient):
         assert "access_token" in response.json()
 
 
+@pytest.mark.no_auth
 def test_me_requires_valid_token(client: TestClient):
     """GET /api/v1/auth/me returns 401 without Bearer token."""
     r = client.get("/api/v1/auth/me")

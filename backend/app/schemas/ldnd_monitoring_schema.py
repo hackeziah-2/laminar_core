@@ -1,6 +1,9 @@
 from datetime import date, datetime
-from typing import Optional
+from typing import Any, Optional
+
 from pydantic import BaseModel, Field, validator
+
+from app.services.excel_import.parsers import parse_import_date
 
 
 class AircraftSummary(BaseModel):
@@ -38,6 +41,76 @@ class LDNDMonitoringBase(BaseModel):
 
 class LDNDMonitoringCreate(LDNDMonitoringBase):
     pass
+
+
+def _coerce_optional_float(v: Any) -> Any:
+    if v is None:
+        return None
+    if isinstance(v, str):
+        s = v.strip().replace(",", "")
+        if not s or s in ("-", "NA", "N/A"):
+            return None
+        try:
+            return float(s)
+        except ValueError:
+            return v
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return float(v)
+    return v
+
+
+class LDNDMonitoringImportSchema(BaseModel):
+    """One spreadsheet row for LDND monitoring import (aircraft_fk from form context)."""
+
+    aircraft_fk: int
+    inspection_type: str = Field(..., max_length=100)
+    unit: str = Field(default="HRS")
+    last_done_tach_due: Optional[float] = None
+    last_done_tach_done: Optional[float] = None
+    next_due_tach_hours: Optional[float] = None
+    performed_date_start: Optional[date] = None
+    performed_date_end: Optional[date] = None
+
+    @validator("inspection_type", pre=True)
+    def coerce_inspection_type(cls, v: Any) -> str:
+        if v is None or (isinstance(v, str) and not str(v).strip()):
+            raise ValueError("inspection_type is required")
+        return str(v).strip()
+
+    @validator("unit", pre=True)
+    def validate_unit(cls, v: Any) -> str:
+        if v is None:
+            return "HRS"
+        u = str(v).upper().strip()
+        if u not in ("HRS", "CYCLES"):
+            raise ValueError("unit must be HRS or CYCLES")
+        return u
+
+    @validator(
+        "last_done_tach_due",
+        "last_done_tach_done",
+        "next_due_tach_hours",
+        pre=True,
+    )
+    def coerce_optional_floats(cls, v: Any) -> Any:
+        return _coerce_optional_float(v)
+
+    @validator("last_done_tach_done", pre=False)
+    def require_last_done_tach_done(cls, v: Any) -> float:
+        if v is None:
+            raise ValueError("last_done_tach_done is required for import upsert")
+        return v
+
+    @validator("performed_date_start", "performed_date_end", pre=True)
+    def coerce_import_dates(cls, v: Any) -> Any:
+        if v is None or (isinstance(v, str) and not str(v).strip()):
+            return None
+        parsed = parse_import_date(v)
+        if isinstance(parsed, date):
+            return parsed
+        if isinstance(parsed, str):
+            raise ValueError(f"invalid date format: {parsed!r}")
+        return parsed
 
 
 class LDNDMonitoringUpdate(BaseModel):

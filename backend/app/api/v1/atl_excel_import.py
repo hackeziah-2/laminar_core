@@ -13,15 +13,15 @@ from fastapi import (
     UploadFile,
     status,
 )
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_active_account
+from app.api.deps import get_current_active_account, require_permission
+from app.core.exceptions import AppError
+from app.core.rbac_modules import MAINTENANCE_MODULE
 from app.database import get_session
 from app.models.account import AccountInformation
-from app.models.aircraft import Aircraft
-from app.models.atl_batch import AtlBatch
 from app.repository.atl_excel_import_job import create_import_job, get_import_job
+from app.repository.import_prerequisites import ensure_atl_batch_exists, resolve_aircraft_id
 from app.schemas.atl_excel_import_job_schema import (
     AtlExcelImportProgressResponse,
     AtlExcelImportStartResponse,
@@ -59,7 +59,9 @@ async def start_atl_excel_import(
     registration: Optional[str] = Form(None, description="Aircraft registration if aircraft_id omitted"),
     batch_id: str = Form(..., description="atl_batch.id applied to every imported row"),
     session: AsyncSession = Depends(get_session),
-    current_account: AccountInformation = Depends(get_current_active_account),
+    current_account: AccountInformation = Depends(
+        require_permission(MAINTENANCE_MODULE, "can_create")
+    ),
 ):
     fn = (file.filename or "").lower()
     if not fn.endswith((".xlsx", ".xls")):
@@ -75,38 +77,16 @@ async def start_atl_excel_import(
             detail="batch_id is required and must be a valid integer (atl_batch.id).",
         )
 
-    aid = _parse_form_optional_int(aircraft_id)
-    reg = str(registration).strip() if registration else ""
-
-    if aid is not None:
-        result = await session.execute(
-            select(Aircraft).where(Aircraft.id == aid).where(Aircraft.is_deleted.is_(False))
+    try:
+        resolved_id = await resolve_aircraft_id(
+            session,
+            aircraft_id=_parse_form_optional_int(aircraft_id),
+            registration=str(registration).strip() if registration else None,
         )
-        if result.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail="Aircraft with this ID not found")
-        resolved_id = aid
-    elif reg:
-        result = await session.execute(
-            select(Aircraft).where(Aircraft.registration.ilike(reg)).where(Aircraft.is_deleted.is_(False))
-        )
-        aircraft = result.scalar_one_or_none()
-        if aircraft is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Aircraft with registration '{reg}' not found",
-            )
-        resolved_id = aircraft.id
-    else:
-        raise HTTPException(
-            status_code=400,
-            detail="Provide either aircraft_id or registration",
-        )
-
-    b = await session.execute(
-        select(AtlBatch).where(AtlBatch.id == resolved_batch_id).where(AtlBatch.is_deleted.is_(False))
-    )
-    if b.scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="ATL batch not found")
+        await ensure_atl_batch_exists(session, resolved_batch_id)
+    except AppError as exc:
+        code = 404 if exc.code == "not_found" else 400
+        raise HTTPException(status_code=code, detail=exc.message) from exc
 
     ensure_atl_import_jobs_dir()
     job_id = str(uuid.uuid4())
@@ -148,7 +128,7 @@ async def start_atl_excel_import(
 async def get_atl_excel_import_progress(
     job_id: str,
     session: AsyncSession = Depends(get_session),
-    _: AccountInformation = Depends(get_current_active_account),
+    _: AccountInformation = Depends(require_permission(MAINTENANCE_MODULE, "can_read")),
 ):
     job = await get_import_job(session, job_id)
     if not job:

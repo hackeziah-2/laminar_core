@@ -12,6 +12,7 @@ from app.schemas.aircraft_schema import AircraftCreate
 from tests.conftest import TestSessionLocal
 
 
+@pytest.mark.no_auth
 def test_list_aircraft_empty(client: TestClient):
     """Test listing aircraft when database is empty."""
     response = client.get("/api/v1/aircraft/paged?limit=10&page=1")
@@ -81,10 +82,10 @@ def test_create_aircraft(client: TestClient, test_aircraft_data: dict):
     data = response.json()
     assert data["registration"] == test_aircraft_data["registration"]
     assert data["id"] is not None
-    # TSN/TSO default to 0 when not provided
-    assert data.get("engine_tsn") == 0
+    # TSO defaults to 0; TSN fields are optional (null when omitted)
+    assert data.get("engine_tsn") is None
     assert data.get("engine_tso") == 0
-    assert data.get("propeller_tsn") == 0
+    assert data.get("propeller_tsn") is None
     assert data.get("propeller_tso") == 0
 
 
@@ -141,16 +142,16 @@ def test_update_aircraft_airframe_aftt(client: TestClient, test_aircraft_data: d
 
 
 def test_create_aircraft_negative_tsn_rejected(client: TestClient, test_aircraft_data: dict):
-    """Test that negative TSN values are rejected."""
+    """Test that negative TSN values are rejected at validation."""
     import json
-    payload = {**test_aircraft_data, "msn": "TEST-MSN-NEG"}
-    payload["engine_tsn"] = -1.0
-    response = client.post(
-        "/api/v1/aircraft/",
-        data={"json_data": json.dumps(payload)},
-        files={},
-    )
-    assert response.status_code == 422
+
+    from pydantic import ValidationError
+
+    from app.schemas.aircraft_schema import AircraftCreate
+
+    payload = {**test_aircraft_data, "msn": "TEST-MSN-NEG", "engine_tsn": -1.0}
+    with pytest.raises(ValidationError):
+        AircraftCreate(**payload)
 
 
 def test_update_aircraft_tsn_tso(client: TestClient, test_aircraft_data: dict):
@@ -377,6 +378,7 @@ def test_create_read_update_aircraft_model_year(client: TestClient, test_aircraf
     assert update_resp.json()["model_year"] == 2018
 
 
+@pytest.mark.no_auth
 def test_get_aircraft_not_found(client: TestClient):
     """Test getting a non-existent aircraft."""
     response = client.get("/api/v1/aircraft/999")
@@ -442,7 +444,6 @@ def test_list_aircraft_pagination(client: TestClient):
         aircraft_data = {
             "registration": f"TEST-{i:03d}",
             "manufacturer": "Boeing",
-            "type": "Commercial",
             "model": "737-800",
             "msn": f"TEST-MSN-{i:03d}",
             "base": "Test Base",
