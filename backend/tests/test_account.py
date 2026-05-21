@@ -17,6 +17,7 @@ from app.schemas.account_schema import (
 )
 
 
+@pytest.mark.no_auth
 def test_list_account_information_empty(client: TestClient):
     """Test listing account information when database is empty."""
     response = client.get("/api/v1/account-information/paged?limit=10&page=1")

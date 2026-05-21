@@ -2,6 +2,7 @@
 
 import asyncio
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_current_active_account
@@ -11,6 +12,7 @@ from app.models.role import Role
 from tests.conftest import TestSessionLocal
 
 
+@pytest.mark.no_auth
 def test_atl_paged_requires_authentication(client: TestClient):
     """GET /paged requires a valid session (JWT) or dependency override."""
     response = client.get("/api/v1/aircraft-technical-log/paged?limit=10&page=1")

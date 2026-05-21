@@ -11,13 +11,14 @@ from app.schemas.auth_schema import Token, LoginResponse, AccountMe
 from app.schemas.account_schema import (
     AccountInformationCreate,
     AccountInformationRead,
-    PasswordResetResponse,
+    PasswordChangeRequest,
+    PasswordChangeResponse,
 )
 from app.repository.account_auth import authenticate_account
 from app.repository.account import (
     create_account_information,
     update_last_login,
-    reset_account_password,
+    change_account_password,
 )
 from app.core.security import create_access_token, _truncate_password
 from app.models.account import AccountInformation
@@ -163,27 +164,33 @@ async def me(
 
 @router.post(
     "/users/{user_id}/reset-password",
-    response_model=PasswordResetResponse,
+    response_model=PasswordChangeResponse,
     include_in_schema=False,
 )
 @router.post(
     "/users/{user_id}/reset-password/",
-    response_model=PasswordResetResponse,
+    response_model=PasswordChangeResponse,
 )
-async def reset_user_password(
+async def change_user_password(
     user_id: int,
+    payload: PasswordChangeRequest,
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_account),
 ):
-    """Generate and save a new temporary password for an existing account."""
-    account, new_password = await reset_account_password(
+    """Force-change password for an account. Requires JWT; no current password needed."""
+    new_password = (
+        _truncate_password(payload.new_password)
+        if payload.new_password
+        else payload.new_password
+    )
+    updated = await change_account_password(
         session,
         user_id,
+        new_password,
         audit_account_id=current_account.id,
     )
-    return PasswordResetResponse(
-        user_id=account.id,
-        username=account.username,
-        new_password=new_password,
-        message="Password reset successful",
+    return PasswordChangeResponse(
+        user_id=updated.id,
+        username=updated.username,
+        message="Password changed successfully",
     )

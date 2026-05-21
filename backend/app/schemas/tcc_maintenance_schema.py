@@ -1,8 +1,12 @@
 import math
+import re
 from datetime import date, datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field, root_validator, validator
+
+from app.models.tcc_maintenance import MethodOfComplianceEnum, TCCCategoryEnum
+from app.services.excel_import.parsers import coerce_import_float, is_spreadsheet_empty, parse_import_date
 
 
 # Method of compliance values for API (string)
@@ -119,6 +123,118 @@ class TCCMaintenanceBase(BaseModel):
 class TCCMaintenanceCreate(TCCMaintenanceBase):
     """Schema for creating a TCC Maintenance entry."""
     pass
+
+
+def _normalize_tcc_category_import(value: Any) -> Optional[str]:
+    if value is None or (isinstance(value, str) and not str(value).strip()):
+        return None
+    s = str(value).strip()
+    collapsed = re.sub(r"[\s_/]+", " ", s.upper()).strip()
+    if collapsed in ("INSPECTION SERVICING", "INSPECTIONSERVICING"):
+        return TCCCategoryEnum.INSPECTION_SERVICING.value
+    if collapsed == "POWERPLANT":
+        return TCCCategoryEnum.POWERPLANT.value
+    if collapsed == "AIRFRAME":
+        return TCCCategoryEnum.AIRFRAME.value
+    for e in TCCCategoryEnum:
+        if e.value == s or e.name == s or e.name == s.upper().replace(" ", "_"):
+            return e.value
+    raise ValueError(
+        f"invalid category: {value!r}; expected Powerplant, Airframe, or Inspection Servicing"
+    )
+
+
+def _normalize_method_of_compliance_import(value: Any) -> Optional[str]:
+    if value is None or (isinstance(value, str) and not str(value).strip()):
+        return None
+    s = str(value).strip()
+    for e in MethodOfComplianceEnum:
+        if e.value == s or e.name == s:
+            return e.value
+    raise ValueError(f"invalid method of compliance: {value!r}")
+
+
+class TCCMaintenanceImportSchema(BaseModel):
+    """One spreadsheet row for TCC maintenance import (aircraft_fk from form context)."""
+
+    aircraft_fk: int
+    category: Optional[str] = None
+    part_number: str = Field(default="", max_length=255)
+    serial_number: Optional[str] = Field(None, max_length=255)
+    description: Optional[str] = None
+    component_limit_years: Optional[float] = None
+    component_limit_hours: Optional[float] = None
+    component_method_of_compliance: Optional[str] = None
+    last_done_date: Optional[date] = None
+    last_done_tach: Optional[float] = None
+    last_done_aftt: Optional[float] = None
+    last_done_method_of_compliance: Optional[str] = None
+    atl_sequence: Optional[str] = Field(
+        None,
+        description=(
+            "ATL sequence_no from spreadsheet (column 'ATL Ref' or 'Sequence No'); "
+            "on import we load aircraft_technical_log where sequence_no matches and set atl_ref to that row's id."
+        ),
+    )
+    atl_ref: Optional[int] = None
+
+    @validator("part_number", pre=True)
+    def coerce_part_number(cls, v: Any) -> str:
+        if v is None or (isinstance(v, str) and not str(v).strip()):
+            return ""
+        return str(v).strip()
+
+    @validator("category", pre=True)
+    def coerce_category(cls, v: Any) -> Any:
+        if v is None or (isinstance(v, str) and not str(v).strip()):
+            return None
+        return _normalize_tcc_category_import(v)
+
+    @validator(
+        "component_method_of_compliance",
+        "last_done_method_of_compliance",
+        pre=True,
+    )
+    def coerce_method_of_compliance(cls, v: Any) -> Any:
+        return _normalize_method_of_compliance_import(v)
+
+    @validator(
+        "component_limit_years",
+        "component_limit_hours",
+        "last_done_tach",
+        "last_done_aftt",
+        pre=True,
+    )
+    def coerce_optional_floats(cls, v: Any) -> Any:
+        return coerce_import_float(v)
+
+    @validator("last_done_date", pre=True)
+    def coerce_import_date(cls, v: Any) -> Any:
+        if is_spreadsheet_empty(v):
+            return None
+        parsed = parse_import_date(v)
+        if isinstance(parsed, date):
+            return parsed
+        if is_spreadsheet_empty(parsed):
+            return None
+        if isinstance(parsed, str):
+            raise ValueError(f"invalid date format: {parsed!r}")
+        return parsed
+
+    @validator("atl_sequence", pre=True)
+    def coerce_atl_sequence(cls, v: Any) -> Any:
+        if is_spreadsheet_empty(v):
+            return None
+        if isinstance(v, float):
+            if not math.isfinite(v):
+                return None
+            if v.is_integer():
+                return str(int(v))
+            return str(v).strip()
+        if isinstance(v, int) and not isinstance(v, bool):
+            return str(v)
+        s = str(v).strip()
+        return s if s and s.upper() not in ("-", "NA", "N/A") else None
 
 
 class TCCMaintenanceUpdate(BaseModel):

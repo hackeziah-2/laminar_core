@@ -69,6 +69,7 @@ def test_login_user(client: TestClient):
         assert "access_token" in response.json()
 
 
+@pytest.mark.no_auth
 def test_me_requires_valid_token(client: TestClient):
     """GET /api/v1/auth/me returns 401 without Bearer token."""
     r = client.get("/api/v1/auth/me")
@@ -105,8 +106,8 @@ def test_me_returns_profile_with_full_name(client: TestClient):
     assert "designation" in body
 
 
-def test_reset_password_supports_non_slash_route_and_updates_credentials(client: TestClient):
-    """POST /auth/users/{id}/reset-password works without trailing slash and rotates credentials."""
+def test_change_password_force_change_without_old_password(client: TestClient):
+    """POST /auth/users/{id}/reset-password force-sets new password with JWT only."""
     admin_data = {
         "first_name": "Admin",
         "last_name": "User",
@@ -127,6 +128,7 @@ def test_reset_password_supports_non_slash_route_and_updates_credentials(client:
     target_reg = client.post("/api/v1/auth/register", json=target_data)
     assert target_reg.status_code == 201, target_reg.text
     target_id = target_reg.json()["id"]
+    new_password = "newtargetpass456"
 
     admin_token = client.post(
         "/api/v1/auth/token",
@@ -135,16 +137,16 @@ def test_reset_password_supports_non_slash_route_and_updates_credentials(client:
     assert admin_token.status_code == 200, admin_token.text
     access_token = admin_token.json()["access_token"]
 
-    reset_response = client.post(
+    change_response = client.post(
         f"/api/v1/auth/users/{target_id}/reset-password",
         headers={"Authorization": f"Bearer {access_token}"},
+        json={"new_password": new_password},
     )
-    assert reset_response.status_code == 200, reset_response.text
-    body = reset_response.json()
+    assert change_response.status_code == 200, change_response.text
+    body = change_response.json()
     assert body["user_id"] == target_id
     assert body["username"] == "reset_target_user"
-    assert body["message"] == "Password reset successful"
-    assert body["new_password"]
+    assert body["message"] == "Password changed successfully"
 
     old_password_login = client.post(
         "/api/v1/auth/token",
@@ -154,6 +156,16 @@ def test_reset_password_supports_non_slash_route_and_updates_credentials(client:
 
     new_password_login = client.post(
         "/api/v1/auth/token",
-        data={"username": "reset_target_user", "password": body["new_password"]},
+        data={"username": "reset_target_user", "password": new_password},
     )
     assert new_password_login.status_code == 200, new_password_login.text
+
+
+@pytest.mark.no_auth
+def test_change_password_requires_auth(client: TestClient):
+    """Force password change returns 401 without Bearer token."""
+    response = client.post(
+        "/api/v1/auth/users/1/reset-password",
+        json={"new_password": "newpass123456"},
+    )
+    assert response.status_code == 401
