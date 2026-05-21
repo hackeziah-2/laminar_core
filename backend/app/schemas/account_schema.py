@@ -114,9 +114,13 @@ class AccountInformationListItem(BaseModel):
         orm_mode = True
 
 
-class PasswordResetResponse(BaseModel):
-    """Response for account password reset."""
+class PasswordChangeRequest(BaseModel):
+    """Force-change password (no current password required)."""
+    new_password: str = Field(..., min_length=6, max_length=72)
+
+
+class PasswordChangeResponse(BaseModel):
+    """Response for self-service password change."""
     user_id: int
     username: str
-    new_password: str
     message: str

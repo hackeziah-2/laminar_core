@@ -282,6 +282,36 @@ async def reset_account_password(
     return obj, new_password
 
 
+async def change_account_password(
+    session: AsyncSession,
+    account_id: int,
+    new_password: str,
+    *,
+    audit_account_id: Optional[int] = None,
+) -> AccountInformation:
+    """Persist a new password for an account."""
+    obj = await session.get(AccountInformation, account_id)
+    if not obj or obj.is_deleted:
+        raise HTTPException(status_code=404, detail="Account Information not found")
+
+    obj.password = get_password_hash(new_password)
+
+    try:
+        session.add(obj)
+        auditor_id = audit_account_id if audit_account_id is not None else account_id
+        await set_audit_fields(obj, auditor_id, is_create=False)
+        await session.commit()
+        await session.refresh(obj)
+    except Exception as e:
+        await session.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to change account password: {str(e)}",
+        )
+
+    return obj
+
+
 async def list_account_informations(
     session: AsyncSession,
     limit: int = 0,
