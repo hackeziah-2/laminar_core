@@ -45,6 +45,10 @@ from app.api.v1 import (
 )
 from app.database import engine, Base
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
+from app.services.file_upload_service import (
+    is_safe_module_folder,
+    save_module_upload,
+)
 
 OPENAPI_TAGS = [
     {"name": "ad-monitoring", "description": "**Aircraft-scoped AD monitoring** – `api/v1/aircraft/{aircraft_fk}/ad_monitoring/` (CRUD). **Work-order AD monitoring** – `api/v1/aircraft/{aircraft_fk}/ad_monitoring/{ad_monitoring_fk}/work-order-ad-monitoring/` (CRUD). See README **AD Monitoring** section."},
@@ -148,11 +152,6 @@ async def api_v1_health():
 ensure_uploads_dir()
 
 
-def _is_safe_module(name: str) -> bool:
-    """Allow only alphanumeric, underscore, hyphen (no path traversal)."""
-    return bool(name) and all(c.isalnum() or c in "_-" for c in name)
-
-
 def _resolve_and_serve_file(filename: str, module_folder: Optional[str] = None):
     """Normalize filename, resolve path under UPLOAD_DIR, try flat then module subfolder; return FileResponse or raise 404."""
     filename = filename.lstrip("/").replace("\\", "/")
@@ -174,7 +173,7 @@ def _resolve_and_serve_file(filename: str, module_folder: Optional[str] = None):
     # Try 1: flat path (uploads/ATL.jpg)
     file_path = safe_path(filename)
     # Try 2: module subfolder (uploads/white_atl/ATL.jpg)
-    if file_path is None and module_folder and _is_safe_module(module_folder):
+    if file_path is None and module_folder and is_safe_module_folder(module_folder):
         file_path = safe_path(module_folder, base_name)
     if file_path is None:
         raise HTTPException(status_code=404, detail="File not found")
@@ -221,34 +220,32 @@ async def download_file_by_name(
     return _resolve_and_serve_file(name.strip(), module_folder)
 
 
-# Generic upload: POST /api/v1/{module_folder}/upload – "name" is optional (avoids "field required" when frontend omits it)
+# Generic upload: POST /api/v1/{module_folder}/upload – UUID storage name, module subfolder
 @app.post(
     "/api/v1/{module_folder}/upload",
     summary="Upload a file",
-    description="Upload a file. Query param 'name' is optional; when omitted, the uploaded filename is used.",
-    response_description="Uploaded file path",
+    description=(
+        "Upload a file into uploads/{module_folder}/. Files are stored with a UUID-prefixed "
+        "name for safety. Optional query param 'name' only affects the sanitized suffix "
+        "(not the raw client path). Max size defaults to 50 MiB (MAX_UPLOAD_BYTES env)."
+    ),
+    response_description="Uploaded file metadata",
     tags=["files"],
+    status_code=201,
 )
 async def upload_file(
     module_folder: str,
     file: UploadFile = File(...),
-    name: Optional[str] = Query(None, description="Optional filename override; when omitted, use the uploaded file's name"),
+    name: Optional[str] = Query(
+        None,
+        description="Optional sanitized filename suffix; storage name is always UUID-prefixed",
+    ),
 ):
-    """Upload a file to the shared uploads directory. 'name' query param is optional."""
-    ensure_uploads_dir()
-    save_name = (name.strip() if name and name.strip() else None) or (file.filename or "upload")
-    # Sanitize: keep only the base name to avoid path traversal
-    save_name = save_name.split("/")[-1].split("\\")[-1] if save_name else "upload"
-    if not save_name or ".." in save_name:
+    """Upload a file to the module uploads subfolder with a safe UUID filename."""
+    name_override = name.strip() if name and name.strip() else None
+    if name_override and (".." in name_override or "/" in name_override or "\\" in name_override):
         raise HTTPException(status_code=400, detail="Invalid filename")
-    file_path = UPLOAD_DIR / save_name
-    try:
-        content = await file.read()
-        file_path.write_bytes(content)
-    except OSError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
-    # Return path that works for download (relative to uploads)
-    return {"file_path": f"uploads/{save_name}", "filename": save_name}
+    return await save_module_upload(file, module_folder, name_override=name_override)
 
 
 app.include_router(flights_router.router)
