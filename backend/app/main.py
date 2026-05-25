@@ -68,6 +68,7 @@ _default_origins = [
     "http://120.89.33.51:3002",   # prod frontend
     "http://35.247.149.93:3002",  # prod frontend (alternate host)
     "http://34.126.119.234:3002", # prod frontend (new host)
+    "https://fms.laminaraviationapps.com", # prod frontend (new host)
     "http://120.89.33.51:8000",
     "http://120.89.33.52:8081",
     "http://fleet.llibus.com",
