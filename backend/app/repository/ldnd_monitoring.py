@@ -1,6 +1,6 @@
 from typing import Optional, List, Tuple
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -66,7 +66,7 @@ async def get_ldnd_latest_by_aircraft(
         .options(selectinload(LDNDMonitoring.aircraft))
         .where(*base_filter)
         .order_by(
-            LDNDMonitoring.performed_date_start.desc().nulls_last(),
+            LDNDMonitoring.performed_date_end.desc().nulls_last(),
             LDNDMonitoring.updated_at.desc().nulls_last(),
             LDNDMonitoring.created_at.desc().nulls_last(),
         )
@@ -199,6 +199,7 @@ async def list_ldnd_monitoring(
     offset: int = 0,
     aircraft_fk: Optional[int] = None,
     inspection_type: Optional[str] = None,
+    search: Optional[str] = None,
     sort: Optional[str] = "",
 ) -> Tuple[List[LDNDMonitoring], int]:
     """List LDNDMonitoring entries with pagination and filtering."""
@@ -214,6 +215,22 @@ async def list_ldnd_monitoring(
         stmt = stmt.where(
             LDNDMonitoring.inspection_type.ilike(f"%{inspection_type.strip()}%")
         )
+
+    search_filter = None
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        # Cast non-string columns to String so ilike works uniformly across
+        # text, enum, float, and date columns.
+        search_filter = or_(
+            LDNDMonitoring.inspection_type.ilike(pattern),
+            cast(LDNDMonitoring.unit, String).ilike(pattern),
+            cast(LDNDMonitoring.last_done_tach_due, String).ilike(pattern),
+            cast(LDNDMonitoring.last_done_tach_done, String).ilike(pattern),
+            cast(LDNDMonitoring.next_due_tach_hours, String).ilike(pattern),
+            cast(LDNDMonitoring.performed_date_start, String).ilike(pattern),
+            cast(LDNDMonitoring.performed_date_end, String).ilike(pattern),
+        )
+        stmt = stmt.where(search_filter)
 
     sortable_fields = {
         "id": LDNDMonitoring.id,
@@ -249,6 +266,8 @@ async def list_ldnd_monitoring(
         count_stmt = count_stmt.where(
             LDNDMonitoring.inspection_type.ilike(f"%{inspection_type.strip()}%")
         )
+    if search_filter is not None:
+        count_stmt = count_stmt.where(search_filter)
     total_count = (await session.execute(count_stmt)).scalar()
 
     stmt = stmt.limit(limit).offset(offset)
