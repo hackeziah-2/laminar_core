@@ -2,7 +2,7 @@ import os
 from typing import Optional, List, Tuple
 
 from fastapi import HTTPException, UploadFile
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -67,9 +67,19 @@ async def list_ad_monitoring(
     offset: int = 0,
     aircraft_fk: Optional[int] = None,
     search: Optional[str] = None,
+    compli_date: Optional[str] = None,
+    inspection_interval: Optional[str] = None,
     sort: Optional[str] = "",
 ) -> Tuple[List[ADMonitoring], int]:
-    """List ADMonitoring with pagination and filtering."""
+    """List ADMonitoring with pagination and filtering.
+
+    Filters:
+    - search: case-insensitive partial match across ad_number, subject,
+      inspection_interval, and compli_date.
+    - compli_date: case-insensitive partial match on compli_date (cast to text,
+      e.g. "2024", "2024-01", "2024-01-15").
+    - inspection_interval: case-insensitive partial match on inspection_interval.
+    """
     stmt = (
         select(ADMonitoring)
         .options(
@@ -80,19 +90,33 @@ async def list_ad_monitoring(
     )
     if aircraft_fk is not None:
         stmt = stmt.where(ADMonitoring.aircraft_fk == aircraft_fk)
-    if search and search.strip():
-        q = f"%{search.strip()}%"
+
+    if inspection_interval and inspection_interval.strip():
         stmt = stmt.where(
-            ADMonitoring.ad_number.ilike(q)
-            | ADMonitoring.subject.ilike(q)
-            | ADMonitoring.inspection_interval.ilike(q)
+            ADMonitoring.inspection_interval.ilike(f"%{inspection_interval.strip()}%")
         )
+    if compli_date and compli_date.strip():
+        stmt = stmt.where(
+            cast(ADMonitoring.compli_date, String).ilike(f"%{compli_date.strip()}%")
+        )
+
+    search_filter = None
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        search_filter = or_(
+            ADMonitoring.ad_number.ilike(pattern),
+            ADMonitoring.subject.ilike(pattern),
+            ADMonitoring.inspection_interval.ilike(pattern),
+            cast(ADMonitoring.compli_date, String).ilike(pattern),
+        )
+        stmt = stmt.where(search_filter)
 
     sortable = {
         "id": ADMonitoring.id,
         "aircraft_fk": ADMonitoring.aircraft_fk,
         "ad_number": ADMonitoring.ad_number,
         "subject": ADMonitoring.subject,
+        "inspection_interval": ADMonitoring.inspection_interval,
         "compli_date": ADMonitoring.compli_date,
         "created_at": ADMonitoring.created_at,
         "updated_at": ADMonitoring.updated_at,
@@ -114,13 +138,16 @@ async def list_ad_monitoring(
     )
     if aircraft_fk is not None:
         count_stmt = count_stmt.where(ADMonitoring.aircraft_fk == aircraft_fk)
-    if search and search.strip():
-        q = f"%{search.strip()}%"
+    if inspection_interval and inspection_interval.strip():
         count_stmt = count_stmt.where(
-            ADMonitoring.ad_number.ilike(q)
-            | ADMonitoring.subject.ilike(q)
-            | ADMonitoring.inspection_interval.ilike(q)
+            ADMonitoring.inspection_interval.ilike(f"%{inspection_interval.strip()}%")
         )
+    if compli_date and compli_date.strip():
+        count_stmt = count_stmt.where(
+            cast(ADMonitoring.compli_date, String).ilike(f"%{compli_date.strip()}%")
+        )
+    if search_filter is not None:
+        count_stmt = count_stmt.where(search_filter)
     total = (await session.execute(count_stmt)).scalar()
     stmt = stmt.limit(limit).offset(offset)
     result = await session.execute(stmt)
