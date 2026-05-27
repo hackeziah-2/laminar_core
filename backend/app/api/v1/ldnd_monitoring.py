@@ -45,6 +45,14 @@ async def api_list_ldnd_monitoring_paged(
     page: int = Query(1, ge=1, description="Page number (1-indexed)"),
     aircraft_fk: Optional[int] = Query(None, description="Filter by aircraft ID"),
     inspection_type: Optional[str] = Query(None, description="Filter by inspection type (partial match)"),
+    search: Optional[str] = Query(
+        None,
+        description=(
+            "Case-insensitive partial match across inspection_type, unit, "
+            "last_done_tach_due, last_done_tach_done, next_due_tach_hours, "
+            "performed_date_start, performed_date_end."
+        ),
+    ),
     sort: Optional[str] = Query("", description="Sort fields (comma-separated). Prefix '-' for descending."),
     session: AsyncSession = Depends(get_session),
 ):
@@ -56,6 +64,7 @@ async def api_list_ldnd_monitoring_paged(
         offset=offset,
         aircraft_fk=aircraft_fk,
         inspection_type=inspection_type,
+        search=search.strip() if search and search.strip() else None,
         sort=sort,
     )
     pages = ceil(total / limit) if total else 0
@@ -148,7 +157,7 @@ async def api_get_ldnd_latest_by_aircraft(
     aircraft_id: int,
     session: AsyncSession = Depends(get_session),
 ):
-    """Get latest LDND summary for aircraft based on most recent performed_date_start."""
+    """Get latest LDND summary for aircraft based on most recent performed_date_end."""
     aircraft = await get_aircraft(session, aircraft_id)
     if not aircraft:
         raise HTTPException(status_code=404, detail="Aircraft not found")
@@ -164,6 +173,14 @@ async def api_list_ldnd_monitoring_by_aircraft_paged(
     limit: int = Query(10, ge=1, le=100),
     page: int = Query(1, ge=1),
     inspection_type: Optional[str] = Query(None),
+    search: Optional[str] = Query(
+        None,
+        description=(
+            "Case-insensitive partial match across inspection_type, unit, "
+            "last_done_tach_due, last_done_tach_done, next_due_tach_hours, "
+            "performed_date_start, performed_date_end."
+        ),
+    ),
     sort: Optional[str] = Query(""),
     session: AsyncSession = Depends(get_session),
 ):
@@ -178,6 +195,7 @@ async def api_list_ldnd_monitoring_by_aircraft_paged(
         offset=offset,
         aircraft_fk=aircraft_id,
         inspection_type=inspection_type,
+        search=search.strip() if search and search.strip() else None,
         sort=sort,
     )
     pages = ceil(total / limit) if total else 0

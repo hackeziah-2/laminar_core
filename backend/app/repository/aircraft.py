@@ -118,6 +118,7 @@ async def list_aircraft(
                 Aircraft.registration.ilike(q),
                 Aircraft.base.ilike(q),
                 Aircraft.model.ilike(q),
+                Aircraft.msn.ilike(q),
             )
         )
 

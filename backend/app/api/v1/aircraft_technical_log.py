@@ -31,7 +31,9 @@ from app.repository.aircraft_technical_log import (
     get_latest_aircraft_technical_log,
     create_aircraft_technical_log,
     update_aircraft_technical_log,
+    bulk_update_aircraft_technical_log_work_status,
     soft_delete_aircraft_technical_log,
+    bulk_soft_delete_aircraft_technical_logs,
 )
 from app.api.deps import get_current_active_account
 from app.database import get_session
@@ -398,6 +400,44 @@ async def api_update(
         )
 
     return await aircraft_technical_log_read_with_computed(session, updated)
+
+
+@router.put(
+    "/work-status/bulk",
+    response_model=aircraft_technical_log_schema.AircraftTechnicalLogBulkWorkStatusUpdateResponse,
+)
+async def api_bulk_update_work_status(
+    payload: aircraft_technical_log_schema.AircraftTechnicalLogBulkWorkStatusUpdateRequest,
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
+):
+    """Bulk update ATL work_status by explicit ATL IDs."""
+    return await bulk_update_aircraft_technical_log_work_status(
+        session=session,
+        atl_ids=payload.ids,
+        work_status=payload.work_status,
+        atomic=payload.atomic,
+        audit_account_id=current_account.id,
+        current_account=current_account,
+    )
+
+
+@router.delete(
+    "/bulk",
+    response_model=aircraft_technical_log_schema.AircraftTechnicalLogBulkDeleteResponse,
+)
+async def api_bulk_delete(
+    payload: aircraft_technical_log_schema.AircraftTechnicalLogBulkDeleteRequest,
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
+):
+    """Bulk soft delete ATL entries by explicit ATL IDs."""
+    return await bulk_soft_delete_aircraft_technical_logs(
+        session=session,
+        atl_ids=payload.ids,
+        atomic=payload.atomic,
+        audit_account_id=current_account.id,
+    )
 
 
 @router.delete(

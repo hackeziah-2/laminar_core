@@ -516,6 +516,18 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
             out.append(normalize_component_part_dict_for_import(item))
         return out if out else None
 
+    @validator("work_status", pre=True, always=True)
+    def default_work_status_on_import(cls, v: Any) -> Any:
+        """Default empty/null/dash import values to FOR_REVIEW."""
+        if v is None:
+            return WorkStatus.FOR_REVIEW
+        if isinstance(v, str):
+            s = v.strip()
+            if not s or s == "-":
+                return WorkStatus.FOR_REVIEW
+            return s.upper().replace(" ", "_")
+        return v
+
     @validator(
         "destination_date",
         "origin_date",
@@ -797,6 +809,47 @@ class AircraftTechnicalLogUpdate(BaseModel):
 
     class Config:
         allow_population_by_field_name = True
+
+
+class AircraftTechnicalLogBulkWorkStatusUpdateRequest(BaseModel):
+    ids: List[int] = Field(..., min_items=1, description="ATL record IDs to update.")
+    work_status: WorkStatus
+    atomic: bool = Field(
+        False,
+        description="When true, fail and rollback the whole batch on first error.",
+    )
+
+
+class AircraftTechnicalLogBulkWorkStatusUpdateItem(BaseModel):
+    id: int
+    success: bool
+    message: str
+
+
+class AircraftTechnicalLogBulkWorkStatusUpdateResponse(BaseModel):
+    updated_count: int
+    failed_count: int
+    results: List[AircraftTechnicalLogBulkWorkStatusUpdateItem]
+
+
+class AircraftTechnicalLogBulkDeleteRequest(BaseModel):
+    ids: List[int] = Field(..., min_items=1, description="ATL record IDs to soft delete.")
+    atomic: bool = Field(
+        False,
+        description="When true, fail and rollback the whole batch on first error.",
+    )
+
+
+class AircraftTechnicalLogBulkDeleteItem(BaseModel):
+    id: int
+    success: bool
+    message: str
+
+
+class AircraftTechnicalLogBulkDeleteResponse(BaseModel):
+    deleted_count: int
+    failed_count: int
+    results: List[AircraftTechnicalLogBulkDeleteItem]
 
 
 # ---------- Aircraft Read Schema (for nested display) ----------

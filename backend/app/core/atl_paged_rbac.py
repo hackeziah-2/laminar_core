@@ -50,6 +50,10 @@ def _is_maintenance_planner_role(role_name: Optional[str]) -> bool:
         return False
     return str(role_name).strip().casefold() == "maintenance planner"
 
+def _is_maintenance_manager_role(role_name: Optional[str]) -> bool:
+    if not role_name or not str(role_name).strip():
+        return False
+    return str(role_name).strip().casefold() == "maintenance manager"
 
 def atl_paged_list_skips_work_status_rbac(role_name: Optional[str]) -> bool:
     """Admin sees all ATL rows regardless of work_status (no IN filter)."""
@@ -113,6 +117,15 @@ def atl_rbac_filter():
                             AircraftTechnicalLog.work_status.is_(None),
                         )
                     )
+
+                # if _is_maintenance_manager_role(role_name):
+                #     return s.where(
+                #         or_(
+                #             AircraftTechnicalLog.work_status.in_(list(allowed)),
+                #             AircraftTechnicalLog.work_status.is_(None),
+                #         )
+                #     )
+                
                 return s.where(AircraftTechnicalLog.work_status.in_(list(allowed)))
 
             stmt = apply_rbac(stmt)

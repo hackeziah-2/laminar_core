@@ -62,7 +62,21 @@ async def api_list_ad_monitoring_paged(
     limit: int = Query(10, ge=1, le=100),
     page: int = Query(1, ge=1),
     aircraft_fk: Optional[int] = Query(None),
-    search: Optional[str] = Query(None),
+    search: Optional[str] = Query(
+        None,
+        description=(
+            "Case-insensitive partial match across ad_number, subject, "
+            "inspection_interval, and compli_date."
+        ),
+    ),
+    compli_date: Optional[str] = Query(
+        None,
+        description="Filter by compli_date (partial match, e.g. '2024', '2024-01', '2024-01-15').",
+    ),
+    inspection_interval: Optional[str] = Query(
+        None,
+        description="Filter by inspection_interval (case-insensitive partial match).",
+    ),
     sort: Optional[str] = Query(""),
     session: AsyncSession = Depends(get_session),
 ):
@@ -72,7 +86,9 @@ async def api_list_ad_monitoring_paged(
         limit=limit,
         offset=offset,
         aircraft_fk=aircraft_fk,
-        search=search,
+        search=search.strip() if search and search.strip() else None,
+        compli_date=compli_date,
+        inspection_interval=inspection_interval,
         sort=sort,
     )
     pages = ceil(total / limit) if total else 0
@@ -170,7 +186,21 @@ async def api_list_ad_monitoring_by_aircraft_paged(
     aircraft_fk: int,
     limit: int = Query(10, ge=1, le=100),
     page: int = Query(1, ge=1),
-    search: Optional[str] = Query(None),
+    search: Optional[str] = Query(
+        None,
+        description=(
+            "Case-insensitive partial match across ad_number, subject, "
+            "inspection_interval, and compli_date."
+        ),
+    ),
+    compli_date: Optional[str] = Query(
+        None,
+        description="Filter by compli_date (partial match, e.g. '2024', '2024-01', '2024-01-15').",
+    ),
+    inspection_interval: Optional[str] = Query(
+        None,
+        description="Filter by inspection_interval (case-insensitive partial match).",
+    ),
     sort: Optional[str] = Query(""),
     session: AsyncSession = Depends(get_session),
 ):
@@ -183,7 +213,9 @@ async def api_list_ad_monitoring_by_aircraft_paged(
         limit=limit,
         offset=offset,
         aircraft_fk=aircraft_fk,
-        search=search,
+        search=search.strip() if search and search.strip() else None,
+        compli_date=compli_date,
+        inspection_interval=inspection_interval,
         sort=sort,
     )
     pages = ceil(total / limit) if total else 0
