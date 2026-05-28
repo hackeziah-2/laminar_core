@@ -1,15 +1,19 @@
 """ATL paged endpoint: GET /api/v1/aircraft/{aircraft_id}/atl/paged with search (sequence_no), filter (nature_of_flight), sort, pagination, and auto_comp_* computed fields. All floats formatted to 2 decimal places."""
 from math import ceil
-from typing import Optional, Dict, Any, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import ensure_account_permission, get_current_active_account
+from app.core.rbac_modules import MAINTENANCE_MODULE
 from app.database import get_session
+from app.models.account import AccountInformation
 from app.schemas import aircraft_technical_log_schema
 from app.repository.aircraft_technical_log import list_atl_paged
 from app.repository.aircraft import get_aircraft
 from app.core.atl_derived_times import (
+    backfill_atl_auto_fields_for_scope,
     canonical_time_fields_from_auto,
     map_auto_fields_to_comp,
     resolve_auto_fields,
@@ -88,3 +92,34 @@ async def atl_paged(
         "pages": pages,
         "page_size": int(page_size),
     }
+
+
+@router.post(
+    "/{aircraft_id}/atl/backfill-auto-fields",
+    summary="Backfill persisted auto_* columns for an aircraft ATL stream",
+)
+async def backfill_atl_auto_fields(
+    aircraft_id: int,
+    batch_id: Optional[int] = Query(
+        None,
+        description="Optional atl_batch.id; omit to backfill rows with NULL atl_batch_fk only.",
+    ),
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
+):
+    """Recompute and persist auto_* for all ATLs on this aircraft (and optional batch)."""
+    await ensure_account_permission(
+        session, current_account, MAINTENANCE_MODULE, "update"
+    )
+    aircraft = await get_aircraft(session, aircraft_id)
+    if not aircraft:
+        raise HTTPException(status_code=404, detail="Aircraft not found")
+
+    updated = await backfill_atl_auto_fields_for_scope(
+        session,
+        aircraft_id,
+        atl_batch_fk=batch_id,
+        aircraft_obj=aircraft,
+    )
+    await session.commit()
+    return {"aircraft_id": aircraft_id, "atl_batch_fk": batch_id, "rows_updated": updated}

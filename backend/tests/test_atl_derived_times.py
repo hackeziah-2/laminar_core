@@ -2,11 +2,17 @@
 
 import asyncio
 import json
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import Numeric, cast, select
 
-from app.core.atl_derived_times import persist_atl_auto_fields_to_row
+from app.core.atl_derived_times import (
+    ATL_AUTO_FIELD_KEYS,
+    backfill_atl_auto_fields_for_scope,
+    persist_atl_auto_fields_to_row,
+    resolve_auto_fields,
+)
 from app.models.aircraft import Aircraft
 from app.models.aircraft_techinical_log import AircraftTechnicalLog
 from tests.conftest import TestSessionLocal
@@ -26,6 +32,189 @@ async def _persist_auto_columns_for_all_atl_rows(aircraft_id: int) -> None:
         for row in rows:
             await persist_atl_auto_fields_to_row(session, row, ac)
         await session.commit()
+
+
+def test_resolve_auto_fields_handles_deep_predecessor_chain_without_recursion(
+    client_with_atl_auth: TestClient,
+):
+    """Regression: bulk-imported ATLs can have 1000+ predecessors; recursive resolve caused RecursionError on GET."""
+    last_atl_id = None
+
+    async def _seed() -> None:
+        nonlocal last_atl_id
+        async with TestSessionLocal() as session:
+            ac = Aircraft(
+                registration="TEST-ATL-DEEP",
+                manufacturer="Cessna",
+                model="172",
+                msn="TEST-MSN-DEEP",
+                base="Base",
+                ownership="Owner",
+                status="Active",
+                airframe_aftt=0.0,
+            )
+            session.add(ac)
+            await session.flush()
+            aircraft_id = ac.id
+
+            rows = []
+            for seq in range(1, 1101):
+                rows.append(
+                    AircraftTechnicalLog(
+                        aircraft_fk=ac.id,
+                        sequence_no=str(seq),
+                        tachometer_start=float(seq),
+                        tachometer_end=float(seq) + 1.0,
+                    )
+                )
+            session.add_all(rows)
+            await session.commit()
+            last_atl_id = rows[-1].id
+
+    asyncio.run(_seed())
+    assert last_atl_id is not None
+
+    response = client_with_atl_auth.get(
+        f"/api/v1/aircraft-technical-log/{last_atl_id}"
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["sequence_no"] == "1100"
+    assert body["auto_airframe_run_time"] == 1.0
+
+
+def test_get_atl_uses_stored_auto_fields_without_predecessor_queries(
+    client_with_atl_auth: TestClient,
+):
+    """GET should read persisted auto_* when present (no get_previous_atl / batch fetch)."""
+    last_atl_id = None
+
+    async def _seed() -> None:
+        nonlocal last_atl_id
+        async with TestSessionLocal() as session:
+            ac = Aircraft(
+                registration="TEST-ATL-STORED",
+                manufacturer="Cessna",
+                model="172",
+                msn="TEST-MSN-STORED",
+                base="Base",
+                ownership="Owner",
+                status="Active",
+                airframe_aftt=100.0,
+            )
+            session.add(ac)
+            await session.flush()
+            for seq in ("001", "002", "003"):
+                session.add(
+                    AircraftTechnicalLog(
+                        aircraft_fk=ac.id,
+                        sequence_no=seq,
+                        tachometer_start=float(seq),
+                        tachometer_end=float(seq) + 1.0,
+                    )
+                )
+            await session.commit()
+            await backfill_atl_auto_fields_for_scope(session, ac.id)
+            await session.commit()
+            stmt = (
+                select(AircraftTechnicalLog)
+                .where(AircraftTechnicalLog.aircraft_fk == ac.id)
+                .where(AircraftTechnicalLog.sequence_no == "003")
+            )
+            last_atl_id = (await session.execute(stmt)).scalar_one().id
+
+    asyncio.run(_seed())
+    assert last_atl_id is not None
+
+    with patch(
+        "app.repository.aircraft_technical_log.get_previous_atl",
+        new_callable=AsyncMock,
+    ) as mock_prev, patch(
+        "app.repository.aircraft_technical_log.fetch_predecessors_for_atl",
+        new_callable=AsyncMock,
+    ) as mock_fetch:
+        response = client_with_atl_auth.get(
+            f"/api/v1/aircraft-technical-log/{last_atl_id}"
+        )
+        assert response.status_code == 200, response.text
+        mock_prev.assert_not_called()
+        mock_fetch.assert_not_called()
+
+    with patch(
+        "app.repository.aircraft_technical_log.get_previous_atl",
+        new_callable=AsyncMock,
+    ) as mock_prev, patch(
+        "app.repository.aircraft_technical_log.fetch_predecessors_for_atl",
+        new_callable=AsyncMock,
+    ) as mock_fetch:
+        response = client_with_atl_auth.get(
+            f"/api/v1/aircraft-technical-log/{last_atl_id}?recompute=true"
+        )
+        assert response.status_code == 200, response.text
+        assert mock_prev.called or mock_fetch.called
+
+
+def test_batch_resolve_matches_chain_for_three_row_sequence(
+    client_with_atl_auth: TestClient,
+):
+    """Batch predecessor fetch should match sequential resolve for a short chain."""
+
+    async def _run() -> None:
+        async with TestSessionLocal() as session:
+            ac = Aircraft(
+                registration="TEST-ATL-BATCH",
+                manufacturer="Cessna",
+                model="172",
+                msn="TEST-MSN-BATCH",
+                base="Base",
+                ownership="Owner",
+                status="Active",
+                airframe_aftt=10.0,
+                engine_tsn=100.0,
+                engine_tso=20.0,
+                propeller_tsn=50.0,
+                propeller_tso=10.0,
+            )
+            session.add(ac)
+            await session.flush()
+            session.add_all(
+                [
+                    AircraftTechnicalLog(
+                        aircraft_fk=ac.id,
+                        sequence_no="001",
+                        airframe_aftt=11.0,
+                        tachometer_start=1.0,
+                        tachometer_end=2.0,
+                    ),
+                    AircraftTechnicalLog(
+                        aircraft_fk=ac.id,
+                        sequence_no="002",
+                        tachometer_start=2.0,
+                        tachometer_end=4.0,
+                    ),
+                    AircraftTechnicalLog(
+                        aircraft_fk=ac.id,
+                        sequence_no="003",
+                        tachometer_start=4.0,
+                        tachometer_end=5.5,
+                    ),
+                ]
+            )
+            await session.commit()
+            stmt = (
+                select(AircraftTechnicalLog)
+                .where(AircraftTechnicalLog.aircraft_fk == ac.id)
+                .order_by(cast(AircraftTechnicalLog.sequence_no, Numeric).asc())
+            )
+            rows = (await session.execute(stmt)).scalars().all()
+            target = rows[-1]
+            forced = await resolve_auto_fields(
+                session, target, ac, {}, force_recompute=True
+            )
+            assert round(forced["auto_airframe_run_time"], 2) == 1.5
+            assert round(forced["auto_airframe_aftt"], 2) == 11.5
+
+    asyncio.run(_run())
 
 
 def test_atl_paged_computes_runtime_and_component_totals_from_tach_and_aircraft_baselines(
