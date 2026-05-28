@@ -636,6 +636,55 @@ async def get_previous_atl(
     return result.scalar_one_or_none()
 
 
+async def fetch_predecessors_for_atl(
+    session: AsyncSession,
+    aircraft_fk: int,
+    sequence_no: str,
+    *,
+    atl_batch_fk: Optional[int] = None,
+) -> List[AircraftTechnicalLog]:
+    """All predecessors for one ATL stream in ascending numeric sequence (single query)."""
+    sequence_no = _sequence_no_digits_only(sequence_no)
+    try:
+        sequence_no_int = int(sequence_no)
+    except (TypeError, ValueError):
+        return []
+    stmt = (
+        select(AircraftTechnicalLog)
+        .where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
+        .where(_sequence_no_as_numeric() < sequence_no_int)
+        .where(AircraftTechnicalLog.is_deleted.is_(False))
+    )
+    if atl_batch_fk is None:
+        stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk.is_(None))
+    else:
+        stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk == atl_batch_fk)
+    stmt = stmt.order_by(_sequence_no_as_numeric().asc())
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def list_atls_for_scope_ordered(
+    session: AsyncSession,
+    aircraft_fk: int,
+    *,
+    atl_batch_fk: Optional[int] = None,
+) -> List[AircraftTechnicalLog]:
+    """All non-deleted ATLs for aircraft (+ optional batch), ascending by numeric sequence_no."""
+    stmt = (
+        select(AircraftTechnicalLog)
+        .where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
+        .where(AircraftTechnicalLog.is_deleted.is_(False))
+    )
+    if atl_batch_fk is None:
+        stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk.is_(None))
+    else:
+        stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk == atl_batch_fk)
+    stmt = stmt.order_by(_sequence_no_as_numeric().asc())
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
 async def list_atl_paged(
     session: AsyncSession,
     limit: int = 10,

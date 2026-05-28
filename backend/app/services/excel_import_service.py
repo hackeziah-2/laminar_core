@@ -165,7 +165,7 @@ class ExcelImportService:
             await session.commit()
             await hook.after_commit(
                 session,
-                context={},
+                context=dict(config.inject_fields),
                 audit_account_id=config.audit_account_id,
             )
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 from httpx import AsyncClient
+from sqlalchemy import select
 
 from tests.factories.import_files import (
     ad_csv_bytes,
@@ -154,6 +155,72 @@ def test_atl_import_aircraft_not_found(
     )
     assert response.status_code == 404
     assert "Aircraft" in response.json()["detail"]
+
+
+def test_atl_import_backfills_persisted_auto_columns(
+    client_with_maintenance_import_auth: TestClient,
+):
+    """Successful ATL import should persist auto_* via after_commit backfill."""
+    import asyncio
+
+    from app.core.atl_derived_times import ATL_AUTO_FIELD_KEYS
+    from app.models.aircraft import Aircraft
+    from app.models.aircraft_techinical_log import AircraftTechnicalLog
+    from app.models.atl_batch import AtlBatch
+    from tests.conftest import TestSessionLocal
+
+    async def _seed() -> tuple[int, int]:
+        async with TestSessionLocal() as session:
+            ac = Aircraft(
+                registration="ATL-IMP-BF",
+                manufacturer="Cessna",
+                model="172",
+                msn="ATL-MSN-BF",
+                base="Base",
+                ownership="Owner",
+                status="Active",
+                airframe_aftt=10.0,
+            )
+            session.add(ac)
+            await session.flush()
+            batch = AtlBatch(name="Import BF", description="pytest")
+            session.add(batch)
+            await session.commit()
+            await session.refresh(ac)
+            await session.refresh(batch)
+            return ac.id, batch.id
+
+    aircraft_id, batch_id = asyncio.run(_seed())
+    csv_body = (
+        b"SEQ NO.,TACH START,TACH END\n"
+        b"001,1,2\n"
+        b"002,2,3.5\n"
+    )
+    response = client_with_maintenance_import_auth.post(
+        "/api/v1/excel-data/aircraft-technical-log/import",
+        data={"aircraft_id": str(aircraft_id), "batch_id": str(batch_id)},
+        files={"file": ("atl.csv", csv_body, "text/csv")},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "success"
+
+    async def _check_row() -> None:
+        from sqlalchemy import Numeric, cast
+
+        async with TestSessionLocal() as session:
+            row = (
+                await session.execute(
+                    select(AircraftTechnicalLog)
+                    .where(AircraftTechnicalLog.aircraft_fk == aircraft_id)
+                    .where(AircraftTechnicalLog.atl_batch_fk == batch_id)
+                    .order_by(cast(AircraftTechnicalLog.sequence_no, Numeric).desc())
+                    .limit(1)
+                )
+            ).scalar_one()
+            for key in ATL_AUTO_FIELD_KEYS:
+                assert getattr(row, key) is not None, key
+
+    asyncio.run(_check_row())
 
 
 def test_atl_import_batch_not_found(

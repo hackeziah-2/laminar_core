@@ -294,7 +294,14 @@ async def api_atl_list_paged(
 )
 async def api_get(
     log_id: int,
-    session: AsyncSession = Depends(get_session)
+    recompute: bool = Query(
+        False,
+        description=(
+            "When true, recompute auto_* from the full predecessor chain even if "
+            "persisted auto_* columns exist on the row."
+        ),
+    ),
+    session: AsyncSession = Depends(get_session),
 ):
     """Get a single Aircraft Technical Log entry by ID."""
     obj = await get_aircraft_technical_log(session, log_id)
@@ -303,7 +310,9 @@ async def api_get(
             status_code=404,
             detail="Aircraft Technical Log not found"
         )
-    return await aircraft_technical_log_read_with_computed(session, obj)
+    return await aircraft_technical_log_read_with_computed(
+        session, obj, recompute=recompute
+    )
 
 
 @router.post(

@@ -5,8 +5,9 @@ Used for API responses (standard fields + auto_*) and aircraft-scoped ATL paged 
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -14,6 +15,23 @@ from sqlalchemy.orm import selectinload
 from app.schemas.aircraft_technical_log_schema import AircraftTechnicalLogRead
 
 from app.models.aircraft_techinical_log import AircraftTechnicalLog
+
+
+def _atl_memo_key(item: AircraftTechnicalLog) -> Tuple[int, str, Optional[int]]:
+    return (
+        int(item.aircraft_fk),
+        str(getattr(item, "sequence_no", "")),
+        getattr(item, "atl_batch_fk", None),
+    )
+
+
+def _atl_relationships_loaded(entry: AircraftTechnicalLog) -> bool:
+    """True when aircraft, atl_batch, and component_parts are already eager-loaded."""
+    insp = sa_inspect(entry)
+    for rel in ("aircraft", "atl_batch", "component_parts"):
+        if rel in insp.unloaded:
+            return False
+    return True
 
 
 def float_or_zero(value: Any) -> float:
@@ -246,6 +264,46 @@ ATL_AUTO_FIELD_KEYS: tuple[str, ...] = (
 )
 
 
+def _atl_has_persisted_auto_fields(entry: AircraftTechnicalLog) -> bool:
+    """True when every persisted auto_* column is set on the row."""
+    return all(getattr(entry, key, None) is not None for key in ATL_AUTO_FIELD_KEYS)
+
+
+def _auto_fields_from_row(entry: AircraftTechnicalLog) -> Dict[str, float]:
+    return {key: float_or_zero(getattr(entry, key)) for key in ATL_AUTO_FIELD_KEYS}
+
+
+def _compute_chain_in_memory(
+    chain: List[AircraftTechnicalLog],
+    target: AircraftTechnicalLog,
+    aircraft_obj: Any,
+    memo: Optional[Dict[Tuple[int, str, Optional[int]], Dict[str, float]]],
+) -> Dict[str, float]:
+    prev_atl = None
+    prev_auto_fields: Optional[Dict[str, float]] = None
+    result: Optional[Dict[str, float]] = None
+    for atl in chain:
+        atl_key = _atl_memo_key(atl)
+        if memo is not None and atl_key in memo:
+            auto_fields = memo[atl_key]
+        else:
+            auto_fields = compute_auto_fields(
+                atl,
+                prev_atl,
+                aircraft_obj,
+                prev_auto_fields=prev_auto_fields,
+            )
+            if memo is not None:
+                memo[atl_key] = auto_fields
+        prev_atl = atl
+        prev_auto_fields = auto_fields
+        if int(atl.id) == int(target.id):
+            result = auto_fields
+    if result is not None:
+        return result
+    return compute_auto_fields(target, None, aircraft_obj, prev_auto_fields=None)
+
+
 # Map shared computation to auto_comp_* names (GET /api/v1/aircraft/{id}/atl/paged).
 _AUTO_TO_COMP_KEYS: tuple[tuple[str, str], ...] = (
     ("auto_airframe_run_time", "auto_comp_airframe_run_time"),
@@ -310,11 +368,17 @@ async def _atl_eager_for_read(
 async def aircraft_technical_log_read_with_computed(
     session: AsyncSession,
     entry: AircraftTechnicalLog,
+    *,
+    recompute: bool = False,
 ) -> AircraftTechnicalLogRead:
     """Build AircraftTechnicalLogRead with standard time fields replaced by computed values."""
-    entry = await _atl_eager_for_read(session, entry)
+    if not _atl_relationships_loaded(entry):
+        entry = await _atl_eager_for_read(session, entry)
     aircraft_obj = entry.aircraft
-    auto_fields = await resolve_auto_fields(session, entry, aircraft_obj)
+    memo: Dict[Tuple[int, str, Optional[int]], Dict[str, float]] = {}
+    auto_fields = await resolve_auto_fields(
+        session, entry, aircraft_obj, memo, force_recompute=recompute
+    )
     auto_fields = {k: round(v, 2) for k, v in auto_fields.items()}
     base = AircraftTechnicalLogRead.from_orm(entry)
     auto_only = {k: auto_fields[k] for k in ATL_AUTO_FIELD_KEYS}
@@ -327,31 +391,79 @@ async def resolve_auto_fields(
     item: AircraftTechnicalLog,
     aircraft_obj: Any,
     memo: Optional[Dict[Tuple[int, str, Optional[int]], Dict[str, float]]] = None,
+    *,
+    force_recompute: bool = False,
 ) -> Dict[str, float]:
-    """Resolve cumulative auto_* values through the previous ATL chain."""
-    from app.repository.aircraft_technical_log import get_previous_atl
+    """Resolve cumulative auto_* values through the previous ATL chain (no recursion)."""
+    from app.repository.aircraft_technical_log import (
+        fetch_predecessors_for_atl,
+        get_previous_atl,
+    )
 
-    batch_fk = getattr(item, "atl_batch_fk", None)
-    key = (int(item.aircraft_fk), str(getattr(item, "sequence_no", "")), batch_fk)
+    key = _atl_memo_key(item)
     if memo is not None and key in memo:
         return memo[key]
 
-    prev_atl = await get_previous_atl(
-        session, item.aircraft_fk, item.sequence_no, atl_batch_fk=batch_fk
-    )
-    prev_auto_fields = None
-    if prev_atl is not None:
-        prev_auto_fields = await resolve_auto_fields(session, prev_atl, aircraft_obj, memo)
+    if not force_recompute and _atl_has_persisted_auto_fields(item):
+        return _auto_fields_from_row(item)
 
-    auto_fields = compute_auto_fields(
-        item,
-        prev_atl,
-        aircraft_obj,
-        prev_auto_fields=prev_auto_fields,
+    batch_fk = getattr(item, "atl_batch_fk", None)
+    aircraft_fk = int(item.aircraft_fk)
+
+    if not force_recompute:
+        prev_atl = await get_previous_atl(
+            session,
+            aircraft_fk,
+            item.sequence_no,
+            atl_batch_fk=batch_fk,
+        )
+        if prev_atl is None:
+            return compute_auto_fields(item, None, aircraft_obj, prev_auto_fields=None)
+        if _atl_has_persisted_auto_fields(prev_atl):
+            return compute_auto_fields(item, prev_atl, aircraft_obj, prev_auto_fields=None)
+
+    predecessors = await fetch_predecessors_for_atl(
+        session,
+        aircraft_fk,
+        item.sequence_no,
+        atl_batch_fk=batch_fk,
     )
-    if memo is not None:
-        memo[key] = auto_fields
-    return auto_fields
+    chain = predecessors + [item]
+    return _compute_chain_in_memory(chain, item, aircraft_obj, memo)
+
+
+async def backfill_atl_auto_fields_for_scope(
+    session: AsyncSession,
+    aircraft_fk: int,
+    *,
+    atl_batch_fk: Optional[int] = None,
+    aircraft_obj: Optional[Any] = None,
+) -> int:
+    """Persist auto_* for all ATLs in one aircraft/batch stream (ascending sequence). Returns rows updated."""
+    from app.models.aircraft import Aircraft
+    from app.repository.aircraft_technical_log import list_atls_for_scope_ordered
+
+    if aircraft_obj is None:
+        aircraft_obj = await session.get(Aircraft, aircraft_fk)
+    rows = await list_atls_for_scope_ordered(
+        session, aircraft_fk, atl_batch_fk=atl_batch_fk
+    )
+    prev_atl = None
+    prev_auto_fields: Optional[Dict[str, float]] = None
+    for row in rows:
+        auto_fields = compute_auto_fields(
+            row,
+            prev_atl,
+            aircraft_obj,
+            prev_auto_fields=prev_auto_fields,
+        )
+        for k in ATL_AUTO_FIELD_KEYS:
+            setattr(row, k, round(auto_fields[k], 2))
+        prev_atl = row
+        prev_auto_fields = auto_fields
+    if rows:
+        await session.flush()
+    return len(rows)
 
 
 async def persist_atl_auto_fields_to_row(
@@ -373,8 +485,10 @@ async def persist_atl_auto_fields_to_row(
         atl_batch_fk=getattr(entry, "atl_batch_fk", None),
     )
     prev_auto_fields = None
-    if prev_atl is not None:
-        prev_auto_fields = await resolve_auto_fields(session, prev_atl, aircraft_obj)
+    if prev_atl is not None and _atl_has_persisted_auto_fields(prev_atl):
+        prev_auto_fields = _auto_fields_from_row(prev_atl)
+    elif prev_atl is not None:
+        prev_auto_fields = await resolve_auto_fields(session, prev_atl, aircraft_obj, {})
     auto_fields = compute_auto_fields(
         entry, prev_atl, aircraft_obj, prev_auto_fields=prev_auto_fields
     )
