@@ -23,6 +23,10 @@ from app.models.role import Role
 from app.schemas.aircraft_technical_log_schema import (
     AircraftTechnicalLogCreate,
     AircraftTechnicalLogUpdate,
+    AircraftTechnicalLogBulkWorkStatusUpdateResponse,
+    AircraftTechnicalLogBulkWorkStatusUpdateItem,
+    AircraftTechnicalLogBulkDeleteResponse,
+    AircraftTechnicalLogBulkDeleteItem,
     ComponentPartsRecordCreate,
 )
 
@@ -504,6 +508,106 @@ async def update_aircraft_technical_log(
     return reloaded
 
 
+async def bulk_update_aircraft_technical_log_work_status(
+    session: AsyncSession,
+    *,
+    atl_ids: List[int],
+    work_status: WorkStatus,
+    atomic: bool = False,
+    audit_account_id: Optional[int] = None,
+    current_account: Optional[AccountInformation] = None,
+) -> AircraftTechnicalLogBulkWorkStatusUpdateResponse:
+    """Bulk update ATL work_status with optional atomic rollback behavior."""
+    unique_ids = list(dict.fromkeys(atl_ids))
+    if not unique_ids:
+        raise HTTPException(status_code=400, detail="ids must not be empty")
+
+    result_items: List[AircraftTechnicalLogBulkWorkStatusUpdateItem] = []
+    updated_count = 0
+    touched_rows: List[AircraftTechnicalLog] = []
+
+    rows_result = await session.execute(
+        select(AircraftTechnicalLog).where(AircraftTechnicalLog.id.in_(unique_ids))
+    )
+    row_map = {
+        row.id: row
+        for row in rows_result.scalars().all()
+    }
+
+    for atl_id in unique_ids:
+        obj = row_map.get(atl_id)
+        if not obj or obj.is_deleted:
+            if atomic:
+                await session.rollback()
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"ATL id {atl_id} not found",
+                )
+            result_items.append(
+                AircraftTechnicalLogBulkWorkStatusUpdateItem(
+                    id=atl_id,
+                    success=False,
+                    message="ATL not found",
+                )
+            )
+            continue
+
+        try:
+            await _validate_work_status_transition(
+                session=session,
+                obj=obj,
+                update_data={"work_status": work_status},
+                current_account=current_account,
+            )
+            obj.work_status = work_status
+            if audit_account_id is not None:
+                await set_audit_fields(obj, audit_account_id, is_create=False)
+            session.add(obj)
+            touched_rows.append(obj)
+            updated_count += 1
+            result_items.append(
+                AircraftTechnicalLogBulkWorkStatusUpdateItem(
+                    id=atl_id,
+                    success=True,
+                    message="Updated",
+                )
+            )
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+            if atomic:
+                await session.rollback()
+                raise HTTPException(status_code=exc.status_code, detail=detail)
+            result_items.append(
+                AircraftTechnicalLogBulkWorkStatusUpdateItem(
+                    id=atl_id,
+                    success=False,
+                    message=detail,
+                )
+            )
+        except Exception as exc:
+            if atomic:
+                await session.rollback()
+                raise HTTPException(status_code=500, detail=str(exc))
+            result_items.append(
+                AircraftTechnicalLogBulkWorkStatusUpdateItem(
+                    id=atl_id,
+                    success=False,
+                    message=str(exc),
+                )
+            )
+
+    if touched_rows:
+        await session.commit()
+    else:
+        await session.rollback()
+
+    return AircraftTechnicalLogBulkWorkStatusUpdateResponse(
+        updated_count=updated_count,
+        failed_count=len(unique_ids) - updated_count,
+        results=result_items,
+    )
+
+
 async def get_previous_atl(
     session: AsyncSession,
     aircraft_fk: int,
@@ -818,3 +922,68 @@ async def soft_delete_aircraft_technical_log(
     session.add(obj)
     await session.commit()
     return True
+
+
+async def bulk_soft_delete_aircraft_technical_logs(
+    session: AsyncSession,
+    *,
+    atl_ids: List[int],
+    atomic: bool = False,
+    audit_account_id: Optional[int] = None,
+) -> AircraftTechnicalLogBulkDeleteResponse:
+    """Bulk soft-delete ATL entries with optional atomic rollback behavior."""
+    unique_ids = list(dict.fromkeys(atl_ids))
+    if not unique_ids:
+        raise HTTPException(status_code=400, detail="ids must not be empty")
+
+    result_items: List[AircraftTechnicalLogBulkDeleteItem] = []
+    deleted_count = 0
+    touched_rows: List[AircraftTechnicalLog] = []
+
+    rows_result = await session.execute(
+        select(AircraftTechnicalLog).where(AircraftTechnicalLog.id.in_(unique_ids))
+    )
+    row_map = {row.id: row for row in rows_result.scalars().all()}
+
+    for atl_id in unique_ids:
+        obj = row_map.get(atl_id)
+        if not obj or obj.is_deleted:
+            if atomic:
+                await session.rollback()
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"ATL id {atl_id} not found",
+                )
+            result_items.append(
+                AircraftTechnicalLogBulkDeleteItem(
+                    id=atl_id,
+                    success=False,
+                    message="ATL not found",
+                )
+            )
+            continue
+
+        obj.soft_delete()
+        if audit_account_id is not None:
+            await set_audit_fields(obj, audit_account_id, is_create=False)
+        session.add(obj)
+        touched_rows.append(obj)
+        deleted_count += 1
+        result_items.append(
+            AircraftTechnicalLogBulkDeleteItem(
+                id=atl_id,
+                success=True,
+                message="Deleted",
+            )
+        )
+
+    if touched_rows:
+        await session.commit()
+    else:
+        await session.rollback()
+
+    return AircraftTechnicalLogBulkDeleteResponse(
+        deleted_count=deleted_count,
+        failed_count=len(unique_ids) - deleted_count,
+        results=result_items,
+    )

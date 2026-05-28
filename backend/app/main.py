@@ -42,6 +42,7 @@ from app.api.v1 import (
     advisory as advisory_router,
     atl_batch as atl_batch_router,
     atl_excel_import as atl_excel_import_router,
+    report_generator as report_generator_router,
 )
 from app.database import engine, Base
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
@@ -68,6 +69,7 @@ _default_origins = [
     "http://120.89.33.51:3002",   # prod frontend
     "http://35.247.149.93:3002",  # prod frontend (alternate host)
     "http://34.126.119.234:3002", # prod frontend (new host)
+    "https://fms.laminaraviationapps.com", # prod frontend (new host)
     "http://120.89.33.51:8000",
     "http://120.89.33.52:8081",
     "http://fleet.llibus.com",
@@ -292,6 +294,7 @@ app.include_router(advisory_router.router)
 app.include_router(advisory_router.router_advisory)
 app.include_router(dashboard_router.router)
 app.include_router(excel_data_router.router)
+app.include_router(report_generator_router.router)
 
 @app.on_event("startup")
 async def startup():
