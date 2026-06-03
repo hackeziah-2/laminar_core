@@ -22,6 +22,7 @@ class ADMonitoringBase(BaseModel):
     inspection_interval: str = Field(..., max_length=100)
     compli_date: Optional[date] = None
     file_path: Optional[str] = Field(None, max_length=500)
+    web_link: Optional[str] = Field(None, max_length=2048)
 
     class Config:
         orm_mode = True
@@ -39,6 +40,7 @@ class ADMonitoringImportSchema(BaseModel):
     subject: str = Field(..., max_length=100)
     inspection_interval: str = Field(..., max_length=100)
     compli_date: Optional[date] = None
+    web_link: Optional[str] = Field(None, max_length=2048)
 
     @staticmethod
     def _coerce_required_str(v: Any, field_name: str) -> str:
@@ -81,6 +83,7 @@ class ADMonitoringUpdate(BaseModel):
     inspection_interval: Optional[str] = Field(None, max_length=100)
     compli_date: Optional[date] = None
     file_path: Optional[str] = Field(None, max_length=500)
+    web_link: Optional[str] = Field(None, max_length=2048)
 
     class Config:
         orm_mode = True

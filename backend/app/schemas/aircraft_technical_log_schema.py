@@ -413,6 +413,8 @@ class AircraftTechnicalLogBase(BaseModel):
 
     white_atl: Optional[str] = None
     dfp: Optional[str] = None
+    white_atl_web_link: Optional[str] = None
+    dfp_web_link: Optional[str] = None
 
     created_by: Optional[int] = None
     updated_by: Optional[int] = None
@@ -754,6 +756,8 @@ class AircraftTechnicalLogUpdate(BaseModel):
 
     white_atl: Optional[str] = None
     dfp: Optional[str] = None
+    white_atl_web_link: Optional[str] = None
+    dfp_web_link: Optional[str] = None
 
     created_by: Optional[int] = None
     updated_by: Optional[int] = None

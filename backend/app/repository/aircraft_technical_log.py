@@ -18,6 +18,7 @@ from app.models.aircraft_techinical_log import (
 from app.models.atl_batch import AtlBatch
 from app.models.aircraft import Aircraft
 from app.models.account import AccountInformation
+from app.core.atl_edit_rbac import validate_atl_edit_allowed_for_account
 from app.core.atl_workflow_rbac import is_atl_work_status_transition_allowed
 from app.models.role import Role
 from app.schemas.aircraft_technical_log_schema import (
@@ -158,6 +159,36 @@ def _clean_atl_update_data(update_data: Dict[str, Any]) -> Dict[str, Any]:
     return update_data
 
 
+async def _resolve_account_role_name(
+    session: AsyncSession,
+    current_account: Optional[AccountInformation],
+) -> Optional[str]:
+    if not current_account or not current_account.role_id:
+        return None
+    role = await session.get(Role, current_account.role_id)
+    if role and not role.is_deleted:
+        return role.name
+    return None
+
+
+async def _validate_atl_edit_rbac(
+    *,
+    session: AsyncSession,
+    obj: AircraftTechnicalLog,
+    update_data: dict,
+    current_account: Optional[AccountInformation],
+) -> None:
+    role_name = await _resolve_account_role_name(session, current_account)
+    try:
+        validate_atl_edit_allowed_for_account(
+            role_name=role_name,
+            current_status=obj.work_status,
+            update_data=update_data,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
 async def _validate_work_status_transition(
     *,
     session: AsyncSession,
@@ -167,11 +198,7 @@ async def _validate_work_status_transition(
 ) -> None:
     if "work_status" not in update_data:
         return
-    role_name = None
-    if current_account and current_account.role_id:
-        role = await session.get(Role, current_account.role_id)
-        if role and not role.is_deleted:
-            role_name = role.name
+    role_name = await _resolve_account_role_name(session, current_account)
     next_status = update_data["work_status"]
     if not is_atl_work_status_transition_allowed(
         role_name=role_name,
@@ -458,6 +485,12 @@ async def update_aircraft_technical_log(
     update_data = _atl_update_payload_from_schema(log_in)
     update_data = _clean_atl_update_data(update_data)
 
+    await _validate_atl_edit_rbac(
+        session=session,
+        obj=obj,
+        update_data=update_data,
+        current_account=current_account,
+    )
     await _validate_work_status_transition(
         session=session,
         obj=obj,
@@ -614,8 +647,9 @@ async def get_previous_atl(
     sequence_no: str,
     *,
     atl_batch_fk: Optional[int] = None,
+    null_batch_only_when_batch_unset: bool = True,
 ) -> Optional[AircraftTechnicalLog]:
-    """Immediate predecessor by sequence within the same aircraft and ATL batch stream (NULL batch matches NULL only)."""
+    """Immediate predecessor (highest sequence_no strictly less than given) for aircraft (+ batch scope)."""
     sequence_no = _sequence_no_digits_only(sequence_no)
     try:
         sequence_no_int = int(sequence_no)
@@ -627,10 +661,10 @@ async def get_previous_atl(
         .where(_sequence_no_as_numeric() < sequence_no_int)
         .where(AircraftTechnicalLog.is_deleted.is_(False))
     )
-    if atl_batch_fk is None:
-        stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk.is_(None))
-    else:
+    if atl_batch_fk is not None:
         stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk == atl_batch_fk)
+    elif null_batch_only_when_batch_unset:
+        stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk.is_(None))
     stmt = stmt.order_by(_sequence_no_as_numeric().desc()).limit(1)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
@@ -754,7 +788,7 @@ def _build_aircraft_technical_logs_list_statements(
     search: Optional[str] = None,
     aircraft_fk: Optional[int] = None,
     atl_batch_fk: Optional[int] = None,
-    sort: Optional[str] = "",
+    sort: Optional[str] = "-sequence_no",
 ) -> Tuple:
     """Build list/count statements shared by ATL paged endpoints."""
     stmt = (
@@ -828,9 +862,9 @@ def _build_aircraft_technical_logs_list_statements(
                 column.desc() if desc_order else column.asc()
             )
     else:
-        # Default ordering: sequence number ascending so computed "previous" base follows ATL order.
+        # Default ordering: highest sequence number first (newest ATL at top of list).
         stmt = stmt.order_by(
-            _sequence_no_as_numeric().asc(),
+            _sequence_no_as_numeric().desc(),
         )
 
     # Total count query (same filters, no ORDER BY)
@@ -879,7 +913,7 @@ async def list_aircraft_technical_logs(
     aircraft_fk: Optional[int] = None,
     atl_batch_fk: Optional[int] = None,
     work_status: Optional[WorkStatus] = None,
-    sort: Optional[str] = "",
+    sort: Optional[str] = "-sequence_no",
 ) -> Tuple[List[AircraftTechnicalLog], int]:
     """List Aircraft Technical Log entries with pagination."""
     stmt, count_stmt = _build_aircraft_technical_logs_list_statements(
@@ -911,7 +945,7 @@ async def list_aircraft_technical_logs_manage(
     aircraft_fk: Optional[int] = None,
     atl_batch_fk: Optional[int] = None,
     work_status: Optional[WorkStatus] = None,
-    sort: Optional[str] = "",
+    sort: Optional[str] = "-sequence_no",
     current_account: Optional[AccountInformation] = None,
 ) -> Tuple[List[AircraftTechnicalLog], int]:
     """List ATL entries for the manage paged endpoint with RBAC applied by decorator."""
@@ -926,9 +960,10 @@ async def list_aircraft_technical_logs_manage(
 
 async def get_latest_aircraft_technical_log(
     session: AsyncSession,
-    aircraft_fk: Optional[int] = None
+    aircraft_fk: Optional[int] = None,
+    atl_batch_fk: Optional[int] = None,
 ) -> Optional[AircraftTechnicalLog]:
-    """Get the latest Aircraft Technical Log entry by sequence_no."""
+    """Get the latest ATL for aircraft (+ optional batch) by highest numeric sequence_no."""
     stmt = (
         select(AircraftTechnicalLog)
         .options(
@@ -938,16 +973,14 @@ async def get_latest_aircraft_technical_log(
         )
         .where(AircraftTechnicalLog.is_deleted == False)
     )
-    
-    # Filter by aircraft if provided
-    if aircraft_fk:
+
+    if aircraft_fk is not None:
         stmt = stmt.where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
-    
-    # Order by sequence_no descending (numeric) to get the latest
-    stmt = stmt.order_by(_sequence_no_as_numeric().desc())
-    
-    # Get the first result
-    stmt = stmt.limit(1)
+
+    if atl_batch_fk is not None:
+        stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk == atl_batch_fk)
+
+    stmt = stmt.order_by(_sequence_no_as_numeric().desc()).limit(1)
     
     result = await session.execute(stmt)
     obj = result.scalar_one_or_none()

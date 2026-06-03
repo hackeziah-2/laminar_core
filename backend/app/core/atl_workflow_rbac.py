@@ -9,6 +9,8 @@ _ATL_ALLOWED_STATUS_TRANSITIONS_BY_ROLE: Dict[str, Set[Tuple[WorkStatus, WorkSta
     "Quality Manager": {
         (WorkStatus.PENDING, WorkStatus.COMPLETED),
         (WorkStatus.PENDING, WorkStatus.REJECTED_QUALITY),
+        (WorkStatus.APPROVED, WorkStatus.COMPLETED),
+        (WorkStatus.APPROVED, WorkStatus.REJECTED_QUALITY),
     },
 }
 

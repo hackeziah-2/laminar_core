@@ -1,5 +1,3 @@
-import json
-import time
 from math import ceil
 from typing import Optional
 
@@ -64,40 +62,6 @@ async def api_matrix_2_paged(
     ),
 ):
     offset = (page - 1) * limit
-    # region agent log
-    try:
-        with open(
-            "/Users/kevinpaullamadrid/Desktop/Project/laminar_core/.cursor/debug-004053.log",
-            "a",
-            encoding="utf-8",
-        ) as _f:
-            _f.write(
-                json.dumps(
-                    {
-                        "sessionId": "004053",
-                        "timestamp": int(time.time() * 1000),
-                        "hypothesisId": "H3-H4",
-                        "location": "personnel_compliance_matrix_2.py:api_matrix_2_paged:entry",
-                        "message": "request query params",
-                        "data": {
-                            "limit": limit,
-                            "page": page,
-                            "offset": offset,
-                            "search": (search or "")[:120] if search else None,
-                            "sort": (sort or "")[:120] if sort else None,
-                            "designation": (account_information__designation or "")[:120]
-                            if account_information__designation
-                            else None,
-                        },
-                        "runId": "post-fix",
-                    },
-                    default=str,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # endregion
     rows, total, compliance_by_account = await list_personnel_compliance_matrix_2_paged(
         session=session,
         limit=limit,

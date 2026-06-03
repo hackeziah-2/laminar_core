@@ -7,3 +7,5 @@ venv/
 .idea/
 .vscode/
 backend/uploads/
+backend/static/
+backups/

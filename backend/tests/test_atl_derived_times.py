@@ -556,11 +556,11 @@ def test_atl_paged_keeps_tso_cumulative_from_previous_computed_values_for_later_
     assert items["003"]["auto_propeller_tso"] == 304.5
 
 
-def test_atl_paged_defaults_to_sequence_number_ascending_for_base_computation(
+def test_atl_paged_defaults_to_sequence_number_descending(
     client_with_atl_auth: TestClient,
     test_aircraft_data: dict,
 ):
-    """Default paged ordering should follow ascending numeric sequence_no so previous-base computation is consistent."""
+    """Default paged ordering should follow descending numeric sequence_no (newest first)."""
     aircraft_payload = {
         **test_aircraft_data,
         "msn": "TEST-MSN-ATL-ASC",
@@ -604,7 +604,7 @@ def test_atl_paged_defaults_to_sequence_number_ascending_for_base_computation(
     assert paged_response.status_code == 200, paged_response.text
 
     items = paged_response.json()["items"]
-    assert [item["sequence_no"] for item in items] == ["002", "010"]
+    assert [item["sequence_no"] for item in items] == ["010", "002"]
 
     row_010 = next(item for item in items if item["sequence_no"] == "010")
     assert row_010["auto_airframe_run_time"] == 2.5

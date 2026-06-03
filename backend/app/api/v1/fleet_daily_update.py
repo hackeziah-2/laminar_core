@@ -12,6 +12,7 @@ from app.repository.fleet_daily_update import (
     get_fleet_daily_update_by_aircraft,
     list_fleet_daily_updates,
     update_fleet_daily_update,
+    bulk_update_fleet_daily_updates,
     soft_delete_fleet_daily_update,
     soft_delete_fleet_daily_update_by_aircraft,
 )
@@ -22,9 +23,10 @@ from app.repository.ldnd_monitoring import (
 )
 from app.repository.aircraft_technical_log import get_latest_aircraft_technical_log
 from app.repository.tcc_maintenance import get_latest_tcc_by_aircraft_and_description
-from app.api.deps import get_current_active_account
+from app.api.deps import get_current_active_account, require_permission
 from app.database import get_session
 from app.models.account import AccountInformation
+from app.models.fleet_daily_update import FLEET_DAILY_UPDATE_MODULE_NAME
 
 router = APIRouter(
     prefix="/api/v1/fleet-daily-update",
@@ -79,7 +81,9 @@ async def _enrich_item_with_ldnd(session, orm_item):
     # tach_time_eod: from latest ATL by sequence_no → tachometer_end, rounded to one decimal
     latest_atl = await get_latest_aircraft_technical_log(session, aircraft_fk=aircraft_id)
     tach_time_eod = latest_atl.tachometer_end if latest_atl else None
-    base["tach_time_eod"] = _round1(tach_time_eod)
+
+    base["tach_time_eod"] =  base["tach_time_eod"]
+    # _round1(tach_time_eod)
 
     # remaining_time_before_next_isp: tach_time_due - tach_time_eod (from raw values), rounded to one decimal
     remaining_isp = (raw_tach_due - tach_time_eod) if (raw_tach_due is not None and tach_time_eod is not None) else None
@@ -159,6 +163,40 @@ async def api_list_fleet_daily_updates_paged(
         "page": page,
         "pages": pages,
     }
+
+
+@router.patch(
+    "/bulk/",
+    response_model=fleet_daily_update_schema.FleetDailyUpdateBulkUpdateResponse,
+    summary="Bulk partial update Fleet Daily Update records",
+    description=(
+        "Apply partial updates to multiple Fleet Daily Update records in one atomic request. "
+        "Each item in `updates` must include `id`; optional fields are `aircraft_id`, `status`, "
+        "`tach_time_eod`, and `remarks`. Only provided fields are updated. "
+        "All record IDs are validated before any write; the entire batch rolls back if any update fails. "
+        "Requires `can_update` permission on the Daily Update module."
+    ),
+)
+async def api_bulk_update_fleet_daily_updates(
+    payload: fleet_daily_update_schema.FleetDailyUpdateBulkUpdateRequest,
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(
+        require_permission(FLEET_DAILY_UPDATE_MODULE_NAME, "can_update")
+    ),
+):
+    """
+    Bulk partial update for Aircraft Fleet Daily Update.
+
+    Accepts multiple updates under `updates`. Each entry requires `id` and at least one
+    optional field (`aircraft_id`, `status`, `tach_time_eod`, `remarks`). Status values
+    are normalized (e.g. `OPERATIONAL` → `Operational`). Audit fields `updated_by` and
+    `updated_at` are set on every updated record.
+    """
+    return await bulk_update_fleet_daily_updates(
+        session,
+        payload.updates,
+        audit_account_id=current_account.id,
+    )
 
 
 @router.get(

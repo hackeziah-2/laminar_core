@@ -1,9 +1,12 @@
 from datetime import date, datetime
-from typing import Any, List, Optional
+from typing import Any, List, Optional, TYPE_CHECKING
 
 from pydantic import BaseModel, validator
 
 from app.models.personnel_compliance import PersonnelComplianceItemType
+
+if TYPE_CHECKING:
+    from app.models.personnel_authorization import PersonnelAuthorization
 from app.schemas.personnel_authorization_schema import (
     AccountInformationPersonnelSummary,
     AuthorizationScopeBaronSummary,
@@ -66,6 +69,7 @@ class PersonnelComplianceUpdate(BaseModel):
 
 class PersonnelComplianceRead(PersonnelComplianceBase):
     id: int
+    auth_initial_doi: Optional[date] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     account_information: Optional[AccountInformationPersonnelSummary] = None
@@ -76,6 +80,20 @@ class PersonnelComplianceRead(PersonnelComplianceBase):
     class Config:
         orm_mode = True
         use_enum_values = True
+
+    @classmethod
+    def from_orm_with_personnel_authorization(
+        cls,
+        obj: Any,
+        pa: Optional["PersonnelAuthorization"] = None,
+    ) -> "PersonnelComplianceRead":
+        read = cls.from_orm(obj)
+        auth_doi = pa.auth_initial_doi if pa is not None else None
+        if auth_doi is None:
+            acc = getattr(obj, "account_information", None)
+            if acc is not None:
+                auth_doi = getattr(acc, "auth_initial_doi", None)
+        return cls(**{**read.dict(), "auth_initial_doi": auth_doi})
 
     @validator("account_information", pre=True)
     def account_information_from_orm(cls, v: Any) -> Any:

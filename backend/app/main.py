@@ -67,15 +67,16 @@ _default_origins = [
     "http://120.89.33.51:3000",   # dev frontend
     "http://120.89.33.52:3011",   # uat frontend
     "http://120.89.33.51:3002",   # prod frontend
-    "http://35.247.149.93:3002",  # prod frontend (alternate host)
-    "http://34.126.119.234:3002", # prod frontend (new host)
-    "https://fms.laminaraviationapps.com", # prod frontend (new host)
+    # "http://35.247.149.93:3002",  # prod frontend (alternate host)
+    "http://34.126.119.234:3000", # prod frontend (new host)
+    "https://fleet.laminaraviationapps.com", # prod frontend (new host)
+    "https://api-fleet.laminaraviationapps.com",
     "http://120.89.33.51:8000",
     "http://120.89.33.52:8081",
-    "http://fleet.llibus.com",
-    "https://fleet.llibus.com",
-    "http://api.llibus.com",
-    "https://api.llibus.com",
+    # "http://fleet.llibus.com",
+    # "https://fleet.llibus.com",
+    # "http://api.llibus.com",
+    # "https://api.llibus.com",
 ]
 
 # Optional: still support old single-URL env like VITE_APP_URL
