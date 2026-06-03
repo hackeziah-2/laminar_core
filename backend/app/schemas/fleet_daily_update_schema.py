@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, root_validator, validator
 
 
 FLEET_DAILY_UPDATE_STATUS_VALUES = ["Operational", "Ongoing Maintenance", "AOG"]
@@ -95,3 +95,69 @@ class FleetDailyUpdateRead(FleetDailyUpdateBase):
 
     class Config:
         orm_mode = True
+
+
+class FleetDailyUpdateBulkUpdateItem(BaseModel):
+    """Single partial update in a bulk Fleet Daily Update request."""
+
+    id: int = Field(..., ge=1, description="Fleet Daily Update record ID (required)")
+    aircraft_id: Optional[int] = Field(
+        None,
+        ge=1,
+        description="Aircraft ID to reassign this record to (optional)",
+    )
+    status: Optional[str] = Field(
+        None,
+        description="Operational, Ongoing Maintenance, or AOG (optional)",
+    )
+    tach_time_eod: Optional[float] = Field(
+        None,
+        description="End-of-day tachometer reading (optional)",
+    )
+    remarks: Optional[str] = Field(
+        None,
+        description="Remarks (optional; empty string clears)",
+    )
+
+    @validator("status", pre=True)
+    def status_to_str(cls, v):
+        if v is None:
+            return None
+        s = _status_to_str(v)
+        if s:
+            return s
+        if isinstance(v, str):
+            vn = v.strip().lower()
+            for val in FLEET_DAILY_UPDATE_STATUS_VALUES:
+                if val.lower() == vn:
+                    return val
+        return v
+
+    @root_validator
+    def require_at_least_one_update_field(cls, values):
+        if not any(
+            values.get(k) is not None
+            for k in ("aircraft_id", "status", "tach_time_eod", "remarks")
+        ):
+            raise ValueError(
+                "At least one of aircraft_id, status, tach_time_eod, or remarks must be provided"
+            )
+        return values
+
+
+class FleetDailyUpdateBulkUpdateRequest(BaseModel):
+    """Bulk partial update payload for Fleet Daily Update records."""
+
+    updates: List[FleetDailyUpdateBulkUpdateItem] = Field(
+        ...,
+        min_items=1,
+        description="List of partial updates; each item must include id",
+    )
+
+
+class FleetDailyUpdateBulkUpdateResponse(BaseModel):
+    """Bulk update result summary."""
+
+    message: str
+    updated_count: int
+    updated_ids: List[int]

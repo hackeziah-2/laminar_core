@@ -28,6 +28,15 @@ def _coalesce_compliance_then_auth(
     return auth_val
 
 
+def _coalesce_auth_issue_date(
+    pc_row: Optional[PersonnelCompliance], auth_val: Optional[date]
+) -> Optional[date]:
+    """Prefer personnel_compliance.auth_issue_date, then personnel_authorization."""
+    if pc_row is not None and pc_row.auth_issue_date is not None:
+        return pc_row.auth_issue_date
+    return auth_val
+
+
 class PersonnelComplianceMatrix2Item(BaseModel):
     """One matrix row per account_information_id (combined from latest personnel authorization)."""
 
@@ -118,7 +127,7 @@ class PersonnelComplianceMatrix2Item(BaseModel):
             position=summary.designation if summary else None,
             lic_no_type=lic,
             auth_initial_doi=auth_doi,
-            auth_issue_date=pa_issue,
+            auth_issue_date=_coalesce_auth_issue_date(pc_auth_expiry, pa_issue),
             auth_expiry_date=_coalesce_compliance_then_auth(
                 pc_auth_expiry, pa_auth_expiry
             ),

@@ -146,6 +146,52 @@ def test_personnel_compliance_matrix_2_paged_others_expiry_from_compliance_other
     assert row["others_expiry_date"] == "2028-03-01"
 
 
+def test_personnel_compliance_matrix_2_paged_auth_issue_date_from_compliance_when_no_pa_issue(
+    client_with_regulatory_compliance_auth: TestClient,
+):
+    """auth_issue_date is returned from AUTH_EXPIRY personnel_compliance when PA has none."""
+    client = client_with_regulatory_compliance_auth
+    account_data = {
+        "first_name": "Issue",
+        "last_name": "DateFromPC",
+        "username": "m2_issue_pc",
+        "password": "securepassword123",
+        "status": True,
+        "designation": "Captain",
+        "license_no": "ATPL-ISSUE",
+        "auth_stamp": "AUTH-ISSUE-PC",
+    }
+    r = client.post("/api/v1/account-information/", json=account_data)
+    assert r.status_code == 201, r.text
+    account_id = r.json()["id"]
+
+    pa = {
+        "account_information_id": account_id,
+        "is_withhold": False,
+    }
+    r_pa = client.post("/api/v1/personnel-authorization/", json=pa)
+    assert r_pa.status_code == 201, r_pa.text
+
+    pc = {
+        "account_information_id": account_id,
+        "item_type": "AUTH_EXPIRY",
+        "auth_issue_date": "2026-02-20",
+        "expiry_date": "2027-12-31",
+        "is_withhold": False,
+    }
+    r_pc = client.post("/api/v1/personnel-compliance/", json=pc)
+    assert r_pc.status_code == 201, r_pc.text
+
+    r3 = client.get(
+        "/api/v1/personnel-compliance-matrix-2/paged?page=1&limit=50&search=DateFromPC"
+    )
+    assert r3.status_code == 200, r3.text
+    row = next(
+        it for it in r3.json()["items"] if it["account_information_id"] == account_id
+    )
+    assert row["auth_issue_date"] == "2026-02-20"
+
+
 def test_personnel_compliance_matrix_date_by_item_type():
     from types import SimpleNamespace
 
@@ -171,6 +217,11 @@ def test_personnel_compliance_matrix_date_by_item_type():
 
     assert _coalesce_compliance_then_auth(pc_caap, date(2030, 1, 1)) == date(2027, 6, 1)
     assert _coalesce_compliance_then_auth(None, date(2030, 1, 1)) == date(2030, 1, 1)
+
+    from app.schemas.personnel_compliance_matrix_2_schema import _coalesce_auth_issue_date
+
+    assert _coalesce_auth_issue_date(pc_auth, date(2020, 5, 1)) == date(2026, 1, 15)
+    assert _coalesce_auth_issue_date(None, date(2020, 5, 1)) == date(2020, 5, 1)
 
 
 def test_personnel_compliance_matrix_2_from_personnel_authorization_fallback_auth_doi():

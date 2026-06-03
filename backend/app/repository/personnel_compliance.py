@@ -7,12 +7,32 @@ from sqlalchemy.orm import selectinload
 
 from app.database import set_audit_fields
 from app.models.account import AccountInformation
+from app.models.personnel_authorization import PersonnelAuthorization
 from app.models.personnel_compliance import PersonnelCompliance, PersonnelComplianceItemType
 from app.schemas.personnel_compliance_schema import (
     PersonnelComplianceCreate,
     PersonnelComplianceUpdate,
     PersonnelComplianceRead,
 )
+
+
+def _latest_personnel_authorization_subquery():
+    ranked = (
+        select(
+            PersonnelAuthorization.id.label("pa_id"),
+            PersonnelAuthorization.account_information_id.label("acc_id"),
+            func.row_number()
+            .over(
+                partition_by=PersonnelAuthorization.account_information_id,
+                order_by=(
+                    PersonnelAuthorization.updated_at.desc().nullslast(),
+                    PersonnelAuthorization.id.desc(),
+                ),
+            )
+            .label("rn"),
+        ).where(PersonnelAuthorization.is_deleted == False)
+    ).subquery()
+    return select(ranked.c.pa_id, ranked.c.acc_id).where(ranked.c.rn == 1).subquery()
 
 
 async def validate_personnel_compliance_duplicate(
@@ -46,15 +66,18 @@ async def list_personnel_compliances(
     sort: str = "",
     designation: Optional[str] = None,
     item_type: Optional[PersonnelComplianceItemType] = None,
-) -> Tuple[List[PersonnelCompliance], int]:
+) -> Tuple[List[Tuple[PersonnelCompliance, Optional[PersonnelAuthorization]]], int]:
+    latest_pa = _latest_personnel_authorization_subquery()
     stmt = (
-        select(PersonnelCompliance)
+        select(PersonnelCompliance, PersonnelAuthorization)
         .options(
             selectinload(PersonnelCompliance.account_information),
             selectinload(PersonnelCompliance.authorization_scope_cessna),
             selectinload(PersonnelCompliance.authorization_scope_baron),
             selectinload(PersonnelCompliance.authorization_scope_others),
         )
+        .outerjoin(latest_pa, latest_pa.c.acc_id == PersonnelCompliance.account_information_id)
+        .outerjoin(PersonnelAuthorization, PersonnelAuthorization.id == latest_pa.c.pa_id)
         .where(PersonnelCompliance.is_deleted == False)
     )
     need_join = False
@@ -64,6 +87,8 @@ async def list_personnel_compliances(
         need_join = True
     sort_lower = (sort or "").lower()
     if "account_information_id__auth_stamp" in sort_lower:
+        need_join = True
+    if "auth_initial_doi" in sort_lower:
         need_join = True
     for _part in (sort or "").split(","):
         _n = _part.lstrip("-").strip().lower()
@@ -126,11 +151,22 @@ async def list_personnel_compliances(
         PersonnelCompliance.expiry_date,
         PersonnelCompliance.auth_issue_date,
     }
+    auth_initial_doi_sort = func.coalesce(
+        PersonnelAuthorization.auth_initial_doi,
+        AccountInformation.auth_initial_doi,
+    )
     if sort:
         order_parts = []
         for part in sort.split(","):
             desc = part.startswith("-")
             name = part.lstrip("-").strip()
+            if name.lower() == "auth_initial_doi":
+                order_parts.append(
+                    auth_initial_doi_sort.desc().nullslast()
+                    if desc
+                    else auth_initial_doi_sort.asc().nullslast()
+                )
+                continue
             if name.lower() in ("full_name", "account_information__full_name"):
                 col_last = AccountInformation.last_name
                 col_first = AccountInformation.first_name
@@ -191,7 +227,7 @@ async def list_personnel_compliances(
     total = int(total or 0)
     stmt = stmt.limit(limit).offset(offset)
     result = await session.execute(stmt)
-    items = result.scalars().all()
+    items = [(row[0], row[1]) for row in result.all()]
     return items, total
 
 

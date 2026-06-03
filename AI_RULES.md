@@ -244,6 +244,45 @@ Use these for `rbac_module` on new targets (must match `modules.name` in the DB)
 - Services raise `AppError` subclasses; API catches and maps to `HTTPException`.
 - For imports, row errors are collected in `errors[]` with `row` (1-based sheet row, header = row 1) and `error` message.
 
+## Docstring Rules (API endpoints)
+
+Use this exact docstring structure for router endpoint handlers in `app/api/v1/*.py`:
+
+```python
+"""
+<Short Summary>
+
+Purpose:
+    Explain why this endpoint exists.
+
+Business Rules:
+    - Rule 1
+    - Rule 2
+    - Rule 3
+
+Args:
+    parameter_name (Type):
+        Description.
+
+Returns:
+    ReturnType:
+        Description.
+
+Raises:
+    HTTPException:
+        400 - Validation error.
+        403 - Permission denied.
+        404 - Resource not found.
+        500 - Internal server error.
+"""
+```
+
+Notes:
+- Keep summaries short and action-oriented.
+- List only business rules that actually apply to the endpoint.
+- Keep `Args` and `Returns` aligned with real function signatures and response models.
+- Include only the `Raises` statuses relevant to the endpoint.
+
 ## Pydantic
 
 - Prefer Pydantic v2: `model_dump()`, `model_validate()`. Legacy `dict()` / `from_orm()` remain in older code; match the file you edit.

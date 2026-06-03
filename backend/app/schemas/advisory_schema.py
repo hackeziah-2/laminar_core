@@ -62,23 +62,28 @@ class AdvisoryFilterOptionsResponse(BaseModel):
 
 
 class AdvisoryDetailResponse(BaseModel):
-    """Response for GET /advisory/{id}/ — source row expiry and link when applicable."""
+    """Response for GET /advisory/{id}/ — auth issue date, expiration date, and web link."""
 
-    expiry_date: Optional[date] = Field(
+    auth_issue_date: Optional[date] = Field(
         None,
-        description="Personnel: expiry_date; statutory / approval / OEM: date_of_expiration.",
+        description="Personnel-compliance: auth_issue_date (compliance row, else latest personnel authorization).",
     )
-    web_link: Optional[str] = Field(
-        None,
-        description="URL on the source record; null for personnel-compliance (no column).",
+    expiry_date: date = Field(
+        ...,
+        description="Expiration date: personnel-compliance expiry_date; statutory / approval / OEM date_of_expiration.",
+    )
+    web_link: str = Field(
+        default="",
+        max_length=2048,
+        description="Source URL; empty string when unset or personnel-compliance (no column).",
     )
 
     class Config:
         orm_mode = False
 
 
-class AdvisoryUpdateExpiryBody(BaseModel):
-    """Request body for PUT /advisory/{id}/{expiry}/ (renewal advisory)."""
+class AdvisoryRenewBody(BaseModel):
+    """Request body for PUT /advisory/{id}/renew/."""
 
     regulatory_compliance: RegulatoryComplianceSource = Field(
         ...,
@@ -88,9 +93,10 @@ class AdvisoryUpdateExpiryBody(BaseModel):
             "snapshot to the matching history table."
         ),
     )
-    category_type: Optional[str] = Field(
-        None,
-        description="Optional; ignored. Personnel compliance rows use item_type on the record (not this field).",
+    expiry_date: date = Field(..., description="Expiration date (required).")
+    auth_issue_date: Optional[date] = Field(
+        default=None,
+        description="Optional; personnel-compliance only. Auth issue date; omit to leave unchanged.",
     )
     web_link: Optional[str] = Field(
         default=None,
@@ -100,3 +106,11 @@ class AdvisoryUpdateExpiryBody(BaseModel):
             "Omit to leave unchanged; send empty string to clear."
         ),
     )
+    category_type: Optional[str] = Field(
+        None,
+        description="Optional; ignored. Personnel compliance rows use item_type on the record (not this field).",
+    )
+
+
+# Backward-compatible alias for older clients.
+AdvisoryUpdateExpiryBody = AdvisoryRenewBody

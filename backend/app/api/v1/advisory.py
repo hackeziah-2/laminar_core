@@ -1,4 +1,3 @@
-from datetime import datetime
 from math import ceil
 from typing import Optional
 
@@ -25,7 +24,7 @@ from app.schemas.advisory_schema import (
     AdvisoryFilterOption,
     AdvisoryFilterOptionsResponse,
     AdvisoryPagedResponse,
-    AdvisoryUpdateExpiryBody,
+    AdvisoryRenewBody,
     RegulatoryComplianceSource,
 )
 
@@ -151,12 +150,12 @@ async def get_advisory_paged(
 @router.get(
     "/{id}",
     response_model=AdvisoryDetailResponse,
-    summary="Get advisory expiry_date and web_link",
+    summary="Get advisory auth_issue_date, expiry_date, and web_link",
 )
 @router.get(
     "/{id}/",
     response_model=AdvisoryDetailResponse,
-    summary="Get advisory expiry_date and web_link",
+    summary="Get advisory auth_issue_date, expiry_date, and web_link",
 )
 async def get_advisory_by_id(
     id: int,
@@ -166,9 +165,9 @@ async def get_advisory_by_id(
     ),
     session: AsyncSession = Depends(get_session),
 ):
-    """Return expiry_date and web_link for the source row (id + regulatory_compliance)."""
+    """Return auth_issue_date, expiry_date, and web_link for the source row (id + regulatory_compliance)."""
     try:
-        expiry_date, web_link = await get_advisory_detail(
+        expiry_date, web_link, auth_issue_date = await get_advisory_detail(
             session=session,
             regulatory_compliance=regulatory_compliance,
             id=id,
@@ -178,41 +177,47 @@ async def get_advisory_by_id(
         if "not found" in msg.lower():
             raise HTTPException(status_code=404, detail=msg)
         raise HTTPException(status_code=400, detail=msg)
-    return AdvisoryDetailResponse(expiry_date=expiry_date, web_link=web_link)
+    return AdvisoryDetailResponse(
+        auth_issue_date=auth_issue_date,
+        expiry_date=expiry_date,
+        web_link=web_link,
+    )
 
 
 @router.put(
-    "/{id}/{expiry}/",
+    "/{id}/renew",
+    response_model=AdvisoryDetailResponse,
     status_code=200,
-    summary="Update advisory expiry",
+    summary="Renew advisory (update expiry_date, auth_issue_date, web_link)",
 )
-async def put_advisory_expiry(
+@router.put(
+    "/{id}/renew/",
+    response_model=AdvisoryDetailResponse,
+    status_code=200,
+    summary="Renew advisory (update expiry_date, auth_issue_date, web_link)",
+)
+async def put_advisory_renew(
     id: int,
-    expiry: str,
-    body: AdvisoryUpdateExpiryBody,
+    body: AdvisoryRenewBody,
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
 ):
-    """Renew advisory expiry: update source row and append regulatory history when applicable.
+    """Renew advisory: update source row and append regulatory history when applicable.
 
-    Body: regulatory_compliance (required) selects the source table; optional web_link for statutory /
-    approval / OEM rows.
+    Body: regulatory_compliance (required), expiry_date (required); optional auth_issue_date
+    (personnel-compliance) and web_link (statutory / approval / OEM).
 
     Organizational approvals and aircraft statutory certificates snapshot the prior row into their
     history tables before applying the new expiry (same pattern as create-with-update flows).
     """
     try:
-        expiry_date = datetime.strptime(expiry, "%Y-%m-%d").date()
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid expiry date; use YYYY-MM-DD")
-
-    try:
         history_oa, history_asc = await update_advisory_expiry(
             session=session,
             regulatory_compliance=body.regulatory_compliance,
             id=id,
-            expiry=expiry_date,
+            expiry=body.expiry_date,
             web_link=body.web_link,
+            auth_issue_date=body.auth_issue_date,
             audit_account_id=current_account.id,
         )
 
@@ -241,7 +246,17 @@ async def put_advisory_expiry(
     except Exception:
         await session.rollback()
         raise
-    return {"message": "Expiry updated"}
+
+    expiry_date, web_link, auth_issue_date = await get_advisory_detail(
+        session=session,
+        regulatory_compliance=body.regulatory_compliance,
+        id=id,
+    )
+    return AdvisoryDetailResponse(
+        auth_issue_date=auth_issue_date,
+        expiry_date=expiry_date,
+        web_link=web_link,
+    )
 
 
 @router.put(
@@ -283,5 +298,6 @@ router_advisory.get("/paged", response_model=AdvisoryPagedResponse)(get_advisory
 router_advisory.get("/paged/", response_model=AdvisoryPagedResponse)(get_advisory_paged)
 router_advisory.get("/{id}", response_model=AdvisoryDetailResponse)(get_advisory_by_id)
 router_advisory.get("/{id}/", response_model=AdvisoryDetailResponse)(get_advisory_by_id)
-router_advisory.put("/{id}/{expiry}/", status_code=200)(put_advisory_expiry)
+router_advisory.put("/{id}/renew", response_model=AdvisoryDetailResponse)(put_advisory_renew)
+router_advisory.put("/{id}/renew/", response_model=AdvisoryDetailResponse)(put_advisory_renew)
 router_advisory.put("/withhold/{id}/{regulatory_compliance}", status_code=200)(put_advisory_withhold)

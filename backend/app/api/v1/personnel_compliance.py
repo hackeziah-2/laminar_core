@@ -52,7 +52,10 @@ async def _list_paged(
     )
     pages = ceil(total / limit) if total else 0
     return PersonnelCompliancePagedResponse(
-        items=[PersonnelComplianceRead.from_orm(i) for i in items],
+        items=[
+            PersonnelComplianceRead.from_orm_with_personnel_authorization(pc, pa)
+            for pc, pa in items
+        ],
         total=total,
         page=page,
         pages=pages,
@@ -70,7 +73,7 @@ async def api_list(
     ),
     sort: Optional[str] = Query(
         "",
-        description="Sort: full_name, -full_name, expiry_date, -expiry_date, item_type, id, created_at, account_information_id__auth_stamp, etc.",
+        description="Sort: full_name, -full_name, expiry_date, -expiry_date, auth_initial_doi, item_type, id, created_at, account_information_id__auth_stamp, etc.",
     ),
     account_information__designation: Optional[str] = Query(
         None,
@@ -106,7 +109,7 @@ async def api_list_paged(
     ),
     sort: Optional[str] = Query(
         "",
-        description="Sort: full_name, -full_name, expiry_date, -expiry_date, item_type, id, created_at, account_information_id__auth_stamp, etc.",
+        description="Sort: full_name, -full_name, expiry_date, -expiry_date, auth_initial_doi, item_type, id, created_at, account_information_id__auth_stamp, etc.",
     ),
     account_information__designation: Optional[str] = Query(
         None,
