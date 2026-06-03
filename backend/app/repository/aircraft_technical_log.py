@@ -18,6 +18,7 @@ from app.models.aircraft_techinical_log import (
 from app.models.atl_batch import AtlBatch
 from app.models.aircraft import Aircraft
 from app.models.account import AccountInformation
+from app.core.atl_edit_rbac import validate_atl_edit_allowed_for_account
 from app.core.atl_workflow_rbac import is_atl_work_status_transition_allowed
 from app.models.role import Role
 from app.schemas.aircraft_technical_log_schema import (
@@ -158,6 +159,36 @@ def _clean_atl_update_data(update_data: Dict[str, Any]) -> Dict[str, Any]:
     return update_data
 
 
+async def _resolve_account_role_name(
+    session: AsyncSession,
+    current_account: Optional[AccountInformation],
+) -> Optional[str]:
+    if not current_account or not current_account.role_id:
+        return None
+    role = await session.get(Role, current_account.role_id)
+    if role and not role.is_deleted:
+        return role.name
+    return None
+
+
+async def _validate_atl_edit_rbac(
+    *,
+    session: AsyncSession,
+    obj: AircraftTechnicalLog,
+    update_data: dict,
+    current_account: Optional[AccountInformation],
+) -> None:
+    role_name = await _resolve_account_role_name(session, current_account)
+    try:
+        validate_atl_edit_allowed_for_account(
+            role_name=role_name,
+            current_status=obj.work_status,
+            update_data=update_data,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
 async def _validate_work_status_transition(
     *,
     session: AsyncSession,
@@ -167,11 +198,7 @@ async def _validate_work_status_transition(
 ) -> None:
     if "work_status" not in update_data:
         return
-    role_name = None
-    if current_account and current_account.role_id:
-        role = await session.get(Role, current_account.role_id)
-        if role and not role.is_deleted:
-            role_name = role.name
+    role_name = await _resolve_account_role_name(session, current_account)
     next_status = update_data["work_status"]
     if not is_atl_work_status_transition_allowed(
         role_name=role_name,
@@ -458,6 +485,12 @@ async def update_aircraft_technical_log(
     update_data = _atl_update_payload_from_schema(log_in)
     update_data = _clean_atl_update_data(update_data)
 
+    await _validate_atl_edit_rbac(
+        session=session,
+        obj=obj,
+        update_data=update_data,
+        current_account=current_account,
+    )
     await _validate_work_status_transition(
         session=session,
         obj=obj,
