@@ -11,7 +11,12 @@ from fastapi import (
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.schemas.module_schema import ModuleCreate, ModuleUpdate, ModuleRead, ModuleListItem
+from app.schemas.module_schema import (
+    ModuleCreate,
+    ModuleUpdate,
+    ModuleRead,
+    ModuleListItem
+)
 from app.repository.module import (
     list_modules,
     get_module,
@@ -29,7 +34,7 @@ router = APIRouter(
     tags=["modules"]
 )
 
-
+@router.get("/module-list", response_model=List[ModuleListItem])
 @router.get("/modules-list", response_model=List[ModuleListItem])
 async def api_modules_list(session: AsyncSession = Depends(get_session)):
     """Get all Modules for dropdowns (no pagination)."""
@@ -94,7 +99,9 @@ async def api_create(
 ):
     """Create a new Module."""
     return await create_module(
-        session, payload, audit_account_id=current_account.id
+        session,
+        payload,
+        audit_account_id=current_account.id
     )
 
 
@@ -127,9 +134,11 @@ async def api_delete(
 ):
     """Soft delete a Module."""
     deleted = await soft_delete_module(session, module_id)
+
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Module not found",
         )
+    
     return None
