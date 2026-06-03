@@ -614,8 +614,9 @@ async def get_previous_atl(
     sequence_no: str,
     *,
     atl_batch_fk: Optional[int] = None,
+    null_batch_only_when_batch_unset: bool = True,
 ) -> Optional[AircraftTechnicalLog]:
-    """Immediate predecessor by sequence within the same aircraft and ATL batch stream (NULL batch matches NULL only)."""
+    """Immediate predecessor (highest sequence_no strictly less than given) for aircraft (+ batch scope)."""
     sequence_no = _sequence_no_digits_only(sequence_no)
     try:
         sequence_no_int = int(sequence_no)
@@ -627,10 +628,10 @@ async def get_previous_atl(
         .where(_sequence_no_as_numeric() < sequence_no_int)
         .where(AircraftTechnicalLog.is_deleted.is_(False))
     )
-    if atl_batch_fk is None:
-        stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk.is_(None))
-    else:
+    if atl_batch_fk is not None:
         stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk == atl_batch_fk)
+    elif null_batch_only_when_batch_unset:
+        stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk.is_(None))
     stmt = stmt.order_by(_sequence_no_as_numeric().desc()).limit(1)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
@@ -926,9 +927,10 @@ async def list_aircraft_technical_logs_manage(
 
 async def get_latest_aircraft_technical_log(
     session: AsyncSession,
-    aircraft_fk: Optional[int] = None
+    aircraft_fk: Optional[int] = None,
+    atl_batch_fk: Optional[int] = None,
 ) -> Optional[AircraftTechnicalLog]:
-    """Get the latest Aircraft Technical Log entry by sequence_no."""
+    """Get the latest ATL for aircraft (+ optional batch) by highest numeric sequence_no."""
     stmt = (
         select(AircraftTechnicalLog)
         .options(
@@ -938,16 +940,14 @@ async def get_latest_aircraft_technical_log(
         )
         .where(AircraftTechnicalLog.is_deleted == False)
     )
-    
-    # Filter by aircraft if provided
-    if aircraft_fk:
+
+    if aircraft_fk is not None:
         stmt = stmt.where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
-    
-    # Order by sequence_no descending (numeric) to get the latest
-    stmt = stmt.order_by(_sequence_no_as_numeric().desc())
-    
-    # Get the first result
-    stmt = stmt.limit(1)
+
+    if atl_batch_fk is not None:
+        stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk == atl_batch_fk)
+
+    stmt = stmt.order_by(_sequence_no_as_numeric().desc()).limit(1)
     
     result = await session.execute(stmt)
     obj = result.scalar_one_or_none()

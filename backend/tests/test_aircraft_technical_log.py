@@ -481,3 +481,105 @@ def test_quality_manager_cannot_update_for_review_to_completed(client: TestClien
     )
     assert update_response.status_code == 403
     assert "cannot change work_status" in update_response.json()["detail"]
+
+
+def test_latest_filters_by_batch_id_and_sequence_no(
+    client_with_atl_auth: TestClient,
+    test_aircraft_technical_log_data: dict,
+):
+    """GET /latest returns highest sequence_no (limit 1) within aircraft + batch_id."""
+    from app.models.atl_batch import AtlBatch
+
+    aircraft_fk = test_aircraft_technical_log_data["aircraft_fk"]
+
+    async def seed_batches() -> tuple[int, int]:
+        async with TestSessionLocal() as session:
+            batch_a = AtlBatch(name="Batch A latest test", description="pytest")
+            batch_b = AtlBatch(name="Batch B latest test", description="pytest")
+            session.add_all([batch_a, batch_b])
+            await session.commit()
+            await session.refresh(batch_a)
+            await session.refresh(batch_b)
+            return batch_a.id, batch_b.id
+
+    batch_a_id, batch_b_id = asyncio.run(seed_batches())
+    base = {**test_aircraft_technical_log_data, "aircraft_fk": aircraft_fk}
+
+    for seq, batch in [("001", batch_a_id), ("003", batch_a_id), ("999", batch_b_id)]:
+        response = client_with_atl_auth.post(
+            "/api/v1/aircraft-technical-log/",
+            json={**base, "sequence_no": f"ATL-{seq}", "atl_batch_fk": batch},
+        )
+        assert response.status_code == 201, response.text
+
+    latest_a = client_with_atl_auth.get(
+        f"/api/v1/aircraft-technical-log/latest?aircraft_fk={aircraft_fk}&batch_id={batch_a_id}"
+    )
+    assert latest_a.status_code == 200
+    assert latest_a.json()["sequence_no"] == "003"
+    assert latest_a.json()["atl_batch_fk"] == batch_a_id
+
+    latest_b = client_with_atl_auth.get(
+        f"/api/v1/aircraft-technical-log/latest?aircraft_fk={aircraft_fk}&batch_id={batch_b_id}"
+    )
+    assert latest_b.status_code == 200
+    assert latest_b.json()["sequence_no"] == "999"
+
+    latest_all = client_with_atl_auth.get(
+        f"/api/v1/aircraft-technical-log/latest?aircraft_fk={aircraft_fk}"
+    )
+    assert latest_all.status_code == 200
+    assert latest_all.json()["sequence_no"] == "999"
+
+
+def test_latest_with_sequence_no_returns_previous_atl(
+    client_with_atl_auth: TestClient,
+    test_aircraft_technical_log_data: dict,
+):
+    """GET /latest?sequence_no= returns nearest predecessor (sequence_no DESC, limit 1)."""
+    from app.models.atl_batch import AtlBatch
+
+    aircraft_fk = test_aircraft_technical_log_data["aircraft_fk"]
+
+    async def seed_batch() -> int:
+        async with TestSessionLocal() as session:
+            batch = AtlBatch(name="Batch prev latest test", description="pytest")
+            session.add(batch)
+            await session.commit()
+            await session.refresh(batch)
+            return batch.id
+
+    batch_id = asyncio.run(seed_batch())
+    base = {**test_aircraft_technical_log_data, "aircraft_fk": aircraft_fk, "atl_batch_fk": batch_id}
+
+    for seq in ["1005", "1006"]:
+        response = client_with_atl_auth.post(
+            "/api/v1/aircraft-technical-log/",
+            json={**base, "sequence_no": f"ATL-{seq}"},
+        )
+        assert response.status_code == 201, response.text
+
+    previous = client_with_atl_auth.get(
+        f"/api/v1/aircraft-technical-log/latest"
+        f"?aircraft_fk={aircraft_fk}&batch_id={batch_id}&sequence_no=1006"
+    )
+    assert previous.status_code == 200
+    assert previous.json()["sequence_no"] == "1005"
+
+    previous_atl_prefix = client_with_atl_auth.get(
+        f"/api/v1/aircraft-technical-log/latest"
+        f"?aircraft_fk={aircraft_fk}&batch_id={batch_id}&sequence_no=ATL-1006"
+    )
+    assert previous_atl_prefix.status_code == 200
+    assert previous_atl_prefix.json()["sequence_no"] == "1005"
+
+    missing = client_with_atl_auth.get(
+        f"/api/v1/aircraft-technical-log/latest"
+        f"?aircraft_fk={aircraft_fk}&batch_id={batch_id}&sequence_no=1005"
+    )
+    assert missing.status_code == 404
+
+    no_aircraft = client_with_atl_auth.get(
+        "/api/v1/aircraft-technical-log/latest?sequence_no=1006"
+    )
+    assert no_aircraft.status_code == 422

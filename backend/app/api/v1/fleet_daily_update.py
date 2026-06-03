@@ -79,7 +79,9 @@ async def _enrich_item_with_ldnd(session, orm_item):
     # tach_time_eod: from latest ATL by sequence_no → tachometer_end, rounded to one decimal
     latest_atl = await get_latest_aircraft_technical_log(session, aircraft_fk=aircraft_id)
     tach_time_eod = latest_atl.tachometer_end if latest_atl else None
-    base["tach_time_eod"] = _round1(tach_time_eod)
+
+    base["tach_time_eod"] =  base["tach_time_eod"]
+    # _round1(tach_time_eod)
 
     # remaining_time_before_next_isp: tach_time_due - tach_time_eod (from raw values), rounded to one decimal
     remaining_isp = (raw_tach_due - tach_time_eod) if (raw_tach_due is not None and tach_time_eod is not None) else None

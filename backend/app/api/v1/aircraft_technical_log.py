@@ -29,6 +29,7 @@ from app.repository.aircraft_technical_log import (
     search_atl_by_sequence_no,
     get_aircraft_technical_log,
     get_latest_aircraft_technical_log,
+    get_previous_atl,
     create_aircraft_technical_log,
     update_aircraft_technical_log,
     bulk_update_aircraft_technical_log_work_status,
@@ -218,15 +219,62 @@ async def api_search_by_sequence(
 )
 async def api_get_latest(
     aircraft_fk: Optional[int] = Query(None, description="Filter by aircraft ID"),
-    session: AsyncSession = Depends(get_session)
+    batch_id: Optional[int] = Query(
+        None,
+        description="Filter by ATL batch id (atl_batch.id / atl_batch_fk).",
+    ),
+    atl_batch: Optional[int] = Query(
+        None,
+        description="Filter by ATL batch id (same as batch_id).",
+    ),
+    atl_batch_fk: Optional[int] = Query(
+        None,
+        description="Filter by ATL batch id.",
+    ),
+    sequence_no: Optional[str] = Query(
+        None,
+        description=(
+            "When set, return the nearest previous ATL (highest sequence_no strictly less than this value) "
+            "for the same aircraft_fk and optional batch. Accepts 'ATL-1006' or '1006'."
+        ),
+    ),
+    session: AsyncSession = Depends(get_session),
 ):
-    """Get the latest Aircraft Technical Log entry by sequence_no (highest sequence_no)."""
-    obj = await get_latest_aircraft_technical_log(session, aircraft_fk=aircraft_fk)
-    if not obj:
-        raise HTTPException(
-            status_code=404,
-            detail="No Aircraft Technical Log entries found"
+    """Latest ATL by highest sequence_no, or previous ATL when sequence_no is provided."""
+    batch_filter = (
+        atl_batch_fk
+        if atl_batch_fk is not None
+        else (atl_batch if atl_batch is not None else batch_id)
+    )
+    if sequence_no is not None:
+        if aircraft_fk is None:
+            raise HTTPException(
+                status_code=422,
+                detail="aircraft_fk is required when sequence_no is provided",
+            )
+        obj = await get_previous_atl(
+            session,
+            aircraft_fk,
+            sequence_no,
+            atl_batch_fk=batch_filter,
+            null_batch_only_when_batch_unset=False,
         )
+        if not obj:
+            raise HTTPException(
+                status_code=404,
+                detail="No previous Aircraft Technical Log entry found for the given sequence_no",
+            )
+    else:
+        obj = await get_latest_aircraft_technical_log(
+            session,
+            aircraft_fk=aircraft_fk,
+            atl_batch_fk=batch_filter,
+        )
+        if not obj:
+            raise HTTPException(
+                status_code=404,
+                detail="No Aircraft Technical Log entries found",
+            )
     return await aircraft_technical_log_read_with_computed(session, obj)
 
 

@@ -167,14 +167,15 @@ async def get_ldnd_latest_unfilled_by_aircraft(
         select(LDNDMonitoring)
         .where(LDNDMonitoring.aircraft_fk == aircraft_id)
         .where(LDNDMonitoring.is_deleted == False)
-        .where(LDNDMonitoring.last_done_tach_due.is_(None))
+        .where(LDNDMonitoring.last_done_tach_due.is_not(None))
         .where(LDNDMonitoring.last_done_tach_done.is_(None))
         .where(LDNDMonitoring.next_due_tach_hours.is_(None))
         .where(LDNDMonitoring.performed_date_start.is_(None))
         .where(LDNDMonitoring.performed_date_end.is_(None))
         .order_by(
             LDNDMonitoring.created_at.desc().nulls_last(),
-            LDNDMonitoring.id.desc(),
+            # LDNDMonitoring.performed_date_end.desc().nulls_last(),
+            LDNDMonitoring.id.desc(), 
         )
         .limit(1)
     )
