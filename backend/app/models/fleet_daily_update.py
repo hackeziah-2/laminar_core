@@ -7,6 +7,8 @@ from sqlalchemy.dialects.postgresql import ENUM as PGEnum
 from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
 
 
+FLEET_DAILY_UPDATE_MODULE_NAME = "Daily Update"
+
 FLEET_DAILY_UPDATE_STATUS_VALUES = (
     "Operational",
     "Ongoing Maintenance",

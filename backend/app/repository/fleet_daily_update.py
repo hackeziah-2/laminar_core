@@ -1,5 +1,6 @@
 from typing import Optional, List, Tuple
 
+from fastapi import HTTPException
 from sqlalchemy import select, func, case, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -7,9 +8,12 @@ from sqlalchemy.orm import selectinload
 from app.database import set_audit_fields
 from app.models.aircraft import Aircraft, StatusEnum
 from app.models.fleet_daily_update import FleetDailyUpdate, FleetDailyUpdateStatusEnum
+from app.repository.aircraft import get_aircraft_raw
 from app.schemas.fleet_daily_update_schema import (
     FleetDailyUpdateCreate,
     FleetDailyUpdateUpdate,
+    FleetDailyUpdateBulkUpdateItem,
+    FleetDailyUpdateBulkUpdateResponse,
 )
 
 
@@ -20,6 +24,10 @@ def _status_from_str(value: Optional[str]) -> Optional[str]:
     s = str(value).strip()
     for e in FleetDailyUpdateStatusEnum:
         if e.value == s or e.name == s:
+            return e.value
+    normalized = s.lower()
+    for e in FleetDailyUpdateStatusEnum:
+        if e.value.lower() == normalized or e.name.lower() == normalized:
             return e.value
     return None
 
@@ -219,6 +227,135 @@ async def update_fleet_daily_update(
     await session.refresh(obj)
     await session.refresh(obj, ["aircraft"])
     return obj
+
+
+def _apply_fleet_daily_update_changes(
+    obj: FleetDailyUpdate,
+    update_data: dict,
+) -> None:
+    """Apply partial field updates to a FleetDailyUpdate ORM instance."""
+    if "status" in update_data:
+        status_val = _status_from_str(update_data["status"])
+        if not status_val:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid status value: {update_data['status']!r}",
+            )
+        update_data["status"] = status_val
+
+    for k, v in update_data.items():
+        if hasattr(obj, k):
+            setattr(obj, k, v)
+
+
+async def _sync_aircraft_maintenance_from_fleet_status(
+    session: AsyncSession,
+    obj: FleetDailyUpdate,
+    *,
+    audit_account_id: Optional[int] = None,
+) -> None:
+    """When status is Ongoing Maintenance, align linked aircraft to Maintenance if needed."""
+    if (
+        obj.aircraft
+        and obj.status == FleetDailyUpdateStatusEnum.ONGOING_MAINTENANCE.value
+    ):
+        ac_status = obj.aircraft.status
+        ac_status_val = (
+            ac_status.value if hasattr(ac_status, "value") else str(ac_status)
+        )
+        if ac_status_val != StatusEnum.MAINTENANCE.value:
+            obj.aircraft.status = StatusEnum.MAINTENANCE
+            if audit_account_id is not None:
+                await set_audit_fields(obj.aircraft, audit_account_id, is_create=False)
+            session.add(obj.aircraft)
+
+
+async def bulk_update_fleet_daily_updates(
+    session: AsyncSession,
+    updates: List[FleetDailyUpdateBulkUpdateItem],
+    *,
+    audit_account_id: Optional[int] = None,
+) -> FleetDailyUpdateBulkUpdateResponse:
+    """Bulk partial update Fleet Daily Update records in a single atomic transaction."""
+    update_ids = [item.id for item in updates]
+    if len(update_ids) != len(set(update_ids)):
+        raise HTTPException(
+            status_code=400,
+            detail="Duplicate ids in updates are not allowed",
+        )
+
+    unique_ids = list(dict.fromkeys(update_ids))
+    rows_result = await session.execute(
+        select(FleetDailyUpdate)
+        .options(selectinload(FleetDailyUpdate.aircraft))
+        .where(FleetDailyUpdate.id.in_(unique_ids))
+        .where(FleetDailyUpdate.is_deleted == False)
+    )
+    row_map = {row.id: row for row in rows_result.scalars().all()}
+
+    missing_ids = [uid for uid in unique_ids if uid not in row_map]
+    if missing_ids:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Fleet Daily Update record(s) not found: {missing_ids}",
+        )
+
+    updated_ids: List[int] = []
+
+    try:
+        for item in updates:
+            obj = row_map[item.id]
+            update_data = item.dict(exclude_unset=True)
+            update_data.pop("id", None)
+
+            if "aircraft_id" in update_data:
+                aircraft_id = update_data.pop("aircraft_id")
+                aircraft = await get_aircraft_raw(session, aircraft_id)
+                if not aircraft:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Aircraft {aircraft_id} not found",
+                    )
+                if aircraft_id != obj.aircraft_fk:
+                    conflict_result = await session.execute(
+                        select(FleetDailyUpdate)
+                        .where(FleetDailyUpdate.aircraft_fk == aircraft_id)
+                        .where(FleetDailyUpdate.is_deleted == False)
+                        .where(FleetDailyUpdate.id != obj.id)
+                    )
+                    if conflict_result.scalar_one_or_none():
+                        raise HTTPException(
+                            status_code=400,
+                            detail=(
+                                f"A Fleet Daily Update already exists for aircraft {aircraft_id}"
+                            ),
+                        )
+                update_data["aircraft_fk"] = aircraft_id
+
+            _apply_fleet_daily_update_changes(obj, update_data)
+            await _sync_aircraft_maintenance_from_fleet_status(
+                session,
+                obj,
+                audit_account_id=audit_account_id,
+            )
+            session.add(obj)
+            if audit_account_id is not None:
+                await set_audit_fields(obj, audit_account_id, is_create=False)
+            updated_ids.append(obj.id)
+
+        await session.commit()
+    except HTTPException:
+        await session.rollback()
+        raise
+    except Exception as exc:
+        await session.rollback()
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return FleetDailyUpdateBulkUpdateResponse(
+        message="Fleet Daily Update records updated successfully",
+        updated_count=len(updated_ids),
+        updated_ids=updated_ids,
+    )
 
 
 async def soft_delete_fleet_daily_update(

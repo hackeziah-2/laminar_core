@@ -1,0 +1,175 @@
+"""Bulk partial update tests for Fleet Daily Update."""
+
+import asyncio
+import json
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.api.deps import get_current_active_account
+from app.main import app
+from app.models.fleet_daily_update import FLEET_DAILY_UPDATE_MODULE_NAME
+from tests.conftest import TestSessionLocal
+from tests.factories.rbac import seed_account_with_module_permissions
+
+
+@pytest.fixture(scope="function")
+def client_with_daily_update_auth(client: TestClient):
+    async def _seed() -> tuple[int, int]:
+        async with TestSessionLocal() as session:
+            return await seed_account_with_module_permissions(
+                session,
+                {
+                    FLEET_DAILY_UPDATE_MODULE_NAME: {
+                        "can_read": True,
+                        "can_update": True,
+                    },
+                },
+            )
+
+    account_id, role_id = asyncio.run(_seed())
+
+    class _Stub:
+        def __init__(self, aid: int, rid: int) -> None:
+            self.id = aid
+            self.role_id = rid
+            self.status = True
+
+    async def _override():
+        return _Stub(account_id, role_id)
+
+    app.dependency_overrides[get_current_active_account] = _override
+    yield client
+    app.dependency_overrides.pop(get_current_active_account, None)
+
+
+def _create_aircraft(client: TestClient, registration: str) -> int:
+    payload = {
+        "registration": registration,
+        "manufacturer": "Cessna",
+        "model": "172",
+        "msn": f"MSN-{registration}",
+        "base": "Test Base",
+        "ownership": "Test Owner",
+        "status": "Active",
+    }
+    response = client.post(
+        "/api/v1/aircraft/",
+        data={"json_data": json.dumps(payload)},
+        files={},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
+
+
+def _fleet_update_id_for_aircraft(client: TestClient, aircraft_id: int) -> int:
+    response = client.get(f"/api/v1/aircraft/{aircraft_id}/fleet-daily-update")
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
+
+
+def test_bulk_update_fleet_daily_updates_success(
+    client_with_daily_update_auth: TestClient,
+):
+    client = client_with_daily_update_auth
+    ac1 = _create_aircraft(client, "FDU-BULK-001")
+    ac2 = _create_aircraft(client, "FDU-BULK-002")
+    update_id_1 = _fleet_update_id_for_aircraft(client, ac1)
+    update_id_2 = _fleet_update_id_for_aircraft(client, ac2)
+
+    response = client.patch(
+        "/api/v1/fleet-daily-update/bulk/",
+        json={
+            "updates": [
+                {
+                    "id": update_id_1,
+                    "status": "OPERATIONAL",
+                    "tach_time_eod": 1234.5,
+                    "remarks": "Updated after daily review",
+                },
+                {
+                    "id": update_id_2,
+                    "status": "AOG",
+                    "remarks": "Grounded",
+                },
+            ]
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["message"] == "Fleet Daily Update records updated successfully"
+    assert body["updated_count"] == 2
+    assert set(body["updated_ids"]) == {update_id_1, update_id_2}
+
+    r1 = client.get(f"/api/v1/fleet-daily-update/{update_id_1}")
+    assert r1.status_code == 200
+    assert r1.json()["status"] == "Operational"
+    assert r1.json()["tach_time_eod"] == 1234.5
+    assert r1.json()["remarks"] == "Updated after daily review"
+
+    r2 = client.get(f"/api/v1/fleet-daily-update/{update_id_2}")
+    assert r2.status_code == 200
+    assert r2.json()["status"] == "AOG"
+    assert r2.json()["remarks"] == "Grounded"
+
+
+def test_bulk_update_fleet_daily_updates_missing_id_returns_404(
+    client_with_daily_update_auth: TestClient,
+):
+    client = client_with_daily_update_auth
+    ac1 = _create_aircraft(client, "FDU-BULK-404")
+    update_id = _fleet_update_id_for_aircraft(client, ac1)
+
+    response = client.patch(
+        "/api/v1/fleet-daily-update/bulk/",
+        json={
+            "updates": [
+                {"id": update_id, "remarks": "Should not persist alone if batch fails"},
+                {"id": 999999, "remarks": "Missing record"},
+            ]
+        },
+    )
+    assert response.status_code == 404, response.text
+    assert "999999" in response.text
+
+    unchanged = client.get(f"/api/v1/fleet-daily-update/{update_id}")
+    assert unchanged.status_code == 200
+    assert unchanged.json()["remarks"] is None
+
+
+def test_bulk_update_fleet_daily_updates_requires_can_update(client: TestClient):
+    async def _seed() -> tuple[int, int]:
+        async with TestSessionLocal() as session:
+            return await seed_account_with_module_permissions(
+                session,
+                {
+                    FLEET_DAILY_UPDATE_MODULE_NAME: {
+                        "can_read": True,
+                        "can_update": False,
+                    },
+                },
+            )
+
+    account_id, role_id = asyncio.run(_seed())
+
+    class _Stub:
+        def __init__(self, aid: int, rid: int) -> None:
+            self.id = aid
+            self.role_id = rid
+            self.status = True
+
+    async def _override():
+        return _Stub(account_id, role_id)
+
+    app.dependency_overrides[get_current_active_account] = _override
+    try:
+        ac1 = _create_aircraft(client, "FDU-BULK-DENY")
+        update_id = _fleet_update_id_for_aircraft(client, ac1)
+
+        response = client.patch(
+            "/api/v1/fleet-daily-update/bulk/",
+            json={"updates": [{"id": update_id, "remarks": "Denied"}]},
+        )
+        assert response.status_code == 403, response.text
+    finally:
+        app.dependency_overrides.pop(get_current_active_account, None)
