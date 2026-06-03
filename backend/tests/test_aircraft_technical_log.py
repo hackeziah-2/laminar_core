@@ -209,6 +209,46 @@ def test_update_aircraft_technical_log(
     assert response.json()["remarks"] == "Updated remarks for testing"
 
 
+def test_aircraft_technical_log_web_links_crud(
+    client_with_atl_auth: TestClient,
+    test_aircraft_technical_log_data: dict,
+):
+    """Create/update/get ATL web link fields."""
+    create_payload = {
+        **test_aircraft_technical_log_data,
+        "white_atl_web_link": "https://example.com/atl/white/initial",
+        "dfp_web_link": "https://example.com/atl/dfp/initial",
+    }
+    create_response = client_with_atl_auth.post(
+        "/api/v1/aircraft-technical-log/",
+        json=create_payload,
+    )
+    assert create_response.status_code == 201
+    created = create_response.json()
+    log_id = created["id"]
+    assert created["white_atl_web_link"] == create_payload["white_atl_web_link"]
+    assert created["dfp_web_link"] == create_payload["dfp_web_link"]
+
+    update_payload = {
+        "white_atl_web_link": "https://example.com/atl/white/updated",
+        "dfp_web_link": "https://example.com/atl/dfp/updated",
+    }
+    update_response = client_with_atl_auth.put(
+        f"/api/v1/aircraft-technical-log/{log_id}",
+        json=update_payload,
+    )
+    assert update_response.status_code == 200
+    updated = update_response.json()
+    assert updated["white_atl_web_link"] == update_payload["white_atl_web_link"]
+    assert updated["dfp_web_link"] == update_payload["dfp_web_link"]
+
+    get_response = client_with_atl_auth.get(f"/api/v1/aircraft-technical-log/{log_id}")
+    assert get_response.status_code == 200
+    fetched = get_response.json()
+    assert fetched["white_atl_web_link"] == update_payload["white_atl_web_link"]
+    assert fetched["dfp_web_link"] == update_payload["dfp_web_link"]
+
+
 def test_create_aircraft_technical_log_uses_previous_sequence_for_meter_starts(
     client_with_atl_auth: TestClient,
     test_aircraft_technical_log_data: dict,

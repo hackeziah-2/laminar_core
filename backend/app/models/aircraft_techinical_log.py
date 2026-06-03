@@ -147,7 +147,9 @@ class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     date_time_released = Column(DateTime(timezone=False), nullable=True)
 
     white_atl = Column(Text)
-    dfp =  Column(Text)
+    dfp = Column(Text)
+    white_atl_web_link = Column(Text)
+    dfp_web_link = Column(Text)
 
     work_status = Column(
         PGEnum(WorkStatus, name="work_status", create_type=False),

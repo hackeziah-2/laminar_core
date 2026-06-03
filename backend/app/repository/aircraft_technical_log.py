@@ -754,7 +754,7 @@ def _build_aircraft_technical_logs_list_statements(
     search: Optional[str] = None,
     aircraft_fk: Optional[int] = None,
     atl_batch_fk: Optional[int] = None,
-    sort: Optional[str] = "",
+    sort: Optional[str] = "-sequence_no",
 ) -> Tuple:
     """Build list/count statements shared by ATL paged endpoints."""
     stmt = (
@@ -828,9 +828,9 @@ def _build_aircraft_technical_logs_list_statements(
                 column.desc() if desc_order else column.asc()
             )
     else:
-        # Default ordering: sequence number ascending so computed "previous" base follows ATL order.
+        # Default ordering: highest sequence number first (newest ATL at top of list).
         stmt = stmt.order_by(
-            _sequence_no_as_numeric().asc(),
+            _sequence_no_as_numeric().desc(),
         )
 
     # Total count query (same filters, no ORDER BY)
@@ -879,7 +879,7 @@ async def list_aircraft_technical_logs(
     aircraft_fk: Optional[int] = None,
     atl_batch_fk: Optional[int] = None,
     work_status: Optional[WorkStatus] = None,
-    sort: Optional[str] = "",
+    sort: Optional[str] = "-sequence_no",
 ) -> Tuple[List[AircraftTechnicalLog], int]:
     """List Aircraft Technical Log entries with pagination."""
     stmt, count_stmt = _build_aircraft_technical_logs_list_statements(
@@ -911,7 +911,7 @@ async def list_aircraft_technical_logs_manage(
     aircraft_fk: Optional[int] = None,
     atl_batch_fk: Optional[int] = None,
     work_status: Optional[WorkStatus] = None,
-    sort: Optional[str] = "",
+    sort: Optional[str] = "-sequence_no",
     current_account: Optional[AccountInformation] = None,
 ) -> Tuple[List[AircraftTechnicalLog], int]:
     """List ATL entries for the manage paged endpoint with RBAC applied by decorator."""

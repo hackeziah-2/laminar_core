@@ -29,6 +29,7 @@ from app.models.oem_technical_publication import (
     OemTechnicalPublicationCategoryTypeEnum as OemCategoryTypeEnum,
 )
 from app.models.organizational_approval import OrganizationalApproval
+from app.models.personnel_authorization import PersonnelAuthorization
 from app.models.personnel_compliance import PersonnelCompliance, PersonnelComplianceItemType
 from app.schemas.advisory_schema import AdvisoryItem, RegulatoryComplianceSource
 from app.schemas.aircraft_statutory_certificate_history_schema import (
@@ -281,18 +282,40 @@ def _normalize_advisory_web_link(web_link: str) -> Optional[str]:
     return stripped or None
 
 
+async def _latest_auth_issue_date_for_account(
+    session: AsyncSession,
+    account_information_id: int,
+) -> Optional[date]:
+    stmt = (
+        select(PersonnelAuthorization.auth_issue_date)
+        .where(
+            PersonnelAuthorization.account_information_id == account_information_id,
+            PersonnelAuthorization.is_deleted == False,
+        )
+        .order_by(
+            PersonnelAuthorization.updated_at.desc().nullslast(),
+            PersonnelAuthorization.id.desc(),
+        )
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
 async def get_advisory_detail(
     session: AsyncSession,
     regulatory_compliance: RegulatoryComplianceSource,
     id: int,
-) -> tuple[Optional[date], Optional[str]]:
-    """Load expiry_date (or date_of_expiration) and web_link for one advisory source row.
+) -> tuple[date, str, Optional[date]]:
+    """Load expiry_date (or date_of_expiration), web_link, and auth_issue_date for one advisory source row.
 
     Returns:
-        (expiry_date, web_link). web_link is always None for personnel-compliance.
+        (expiry_date, web_link, auth_issue_date). expiry_date is always set when the row exists.
+        web_link is normalized to an empty string when unset. auth_issue_date is populated for
+        personnel-compliance when available on the row or latest personnel authorization.
 
     Raises:
-        ValueError: If advisory item not found or invalid regulatory_compliance.
+        ValueError: If advisory item not found, invalid regulatory_compliance, or expiry is unset.
     """
     if regulatory_compliance == "personnel-compliance":
         stmt = select(PersonnelCompliance).where(
@@ -303,7 +326,14 @@ async def get_advisory_detail(
         instance = result.scalars().one_or_none()
         if not instance:
             raise ValueError("Advisory item not found")
-        return instance.expiry_date, None
+        if instance.expiry_date is None:
+            raise ValueError("Advisory item has no expiry date")
+        auth_issue_date = instance.auth_issue_date
+        if auth_issue_date is None:
+            auth_issue_date = await _latest_auth_issue_date_for_account(
+                session, instance.account_information_id
+            )
+        return instance.expiry_date, "", auth_issue_date
     if regulatory_compliance == "aircraft-statutory-certificates":
         stmt = select(AircraftStatutoryCertificate).where(
             AircraftStatutoryCertificate.id == id,
@@ -313,7 +343,13 @@ async def get_advisory_detail(
         instance = result.scalars().one_or_none()
         if not instance:
             raise ValueError("Advisory item not found")
-        return instance.date_of_expiration, instance.web_link
+        if instance.date_of_expiration is None:
+            raise ValueError("Advisory item has no expiry date")
+        return (
+            instance.date_of_expiration,
+            _advisory_item_web_link(instance.web_link),
+            None,
+        )
     if regulatory_compliance == "organizational-approvals":
         stmt = select(OrganizationalApproval).where(
             OrganizationalApproval.id == id,
@@ -323,7 +359,13 @@ async def get_advisory_detail(
         instance = result.scalars().one_or_none()
         if not instance:
             raise ValueError("Advisory item not found")
-        return instance.date_of_expiration, instance.web_link
+        if instance.date_of_expiration is None:
+            raise ValueError("Advisory item has no expiry date")
+        return (
+            instance.date_of_expiration,
+            _advisory_item_web_link(instance.web_link),
+            None,
+        )
     if regulatory_compliance == "oem-technical-publication":
         stmt = select(OemTechnicalPublication).where(
             OemTechnicalPublication.id == id,
@@ -333,7 +375,13 @@ async def get_advisory_detail(
         instance = result.scalars().one_or_none()
         if not instance:
             raise ValueError("Advisory item not found")
-        return instance.date_of_expiration, instance.web_link
+        if instance.date_of_expiration is None:
+            raise ValueError("Advisory item has no expiry date")
+        return (
+            instance.date_of_expiration,
+            _advisory_item_web_link(instance.web_link),
+            None,
+        )
     raise ValueError("Invalid regulatory_compliance")
 
 
@@ -343,6 +391,7 @@ async def update_advisory_expiry(
     id: int,
     expiry: date,
     web_link: Optional[str] = None,
+    auth_issue_date: Optional[date] = None,
     *,
     audit_account_id: Optional[int] = None,
 ) -> Tuple[
@@ -360,6 +409,7 @@ async def update_advisory_expiry(
       set date_of_expiration = expiry; if web_link is not None, set web_link (empty clears).
 
     For personnel-compliance: set expiry_date on the PersonnelCompliance row (no web_link column).
+    If auth_issue_date is provided, set auth_issue_date on the same row.
 
     Raises:
         ValueError: If advisory item not found or invalid regulatory_compliance.
@@ -377,6 +427,8 @@ async def update_advisory_expiry(
         if not instance:
             raise ValueError("Advisory item not found")
         instance.expiry_date = expiry
+        if auth_issue_date is not None:
+            instance.auth_issue_date = auth_issue_date
     elif regulatory_compliance == "aircraft-statutory-certificates":
         stmt = select(AircraftStatutoryCertificate).where(
             AircraftStatutoryCertificate.id == id,

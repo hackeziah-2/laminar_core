@@ -54,6 +54,96 @@ def test_personnel_compliance_paged_includes_nonempty_account_full_name(
     assert fn == "Pilot, Jane"
 
 
+def test_personnel_compliance_paged_includes_auth_initial_doi_from_latest_personnel_authorization(
+    client_with_regulatory_compliance_auth: TestClient,
+):
+    client = client_with_regulatory_compliance_auth
+    account_data = {
+        "first_name": "Auth",
+        "last_name": "DoiUser",
+        "username": "authdoi_pc",
+        "password": "securepassword123",
+        "status": True,
+    }
+    r = client.post("/api/v1/account-information/", json=account_data)
+    assert r.status_code == 201, r.text
+    account_id = r.json()["id"]
+
+    pa_old = {
+        "account_information_id": account_id,
+        "auth_initial_doi": "2018-05-01",
+        "is_withhold": False,
+    }
+    r1 = client.post("/api/v1/personnel-authorization/", json=pa_old)
+    assert r1.status_code == 201, r1.text
+
+    pa_new = {
+        "account_information_id": account_id,
+        "auth_initial_doi": "2024-03-15",
+        "is_withhold": False,
+    }
+    r2 = client.post("/api/v1/personnel-authorization/", json=pa_new)
+    assert r2.status_code == 201, r2.text
+
+    compliance_payload = {
+        "account_information_id": account_id,
+        "item_type": PersonnelComplianceItemType.AUTH_EXPIRY.value,
+        "is_withhold": False,
+    }
+    r3 = client.post("/api/v1/personnel-compliance/", json=compliance_payload)
+    assert r3.status_code == 201, r3.text
+    created_id = r3.json()["id"]
+
+    r4 = client.get(
+        "/api/v1/personnel-compliance/paged?page=1&limit=50&search=DoiUser"
+    )
+    assert r4.status_code == 200, r4.text
+    item = next(i for i in r4.json()["items"] if i["id"] == created_id)
+    assert item["auth_initial_doi"] == "2024-03-15"
+
+    r5 = client.get(
+        "/api/v1/personnel-compliance/paged?page=1&limit=50&sort=auth_initial_doi"
+    )
+    assert r5.status_code == 200, r5.text
+    r6 = client.get(
+        "/api/v1/personnel-compliance/paged?page=1&limit=50&sort=-auth_initial_doi"
+    )
+    assert r6.status_code == 200, r6.text
+
+
+def test_personnel_compliance_paged_auth_initial_doi_falls_back_to_account(
+    client_with_regulatory_compliance_auth: TestClient,
+):
+    client = client_with_regulatory_compliance_auth
+    account_data = {
+        "first_name": "Acct",
+        "last_name": "DoiOnly",
+        "username": "acctdoi_pc",
+        "password": "securepassword123",
+        "status": True,
+        "auth_initial_doi": "2019-06-20",
+    }
+    r = client.post("/api/v1/account-information/", json=account_data)
+    assert r.status_code == 201, r.text
+    account_id = r.json()["id"]
+
+    compliance_payload = {
+        "account_information_id": account_id,
+        "item_type": PersonnelComplianceItemType.CAAP_LICENSE.value,
+        "is_withhold": False,
+    }
+    r2 = client.post("/api/v1/personnel-compliance/", json=compliance_payload)
+    assert r2.status_code == 201, r2.text
+    created_id = r2.json()["id"]
+
+    r3 = client.get(
+        "/api/v1/personnel-compliance/paged?page=1&limit=50&search=DoiOnly"
+    )
+    assert r3.status_code == 200, r3.text
+    item = next(i for i in r3.json()["items"] if i["id"] == created_id)
+    assert item["auth_initial_doi"] == "2019-06-20"
+
+
 def test_personnel_compliance_create_rejects_duplicate_account_and_item_type(
     client_with_regulatory_compliance_auth: TestClient,
 ):

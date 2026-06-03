@@ -21,6 +21,7 @@ class ADMonitoring(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     inspection_interval = Column(String(100), nullable=False, index=True)
     compli_date = Column(Date, nullable=True)
     file_path = Column(String(500), nullable=True)
+    web_link = Column(String(2048), nullable=True)
 
     aircraft = relationship("Aircraft", back_populates="ad_records")
     ad_works = relationship(

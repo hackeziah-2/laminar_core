@@ -144,9 +144,9 @@ async def api_list_paged(
         None,
         description="Filter by ATL batch id.",
     ),
-    sort: Optional[str] = Query(
-        "",
-        description="Example: -created_at,sequence_no"
+    sort: str = Query(
+        "-sequence_no",
+        description="Sort fields (prefix - for desc). Default: -sequence_no. Example: -created_at,sequence_no",
     ),
     session: AsyncSession = Depends(get_session),
     _current_account: AccountInformation = Depends(get_current_active_account),
@@ -252,9 +252,9 @@ async def api_atl_list_paged(
         None,
         description="Filter by ATL batch id.",
     ),
-    sort: Optional[str] = Query(
-        "",
-        description="Example: -created_at,sequence_no"
+    sort: str = Query(
+        "-sequence_no",
+        description="Sort fields (prefix - for desc). Default: -sequence_no. Example: -created_at,sequence_no",
     ),
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
