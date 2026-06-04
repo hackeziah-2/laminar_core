@@ -93,6 +93,8 @@ class AccountInformationListItem(BaseModel):
     id: int
     fullname: str
     license_no: Optional[str] = None
+    auth_stamp: Optional[str] = None
+
 
     @classmethod
     def from_orm_with_fullname(cls, obj):
@@ -107,7 +109,8 @@ class AccountInformationListItem(BaseModel):
         return cls(
             id=obj.id,
             fullname=fullname,
-            license_no=obj.license_no
+            license_no=obj.license_no,
+            auth_stamp=obj.auth_stamp
         )
 
     class Config:

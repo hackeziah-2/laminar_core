@@ -24,6 +24,12 @@ def test_can_edit_atl_matrix():
     assert can_edit_atl_for_role_and_status(
         "Maintenance Planner", WorkStatus.FOR_REVIEW
     )
+    assert can_edit_atl_for_role_and_status(
+        "Maintenance Planner", WorkStatus.REJECTED_MAINTENANCE
+    )
+    assert can_edit_atl_for_role_and_status(
+        "Maintenance Planner", WorkStatus.PENDING
+    )
     assert not can_edit_atl_for_role_and_status(
         "Maintenance Planner", WorkStatus.APPROVED
     )

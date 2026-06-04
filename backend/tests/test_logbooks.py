@@ -857,3 +857,144 @@ def test_list_engine_logbook_pagination(client: TestClient, aircraft_id: int):
     assert len(data["items"]) <= 2
     assert data["page"] == 1
     assert data["total"] >= 5
+
+
+# ========== web_link Tests ==========
+_LOGBOOK_WEB_LINK_CASES = [
+    pytest.param(
+        "engine",
+        "ENG-WL",
+        id="engine",
+    ),
+    pytest.param(
+        "airframe",
+        "AF-WL",
+        id="airframe",
+    ),
+    pytest.param(
+        "avionics",
+        "AV-WL",
+        id="avionics",
+    ),
+    pytest.param(
+        "propeller",
+        "PROP-WL",
+        id="propeller",
+    ),
+]
+
+
+@pytest.mark.parametrize("logbook_type,sequence_no", _LOGBOOK_WEB_LINK_CASES)
+def test_create_logbook_with_web_link(client: TestClient, aircraft_id: int, logbook_type: str, sequence_no: str):
+    """Create logbook entry with optional web_link."""
+    web_link = f"https://example.com/{logbook_type}/initial"
+    logbook_data = {
+        "aircraft_fk": aircraft_id,
+        "date": "2026-01-27",
+        "sequence_no": sequence_no,
+        "web_link": web_link,
+    }
+    response = _post_logbook(client, f"/api/v1/logbooks/{logbook_type}", logbook_data)
+    assert response.status_code == 201, response.text
+    assert response.json()["web_link"] == web_link
+
+
+@pytest.mark.parametrize("logbook_type,sequence_no", _LOGBOOK_WEB_LINK_CASES)
+def test_create_logbook_without_web_link(client: TestClient, aircraft_id: int, logbook_type: str, sequence_no: str):
+    """web_link may be omitted on create."""
+    logbook_data = {
+        "aircraft_fk": aircraft_id,
+        "date": "2026-01-27",
+        "sequence_no": f"{sequence_no}-NONE",
+    }
+    response = _post_logbook(client, f"/api/v1/logbooks/{logbook_type}", logbook_data)
+    assert response.status_code == 201, response.text
+    assert response.json()["web_link"] is None
+
+
+@pytest.mark.parametrize("logbook_type,sequence_no", _LOGBOOK_WEB_LINK_CASES)
+def test_update_logbook_web_link(client: TestClient, aircraft_id: int, logbook_type: str, sequence_no: str):
+    """Update web_link on an existing logbook entry."""
+    create_data = {
+        "aircraft_fk": aircraft_id,
+        "date": "2026-01-27",
+        "sequence_no": f"{sequence_no}-UPD",
+        "web_link": f"https://example.com/{logbook_type}/before",
+    }
+    create_response = _post_logbook(client, f"/api/v1/logbooks/{logbook_type}", create_data)
+    assert create_response.status_code == 201, create_response.text
+    logbook_id = create_response.json()["id"]
+
+    updated_link = f"https://example.com/{logbook_type}/after"
+    update_response = _put_logbook(
+        client,
+        f"/api/v1/logbooks/{logbook_type}/{logbook_id}",
+        {"web_link": updated_link},
+    )
+    assert update_response.status_code == 200, update_response.text
+    assert update_response.json()["web_link"] == updated_link
+
+
+@pytest.mark.parametrize("logbook_type,sequence_no", _LOGBOOK_WEB_LINK_CASES)
+def test_partial_update_preserves_web_link(client: TestClient, aircraft_id: int, logbook_type: str, sequence_no: str):
+    """Partial update should not remove an existing web_link."""
+    web_link = f"https://example.com/{logbook_type}/preserve"
+    create_data = {
+        "aircraft_fk": aircraft_id,
+        "date": "2026-01-27",
+        "sequence_no": f"{sequence_no}-PARTIAL",
+        "web_link": web_link,
+    }
+    create_response = _post_logbook(client, f"/api/v1/logbooks/{logbook_type}", create_data)
+    assert create_response.status_code == 201, create_response.text
+    logbook_id = create_response.json()["id"]
+
+    update_response = _put_logbook(
+        client,
+        f"/api/v1/logbooks/{logbook_type}/{logbook_id}",
+        {"description": "Updated without touching web_link"},
+    )
+    assert update_response.status_code == 200, update_response.text
+    data = update_response.json()
+    assert data["description"] == "Updated without touching web_link"
+    assert data["web_link"] == web_link
+
+
+@pytest.mark.parametrize("logbook_type,sequence_no", _LOGBOOK_WEB_LINK_CASES)
+def test_list_and_detail_include_web_link(client: TestClient, aircraft_id: int, logbook_type: str, sequence_no: str):
+    """List and detail responses include web_link."""
+    web_link = f"https://example.com/{logbook_type}/listed"
+    create_data = {
+        "aircraft_fk": aircraft_id,
+        "date": "2026-01-27",
+        "sequence_no": f"{sequence_no}-LIST",
+        "web_link": web_link,
+    }
+    create_response = _post_logbook(client, f"/api/v1/logbooks/{logbook_type}", create_data)
+    assert create_response.status_code == 201, create_response.text
+    logbook_id = create_response.json()["id"]
+
+    detail_response = client.get(f"/api/v1/logbooks/{logbook_type}/{logbook_id}")
+    assert detail_response.status_code == 200
+    assert detail_response.json()["web_link"] == web_link
+
+    list_response = client.get(
+        f"/api/v1/logbooks/{logbook_type}/paged?search={sequence_no}-LIST&limit=10&page=1"
+    )
+    assert list_response.status_code == 200
+    items = list_response.json()["items"]
+    assert any(item["id"] == logbook_id and item["web_link"] == web_link for item in items)
+
+
+@pytest.mark.parametrize("logbook_type,sequence_no", _LOGBOOK_WEB_LINK_CASES)
+def test_reject_web_link_longer_than_2048(client: TestClient, aircraft_id: int, logbook_type: str, sequence_no: str):
+    """Schema validation rejects web_link longer than 2048 characters."""
+    logbook_data = {
+        "aircraft_fk": aircraft_id,
+        "date": "2026-01-27",
+        "sequence_no": f"{sequence_no}-LONG",
+        "web_link": "https://example.com/" + ("x" * 2049),
+    }
+    response = _post_logbook(client, f"/api/v1/logbooks/{logbook_type}", logbook_data)
+    assert response.status_code == 400
+    assert "Validation error" in response.json()["detail"]

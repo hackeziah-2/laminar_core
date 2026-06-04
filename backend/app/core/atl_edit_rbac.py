@@ -13,7 +13,12 @@ ATL_LOCKED_STATUSES: FrozenSet[WorkStatus] = frozenset(
 )
 
 _MAINTENANCE_PLANNER_ALLOWED: FrozenSet[WorkStatus] = frozenset(
-    {WorkStatus.FOR_REVIEW, WorkStatus.AWAITING_ATTACHMENT}
+    {
+        WorkStatus.FOR_REVIEW,
+        WorkStatus.AWAITING_ATTACHMENT,
+        WorkStatus.REJECTED_MAINTENANCE,
+        WorkStatus.PENDING,
+    }
 )
 
 _TECHNICAL_PUBLICATION_ALLOWED: FrozenSet[WorkStatus] = frozenset(

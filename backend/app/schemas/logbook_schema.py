@@ -50,6 +50,7 @@ class EngineLogbookBase(BaseModel):
     mechanic_fk: Optional[int] = None
     signature: Optional[str] = Field(None, max_length=255)
     upload_file: Optional[str] = Field(None, max_length=500)
+    web_link: Optional[str] = Field(None, max_length=2048)
 
 
 class EngineLogbookCreate(EngineLogbookBase):
@@ -71,6 +72,7 @@ class EngineLogbookUpdate(BaseModel):
     mechanic_fk: Optional[int] = None
     signature: Optional[str] = Field(None, max_length=255)
     upload_file: Optional[str] = Field(None, max_length=500)
+    web_link: Optional[str] = Field(None, max_length=2048)
     component_parts: Optional[List[ComponentRecordCreate]] = Field(None, alias="componentParts")
 
     class Config:
@@ -101,6 +103,7 @@ class EngineLogbookRead(BaseModel):
     mechanic: Optional[MechanicDetail] = None
     signature: Optional[str] = None
     upload_file: Optional[str] = None
+    web_link: Optional[str] = None
     component_parts: Optional[List[EngineComponentRecordRead]] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -131,6 +134,7 @@ class EngineLogbookRead(BaseModel):
                 "mechanic": orm_state.get("mechanic"),
                 "signature": orm_state.get("signature"),
                 "upload_file": orm_state.get("upload_file"),
+                "web_link": orm_state.get("web_link"),
                 "created_at": orm_state.get("created_at"),
                 "updated_at": orm_state.get("updated_at"),
                 "component_parts": orm_state.get("engine_component_parts") or [],
@@ -152,6 +156,7 @@ class AirframeLogbookBase(BaseModel):
     mechanic_fk: Optional[int] = None
     signature: Optional[str] = Field(None, max_length=255)
     upload_file: Optional[str] = Field(None, max_length=500)
+    web_link: Optional[str] = Field(None, max_length=2048)
 
 
 class AirframeLogbookCreate(AirframeLogbookBase):
@@ -171,6 +176,7 @@ class AirframeLogbookUpdate(BaseModel):
     mechanic_fk: Optional[int] = None
     signature: Optional[str] = Field(None, max_length=255)
     upload_file: Optional[str] = Field(None, max_length=500)
+    web_link: Optional[str] = Field(None, max_length=2048)
     component_parts: Optional[List[ComponentRecordCreate]] = Field(None, alias="componentParts")
 
     class Config:
@@ -199,6 +205,7 @@ class AirframeLogbookRead(BaseModel):
     mechanic: Optional[MechanicDetail] = None
     signature: Optional[str] = None
     upload_file: Optional[str] = None
+    web_link: Optional[str] = None
     component_parts: Optional[List[AirframeComponentRecordRead]] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -227,6 +234,7 @@ class AirframeLogbookRead(BaseModel):
                 "mechanic": orm_state.get("mechanic"),
                 "signature": orm_state.get("signature"),
                 "upload_file": orm_state.get("upload_file"),
+                "web_link": orm_state.get("web_link"),
                 "created_at": orm_state.get("created_at"),
                 "updated_at": orm_state.get("updated_at"),
                 "component_parts": orm_state.get("airframe_component_parts") or [],
@@ -250,6 +258,7 @@ class AvionicsLogbookBase(BaseModel):
     mechanic_fk: Optional[int] = None
     signature: Optional[str] = Field(None, max_length=255)
     upload_file: Optional[str] = Field(None, max_length=500)
+    web_link: Optional[str] = Field(None, max_length=2048)
 
 
 class AvionicsLogbookCreate(AvionicsLogbookBase):
@@ -271,6 +280,7 @@ class AvionicsLogbookUpdate(BaseModel):
     mechanic_fk: Optional[int] = None
     signature: Optional[str] = Field(None, max_length=255)
     upload_file: Optional[str] = Field(None, max_length=500)
+    web_link: Optional[str] = Field(None, max_length=2048)
     component_parts: Optional[List[ComponentRecordCreate]] = Field(None, alias="componentParts")
 
     class Config:
@@ -301,6 +311,7 @@ class AvionicsLogbookRead(BaseModel):
     mechanic: Optional[MechanicDetail] = None
     signature: Optional[str] = None
     upload_file: Optional[str] = None
+    web_link: Optional[str] = None
     component_parts: Optional[List[AvionicsComponentRecordRead]] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -331,6 +342,7 @@ class AvionicsLogbookRead(BaseModel):
                 "mechanic": orm_state.get("mechanic"),
                 "signature": orm_state.get("signature"),
                 "upload_file": orm_state.get("upload_file"),
+                "web_link": orm_state.get("web_link"),
                 "created_at": orm_state.get("created_at"),
                 "updated_at": orm_state.get("updated_at"),
                 "component_parts": orm_state.get("avionics_component_parts") or [],
@@ -355,6 +367,7 @@ class PropellerLogbookBase(BaseModel):
     mechanic_fk: Optional[int] = None
     signature: Optional[str] = Field(None, max_length=255)
     upload_file: Optional[str] = Field(None, max_length=500)
+    web_link: Optional[str] = Field(None, max_length=2048)
 
 
 class PropellerLogbookCreate(PropellerLogbookBase):
@@ -373,6 +386,7 @@ class PropellerLogbookUpdate(BaseModel):
     mechanic_fk: Optional[int] = None
     signature: Optional[str] = Field(None, max_length=255)
     upload_file: Optional[str] = Field(None, max_length=500)
+    web_link: Optional[str] = Field(None, max_length=2048)
 
 
 class PropellerLogbookRead(BaseModel):
@@ -389,6 +403,7 @@ class PropellerLogbookRead(BaseModel):
     mechanic: Optional[MechanicDetail] = None
     signature: Optional[str] = None
     upload_file: Optional[str] = None
+    web_link: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
