@@ -14,6 +14,7 @@ _ATL_PAGED_WORK_STATUSES_BY_ROLE: Dict[str, Tuple[WorkStatus, ...]] = {
         WorkStatus.FOR_REVIEW,
         WorkStatus.APPROVED,
         WorkStatus.REJECTED_MAINTENANCE,
+        WorkStatus.PENDING,
     ),
     "Maintenance Manager": (
         WorkStatus.FOR_REVIEW,

@@ -12,6 +12,7 @@ def test_rbac_maintenance_planner_statuses():
         WorkStatus.FOR_REVIEW,
         WorkStatus.APPROVED,
         WorkStatus.REJECTED_MAINTENANCE,
+        WorkStatus.PENDING,
     }
 
 

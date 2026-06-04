@@ -26,6 +26,7 @@ class EngineLogbook(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     mechanic_fk = Column(Integer, ForeignKey("account_information.id"), nullable=True)
     signature = Column(String(255), nullable=True)
     upload_file = Column(String(500), nullable=True)  # File path for uploaded file
+    web_link = Column(String(2048), nullable=True)
 
     aircraft = relationship("Aircraft", foreign_keys=[aircraft_fk], back_populates="engine_logbooks")
     mechanic = relationship("AccountInformation", foreign_keys=[mechanic_fk])
@@ -58,6 +59,7 @@ class AirframeLogbook(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     mechanic_fk = Column(Integer, ForeignKey("account_information.id"), nullable=True)
     signature = Column(String(255), nullable=True)
     upload_file = Column(String(500), nullable=True)  # File path for uploaded file
+    web_link = Column(String(2048), nullable=True)
 
     aircraft = relationship("Aircraft", foreign_keys=[aircraft_fk], back_populates="airframe_logbooks")
     mechanic = relationship("AccountInformation", foreign_keys=[mechanic_fk])
@@ -93,6 +95,7 @@ class AvionicsLogbook(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     mechanic_fk = Column(Integer, ForeignKey("account_information.id"), nullable=True)
     signature = Column(String(255), nullable=True)
     upload_file = Column(String(500), nullable=True)  # File path for uploaded file
+    web_link = Column(String(2048), nullable=True)
 
     aircraft = relationship("Aircraft", foreign_keys=[aircraft_fk], back_populates="avionics_logbooks")
     mechanic = relationship("AccountInformation", foreign_keys=[mechanic_fk])
@@ -127,6 +130,7 @@ class PropellerLogbook(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     mechanic_fk = Column(Integer, ForeignKey("account_information.id"), nullable=True)
     signature = Column(String(255), nullable=True)
     upload_file = Column(String(500), nullable=True)  # File path for uploaded file
+    web_link = Column(String(2048), nullable=True)
 
     aircraft = relationship("Aircraft", foreign_keys=[aircraft_fk], back_populates="propeller_logbooks")
     mechanic = relationship("AccountInformation", foreign_keys=[mechanic_fk])
