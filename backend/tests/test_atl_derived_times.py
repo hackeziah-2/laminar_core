@@ -14,7 +14,7 @@ from app.core.atl_derived_times import (
     resolve_auto_fields,
 )
 from app.models.aircraft import Aircraft
-from app.models.aircraft_techinical_log import AircraftTechnicalLog
+from app.models.aircraft_techinical_log import AircraftTechnicalLog, WorkStatus
 from tests.conftest import TestSessionLocal
 
 
@@ -799,6 +799,7 @@ def test_aircraft_technical_log_paged_sequence_sort_does_not_change_auto_computa
                     AircraftTechnicalLog(
                         aircraft_fk=aircraft_id,
                         sequence_no="001",
+                        work_status=WorkStatus.APPROVED,
                         airframe_aftt=11.0,
                         engine_tsn=101.0,
                         engine_tso=21.0,
@@ -810,6 +811,7 @@ def test_aircraft_technical_log_paged_sequence_sort_does_not_change_auto_computa
                     AircraftTechnicalLog(
                         aircraft_fk=aircraft_id,
                         sequence_no="002",
+                        work_status=WorkStatus.APPROVED,
                         airframe_aftt=20.0,
                         engine_tsn=102.0,
                         engine_tso=22.0,
@@ -821,6 +823,7 @@ def test_aircraft_technical_log_paged_sequence_sort_does_not_change_auto_computa
                     AircraftTechnicalLog(
                         aircraft_fk=aircraft_id,
                         sequence_no="010",
+                        work_status=WorkStatus.APPROVED,
                         tachometer_start=10.0,
                         tachometer_end=11.5,
                     ),
@@ -845,6 +848,46 @@ def test_aircraft_technical_log_paged_sequence_sort_does_not_change_auto_computa
 
     assert list(asc_items.keys()) == ["001", "002", "010"]
     assert list(desc_items.keys()) == ["010", "002", "001"]
+
+    asc_alias_response = client_with_atl_auth.get(
+        f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&limit=10&page=1&sort=asc"
+    )
+    assert asc_alias_response.status_code == 200, asc_alias_response.text
+    assert [item["sequence_no"] for item in asc_alias_response.json()["items"]] == [
+        "001",
+        "002",
+        "010",
+    ]
+
+    desc_alias_response = client_with_atl_auth.get(
+        f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&limit=10&page=1&sort=desc"
+    )
+    assert desc_alias_response.status_code == 200, desc_alias_response.text
+    assert [item["sequence_no"] for item in desc_alias_response.json()["items"]] == [
+        "010",
+        "002",
+        "001",
+    ]
+
+    manage_asc = client_with_atl_auth.get(
+        f"/api/v1/aircraft-technical-log/manage/paged?aircraft_fk={aircraft_id}&limit=10&page=1&sort=sequence_no"
+    )
+    assert manage_asc.status_code == 200, manage_asc.text
+    assert [item["sequence_no"] for item in manage_asc.json()["items"]] == [
+        "001",
+        "002",
+        "010",
+    ]
+
+    manage_desc = client_with_atl_auth.get(
+        f"/api/v1/aircraft-technical-log/manage/paged?aircraft_fk={aircraft_id}&limit=10&page=1&sort=-sequence_no"
+    )
+    assert manage_desc.status_code == 200, manage_desc.text
+    assert [item["sequence_no"] for item in manage_desc.json()["items"]] == [
+        "010",
+        "002",
+        "001",
+    ]
 
     for sequence_no in ("001", "002", "010"):
         assert asc_items[sequence_no]["auto_airframe_run_time"] == desc_items[sequence_no]["auto_airframe_run_time"]
