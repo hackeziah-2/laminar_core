@@ -117,11 +117,11 @@ def test_list_aircraft_technical_logs_filter_work_status(
     assert log_id in approved_ids2
 
 
-def test_manage_paged_applies_atl_rbac_filter(
+def test_manage_paged_maintenance_manager_sees_all_work_statuses(
     client_with_atl_auth: TestClient,
     test_aircraft_technical_log_data: dict,
 ):
-    """Maintenance Manager should not see PENDING ATL rows on /manage/paged."""
+    """Maintenance Manager sees all ATL rows on /manage/paged, including PENDING."""
     create_response = client_with_atl_auth.post(
         "/api/v1/aircraft-technical-log/",
         json={**test_aircraft_technical_log_data, "sequence_no": "ATL-002"},
@@ -149,14 +149,15 @@ def test_manage_paged_applies_atl_rbac_filter(
     assert manage_response.status_code == 200
     manage_ids = {item["id"] for item in manage_response.json()["items"]}
     assert allowed_log_id in manage_ids
-    assert pending_log_id not in manage_ids
+    assert pending_log_id in manage_ids
 
     pending_response = client_with_atl_auth.get(
         "/api/v1/aircraft-technical-log/manage/paged?work_status=PENDING&limit=10&page=1"
     )
     assert pending_response.status_code == 200
-    assert pending_response.json()["items"] == []
-    assert pending_response.json()["total"] == 0
+    pending_ids = {item["id"] for item in pending_response.json()["items"]}
+    assert pending_log_id in pending_ids
+    assert pending_response.json()["total"] >= 1
 
 
 def test_paged_does_not_apply_atl_rbac_filter(

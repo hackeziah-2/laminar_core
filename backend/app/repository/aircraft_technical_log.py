@@ -46,6 +46,183 @@ def _sequence_no_as_numeric():
     return cast(AircraftTechnicalLog.sequence_no, Numeric)
 
 
+_ATL_SORT_FIELD_ALIASES = {
+    "sequenceno": "sequence_no",
+    "aircraftregistration": "aircraft_registration",
+    "registration": "aircraft_registration",
+    "acreg": "aircraft_registration",
+    "workstatus": "work_status",
+    "createdat": "created_at",
+    "updatedat": "updated_at",
+    "origindate": "origin_date",
+    "destinationdate": "destination_date",
+    "originstation": "origin_station",
+    "destinationstation": "destination_station",
+    "airframeruntime": "airframe_run_time",
+    "airframeaftt": "airframe_aftt",
+    "engineruntime": "engine_run_time",
+    "enginetsn": "engine_tsn",
+    "enginetso": "engine_tso",
+    "enginetbo": "engine_tbo",
+    "propellerruntime": "propeller_run_time",
+    "propellertsn": "propeller_tsn",
+    "propellertso": "propeller_tso",
+    "propellertbo": "propeller_tbo",
+    "lifetimelimitengine": "life_time_limit_engine",
+    "lifetimelimitpropeller": "life_time_limit_propeller",
+}
+
+
+def _resolve_atl_sort_field_name(field_name: str) -> str:
+    """Map camelCase / case variants to snake_case sort keys."""
+    stripped = field_name.strip()
+    if not stripped:
+        return stripped
+    return _ATL_SORT_FIELD_ALIASES.get(stripped.casefold(), stripped)
+
+
+def _normalize_atl_paged_sort(sort: Optional[str]) -> Optional[str]:
+    """
+    Normalize sort query for ATL paged endpoints.
+
+    Accepts:
+    - asc / desc (sequence_no only; matches /aircraft/{id}/atl/paged)
+    - sequence_no / -sequence_no (and camelCase sequenceNo)
+    - sequence_no:asc / sequence_no:desc
+    - sequence_no asc / sequence_no desc (space-separated)
+    """
+    if sort is None:
+        return None
+    raw = str(sort).strip()
+    if not raw:
+        return None
+
+    lower = raw.casefold()
+    if lower in ("asc", "ascending"):
+        return "sequence_no"
+    if lower in ("desc", "descending"):
+        return "-sequence_no"
+
+    normalized_segments: List[str] = []
+    for segment in raw.split(","):
+        segment = segment.strip()
+        if not segment:
+            continue
+
+        seg_lower = segment.casefold()
+        if seg_lower in ("asc", "ascending"):
+            normalized_segments.append("sequence_no")
+            continue
+        if seg_lower in ("desc", "descending"):
+            normalized_segments.append("-sequence_no")
+            continue
+
+        if ":" in segment:
+            field_part, _, dir_part = segment.partition(":")
+            field_part = field_part.strip()
+            dir_part = dir_part.strip().casefold()
+            field_key = _resolve_atl_sort_field_name(field_part.lstrip("-"))
+            if field_part.startswith("-") or dir_part in ("desc", "descending"):
+                normalized_segments.append(f"-{field_key}")
+            else:
+                normalized_segments.append(field_key)
+            continue
+
+        if " " in segment:
+            tokens = segment.split()
+            field_token = tokens[0].strip()
+            dir_token = tokens[-1].strip().casefold() if len(tokens) > 1 else ""
+            field_key = _resolve_atl_sort_field_name(field_token.lstrip("-"))
+            if field_token.startswith("-") or dir_token in ("desc", "descending"):
+                normalized_segments.append(f"-{field_key}")
+            else:
+                normalized_segments.append(field_key)
+            continue
+
+        if segment.startswith("-"):
+            normalized_segments.append(
+                f"-{_resolve_atl_sort_field_name(segment[1:])}"
+            )
+        else:
+            normalized_segments.append(_resolve_atl_sort_field_name(segment))
+
+    return ",".join(normalized_segments) if normalized_segments else None
+
+
+def _atl_paged_sortable_fields(*, include_aircraft: bool = False) -> dict:
+    """Whitelisted ORDER BY columns for ATL paged list endpoints."""
+    fields = {
+        "created_at": AircraftTechnicalLog.created_at,
+        "updated_at": AircraftTechnicalLog.updated_at,
+        "sequence_no": _sequence_no_as_numeric(),
+        "work_status": AircraftTechnicalLog.work_status,
+        "origin_date": AircraftTechnicalLog.origin_date,
+        "destination_date": AircraftTechnicalLog.destination_date,
+        "origin_station": AircraftTechnicalLog.origin_station,
+        "destination_station": AircraftTechnicalLog.destination_station,
+        "airframe_run_time": AircraftTechnicalLog.airframe_run_time,
+        "airframe_aftt": AircraftTechnicalLog.airframe_aftt,
+        "engine_run_time": AircraftTechnicalLog.engine_run_time,
+        "engine_tsn": AircraftTechnicalLog.engine_tsn,
+        "engine_tso": AircraftTechnicalLog.engine_tso,
+        "engine_tbo": AircraftTechnicalLog.engine_tbo,
+        "propeller_run_time": AircraftTechnicalLog.propeller_run_time,
+        "propeller_tsn": AircraftTechnicalLog.propeller_tsn,
+        "propeller_tso": AircraftTechnicalLog.propeller_tso,
+        "propeller_tbo": AircraftTechnicalLog.propeller_tbo,
+        "life_time_limit_engine": AircraftTechnicalLog.life_time_limit_engine,
+        "life_time_limit_propeller": AircraftTechnicalLog.life_time_limit_propeller,
+    }
+    if include_aircraft:
+        fields["aircraft_registration"] = Aircraft.registration
+    return fields
+
+
+def _atl_paged_sort_needs_aircraft_join(sort: Optional[str]) -> bool:
+    normalized_sort = _normalize_atl_paged_sort(sort)
+    if not normalized_sort:
+        return False
+    for field in normalized_sort.split(","):
+        field = field.strip()
+        if not field:
+            continue
+        field_name = _resolve_atl_sort_field_name(field.lstrip("-"))
+        if field_name == "aircraft_registration":
+            return True
+    return False
+
+
+def _apply_atl_paged_sort(stmt, sort: Optional[str], *, aircraft_joined: bool = False):
+    """Apply ORDER BY to ATL list stmt; default to numeric sequence_no desc."""
+    needs_aircraft_join = _atl_paged_sort_needs_aircraft_join(sort)
+    if needs_aircraft_join and not aircraft_joined:
+        stmt = stmt.join(Aircraft, AircraftTechnicalLog.aircraft_fk == Aircraft.id)
+        stmt = stmt.where(Aircraft.is_deleted == False)
+        aircraft_joined = True
+
+    sortable_fields = _atl_paged_sortable_fields(include_aircraft=aircraft_joined)
+    normalized_sort = _normalize_atl_paged_sort(sort)
+    order_clauses = []
+
+    if normalized_sort:
+        for field in normalized_sort.split(","):
+            field = field.strip()
+            if not field:
+                continue
+            desc_order = field.startswith("-")
+            field_name = _resolve_atl_sort_field_name(field.lstrip("-"))
+            column = sortable_fields.get(field_name)
+            if column is None:
+                continue
+            order_clauses.append(column.desc() if desc_order else column.asc())
+
+    if order_clauses:
+        order_clauses.append(AircraftTechnicalLog.id.desc())
+        return stmt.order_by(*order_clauses)
+
+    return stmt.order_by(_sequence_no_as_numeric().desc(), AircraftTechnicalLog.id.desc())
+
+
 def generate_range(start_id: str, end_id: str) -> list[str]:
     """
     Generate a list of sequence numbers between start_id and end_id (exclusive). Number-only.
@@ -808,6 +985,8 @@ def _build_aircraft_technical_logs_list_statements(
     if atl_batch_fk is not None:
         stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk == atl_batch_fk)
 
+    aircraft_joined = False
+
     # Search functionality; sequence_no stored as number only, so strip ATL- from search for that field
     if search:
         q = f"%{search}%"
@@ -815,6 +994,7 @@ def _build_aircraft_technical_logs_list_statements(
         # Join Aircraft table for registration search
         stmt = stmt.join(Aircraft, AircraftTechnicalLog.aircraft_fk == Aircraft.id)
         stmt = stmt.where(Aircraft.is_deleted == False)
+        aircraft_joined = True
         stmt = stmt.where(
             or_(
                 AircraftTechnicalLog.sequence_no.ilike(q_seq),
@@ -825,47 +1005,7 @@ def _build_aircraft_technical_logs_list_statements(
             )
         )
 
-    # Whitelist sortable fields (includes new run_time, tsn, tbo, life_limits)
-    sortable_fields = {
-        "created_at": AircraftTechnicalLog.created_at,
-        "updated_at": AircraftTechnicalLog.updated_at,
-        "sequence_no": _sequence_no_as_numeric(),
-        "origin_date": AircraftTechnicalLog.origin_date,
-        "destination_date": AircraftTechnicalLog.destination_date,
-        "origin_station": AircraftTechnicalLog.origin_station,
-        "destination_station": AircraftTechnicalLog.destination_station,
-        "airframe_run_time": AircraftTechnicalLog.airframe_run_time,
-        "airframe_aftt": AircraftTechnicalLog.airframe_aftt,
-        "engine_run_time": AircraftTechnicalLog.engine_run_time,
-        "engine_tsn": AircraftTechnicalLog.engine_tsn,
-        "engine_tso": AircraftTechnicalLog.engine_tso,
-        "engine_tbo": AircraftTechnicalLog.engine_tbo,
-        "propeller_run_time": AircraftTechnicalLog.propeller_run_time,
-        "propeller_tsn": AircraftTechnicalLog.propeller_tsn,
-        "propeller_tso": AircraftTechnicalLog.propeller_tso,
-        "propeller_tbo": AircraftTechnicalLog.propeller_tbo,
-        "life_time_limit_engine": AircraftTechnicalLog.life_time_limit_engine,
-        "life_time_limit_propeller": AircraftTechnicalLog.life_time_limit_propeller,
-    }
-
-    # Multi-sort logic
-    if sort:
-        for field in sort.split(","):
-            desc_order = field.startswith("-")
-            field_name = field.lstrip("-")
-
-            column = sortable_fields.get(field_name)
-            if column is None:
-                continue
-
-            stmt = stmt.order_by(
-                column.desc() if desc_order else column.asc()
-            )
-    else:
-        # Default ordering: highest sequence number first (newest ATL at top of list).
-        stmt = stmt.order_by(
-            _sequence_no_as_numeric().desc(),
-        )
+    stmt = _apply_atl_paged_sort(stmt, sort, aircraft_joined=aircraft_joined)
 
     # Total count query (same filters, no ORDER BY)
     count_stmt = (

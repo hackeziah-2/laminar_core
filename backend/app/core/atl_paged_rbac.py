@@ -14,6 +14,7 @@ _ATL_PAGED_WORK_STATUSES_BY_ROLE: Dict[str, Tuple[WorkStatus, ...]] = {
         WorkStatus.FOR_REVIEW,
         WorkStatus.APPROVED,
         WorkStatus.REJECTED_MAINTENANCE,
+        WorkStatus.PENDING,
     ),
     "Maintenance Manager": (
         WorkStatus.FOR_REVIEW,
@@ -50,16 +51,16 @@ def _is_maintenance_planner_role(role_name: Optional[str]) -> bool:
         return False
     return str(role_name).strip().casefold() == "maintenance planner"
 
-def _is_maintenance_manager_role(role_name: Optional[str]) -> bool:
-    if not role_name or not str(role_name).strip():
-        return False
-    return str(role_name).strip().casefold() == "maintenance manager"
+_ROLES_SKIP_ATL_MANAGE_PAGED_WORK_STATUS_RBAC = frozenset(
+    {"admin", "maintenance manager", "quality manager"}
+)
+
 
 def atl_paged_list_skips_work_status_rbac(role_name: Optional[str]) -> bool:
-    """Admin sees all ATL rows regardless of work_status (no IN filter)."""
+    """Admin, Maintenance Manager, and Quality Manager see all ATL rows on manage/paged."""
     if not role_name or not str(role_name).strip():
         return False
-    return str(role_name).strip().casefold() == "admin"
+    return str(role_name).strip().casefold() in _ROLES_SKIP_ATL_MANAGE_PAGED_WORK_STATUS_RBAC
 
 
 def allowed_work_statuses_for_atl_paged_list(role_name: Optional[str]) -> Tuple[WorkStatus, ...]:
@@ -118,14 +119,6 @@ def atl_rbac_filter():
                         )
                     )
 
-                # if _is_maintenance_manager_role(role_name):
-                #     return s.where(
-                #         or_(
-                #             AircraftTechnicalLog.work_status.in_(list(allowed)),
-                #             AircraftTechnicalLog.work_status.is_(None),
-                #         )
-                #     )
-                
                 return s.where(AircraftTechnicalLog.work_status.in_(list(allowed)))
 
             stmt = apply_rbac(stmt)

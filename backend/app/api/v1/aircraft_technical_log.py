@@ -147,7 +147,10 @@ async def api_list_paged(
     ),
     sort: str = Query(
         "-sequence_no",
-        description="Sort fields (prefix - for desc). Default: -sequence_no. Example: -created_at,sequence_no",
+        description=(
+            "Sort fields. Use sequence_no / -sequence_no, or asc / desc for sequence_no only. "
+            "Prefix - for descending. Default: -sequence_no. Example: asc, desc, -created_at,sequence_no"
+        ),
     ),
     session: AsyncSession = Depends(get_session),
     _current_account: AccountInformation = Depends(get_current_active_account),
@@ -302,7 +305,10 @@ async def api_atl_list_paged(
     ),
     sort: str = Query(
         "-sequence_no",
-        description="Sort fields (prefix - for desc). Default: -sequence_no. Example: -created_at,sequence_no",
+        description=(
+            "Sort fields. Use sequence_no / -sequence_no, or asc / desc for sequence_no only. "
+            "Prefix - for descending. Default: -sequence_no. Example: asc, desc, -created_at,sequence_no"
+        ),
     ),
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
