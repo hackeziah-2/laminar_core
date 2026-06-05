@@ -51,7 +51,10 @@ def test_rbac_admin_not_in_status_map_but_skips_filter():
     assert allowed_work_statuses_for_atl_paged_list("Admin") == ()
     assert atl_paged_list_skips_work_status_rbac("Admin") is True
     assert atl_paged_list_skips_work_status_rbac("admin") is True
-    assert atl_paged_list_skips_work_status_rbac("Maintenance Manager") is False
+    assert atl_paged_list_skips_work_status_rbac("Maintenance Manager") is True
+    assert atl_paged_list_skips_work_status_rbac("maintenance manager") is True
+    assert atl_paged_list_skips_work_status_rbac("Quality Manager") is True
+    assert atl_paged_list_skips_work_status_rbac("quality manager") is True
 
 
 def test_rbac_case_insensitive_role_name():
