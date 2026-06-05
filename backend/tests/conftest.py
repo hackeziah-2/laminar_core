@@ -184,7 +184,7 @@ async def async_authenticated_client(
 
 @pytest.fixture(scope="function")
 def client_with_atl_auth(client: TestClient):
-    """JWT not required: stubs get_current_active_account with Maintenance Manager (sees FOR_REVIEW/APPROVED on ATL paged)."""
+    """JWT not required: stubs get_current_active_account with Maintenance Manager (manage/paged RBAC)."""
     import asyncio
 
     from app.api.deps import get_current_active_account
