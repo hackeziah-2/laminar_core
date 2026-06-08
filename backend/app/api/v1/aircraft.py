@@ -12,6 +12,7 @@ from fastapi import (
     File,
     Form,
     Depends,
+    Request,
     status
 )
 from fastapi.responses import StreamingResponse, FileResponse
@@ -40,6 +41,7 @@ from app.repository.aircraft_technical_log import (
 from app.core.atl_derived_times import resolve_auto_fields, map_auto_fields_to_comp
 from app.database import get_session
 from app.api.deps import get_current_active_account
+from app.constants.audit import AIRCRAFT_MODULE_NAME, AIRCRAFT_TABLE_NAME
 from app.models.account import AccountInformation
 from app.upload_config import UPLOAD_DIR
 from app.services.generate_report_excel import generate_excel
@@ -275,6 +277,7 @@ async def api_download_propeller_arc(
     description="Create a new aircraft. Also creates a FleetDailyUpdate (one-to-one with aircraft) with status Operational.",
 )
 async def api_create_aircraft_with_file(
+    request: Request,
     json_data: str = Form(...),
     engine_arc_file: UploadFile = File(None),
     propeller_arc_file: UploadFile = File(None),
@@ -290,10 +293,15 @@ async def api_create_aircraft_with_file(
         engine_file=engine_arc_file,
         propeller_file=propeller_arc_file,
         audit_account_id=current_account.id,
+        audit_module_name=AIRCRAFT_MODULE_NAME,
+        audit_table_name=AIRCRAFT_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
 @router.put("/{aircraft_id}", response_model=aircraft_schema.AircraftOut)
 async def api_update_aircraft_with_file(
+    request: Request,
     aircraft_id: int,
     json_data: str = Form(...),
     engine_arc_file: UploadFile = File(None),
@@ -310,6 +318,10 @@ async def api_update_aircraft_with_file(
         user_id=current_account.id,
         engine_file=engine_arc_file,
         propeller_file=propeller_arc_file,
+        audit_module_name=AIRCRAFT_MODULE_NAME,
+        audit_table_name=AIRCRAFT_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
 
@@ -340,8 +352,20 @@ async def api_update_aircraft_with_history(
     summary="Soft delete aircraft",
     description="Soft delete aircraft and all connected data (logbook entries, ATL, LDND, AD, TCC, documents, CPCP, fleet daily update, engine/airframe/avionics/propeller logbooks). Sets is_deleted=True in a single transaction.",
 )
-async def api_delete_aircraft(aircraft_id: int, session: AsyncSession = Depends(get_session)):
-    deleted = await soft_delete_aircraft(session, aircraft_id)
+async def api_delete_aircraft(
+    request: Request,
+    aircraft_id: int,
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
+):
+    deleted = await soft_delete_aircraft(
+        session,
+        aircraft_id,
+        audit_module_name=AIRCRAFT_MODULE_NAME,
+        audit_table_name=AIRCRAFT_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
 
     if not deleted:
         raise HTTPException(

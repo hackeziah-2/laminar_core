@@ -3,7 +3,7 @@ from typing import List, Optional, Tuple, Union
 
 from sqlalchemy import select, or_, cast, String
 from sqlalchemy.sql import func
-from fastapi import Query, Depends, UploadFile, File, Form, HTTPException
+from fastapi import Query, Depends, UploadFile, File, Form, HTTPException, Request
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +28,9 @@ from app.models.document_on_board import DocumentOnBoard
 from app.models.cpcp_monitoring import CPCPMonitoring
 from app.schemas.aircraft_schema import AircraftCreate, AircraftOut, AircraftUpdate
 from app.database import set_audit_fields
+from app.models.account import AccountInformation
+from app.models.audit_log import AuditAction
+from app.services.audit_trail_service import create_audit_log, serialize_audit_data
 
 
 async def _sync_fleet_daily_update_when_aircraft_maintenance(
@@ -234,6 +237,10 @@ async def create_aircraft_with_file(
     propeller_file: UploadFile = None,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ):  
     engine_path = None
     if engine_file:
@@ -291,6 +298,20 @@ async def create_aircraft_with_file(
 
     await session.commit()
     await session.refresh(aircraft)
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=aircraft.id,
+            action=AuditAction.CREATE,
+            old_data=None,
+            new_data=aircraft,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return AircraftOut.from_orm(aircraft)
 
 async def update_aircraft_with_file(
@@ -355,7 +376,13 @@ async def update_aircraft_with_file(
     return AircraftOut.from_orm(aircraft)
 
 async def soft_delete_aircraft(
-    session: AsyncSession, id: int
+    session: AsyncSession,
+    id: int,
+    *,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> bool:
     """Soft delete aircraft and all connected data (cascade).
     Sets is_deleted=True on aircraft and all related records in a single transaction.
@@ -368,6 +395,7 @@ async def soft_delete_aircraft(
         return False
 
     aircraft_id = aircraft.id
+    old_data_snapshot = serialize_audit_data(aircraft)
 
     async def _soft_delete_many(model, fk_col, fk_val):
         """Helper: soft delete all non-deleted records for given FK."""
@@ -417,4 +445,18 @@ async def soft_delete_aircraft(
     aircraft.soft_delete()
     session.add(aircraft)
     await session.commit()
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=aircraft_id,
+            action=AuditAction.DELETE,
+            old_data=old_data_snapshot,
+            new_data=None,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return True
