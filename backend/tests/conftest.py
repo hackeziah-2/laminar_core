@@ -437,7 +437,6 @@ def test_aircraft_data():
     """Sample aircraft data for testing."""
     return {
         "registration": "TEST-001",
-        "manufacturer": "Boeing",
         "model": "737-800",
         "msn": "TEST-MSN-001",
         "base": "Test Base",

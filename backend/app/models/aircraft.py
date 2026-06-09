@@ -17,7 +17,6 @@ class Aircraft(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     
     id = Column(Integer, primary_key=True, index=True)
     registration = Column(String(89), nullable=False, unique=True, index=True)
-    manufacturer = Column(String(89), nullable=False, index=True)
     report_description = Column(Text, nullable=True)
     model = Column(String, nullable=False, index=True)
     model_year = Column(Integer, nullable=True)

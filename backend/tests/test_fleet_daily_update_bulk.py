@@ -49,7 +49,6 @@ def client_with_daily_update_auth(client: TestClient):
 def _create_aircraft(client: TestClient, registration: str) -> int:
     payload = {
         "registration": registration,
-        "manufacturer": "Cessna",
         "model": "172",
         "msn": f"MSN-{registration}",
         "base": "Test Base",
