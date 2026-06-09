@@ -106,6 +106,22 @@ def _resolve_action(action: Union[AuditAction, str]) -> str:
     return str(action)
 
 
+def _resolve_performed_by_name(user: Optional[AccountInformation]) -> Optional[str]:
+    """Resolve display name from AccountInformation or compatible test stubs."""
+    if user is None:
+        return None
+    try:
+        full_name = user.full_name
+        if full_name:
+            return full_name
+    except AttributeError:
+        pass
+    first = getattr(user, "first_name", "") or ""
+    last = getattr(user, "last_name", "") or ""
+    combined = f"{first} {last}".strip()
+    return combined or getattr(user, "username", None)
+
+
 async def create_audit_log(
     db: AsyncSession,
     module_name: str,
@@ -142,7 +158,7 @@ async def create_audit_log(
         new_data=serialized_new,
         changed_fields=changed_fields,
         performed_by_user_id=current_user.id if current_user is not None else None,
-        performed_by_name=current_user.full_name if current_user is not None else None,
+        performed_by_name=_resolve_performed_by_name(current_user),
         ip_address=ip_address,
         user_agent=user_agent,
     )

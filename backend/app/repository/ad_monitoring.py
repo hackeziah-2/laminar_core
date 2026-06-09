@@ -1,14 +1,17 @@
 import os
 from typing import Optional, List, Tuple
 
-from fastapi import HTTPException, UploadFile
+from fastapi import HTTPException, Request, UploadFile
 from sqlalchemy import select, func, or_, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import set_audit_fields
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
+from app.models.account import AccountInformation
 from app.models.ad_monitoring import ADMonitoring, WorkOrderADMonitoring
+from app.models.audit_log import AuditAction
+from app.services.audit_trail_service import create_audit_log, serialize_audit_data
 
 ensure_uploads_dir()
 from app.schemas.ad_monitoring_schema import (
@@ -161,6 +164,10 @@ async def create_ad_monitoring(
     upload_file: UploadFile = None,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> ADMonitoringRead:
     """Create ADMonitoring with optional file upload."""
     ad_data = data.dict()
@@ -180,6 +187,20 @@ async def create_ad_monitoring(
     except Exception as e:
         await session.rollback()
         raise HTTPException(status_code=400, detail=f"Failed to create AD monitoring: {str(e)}")
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=obj.id,
+            action=AuditAction.CREATE,
+            old_data=None,
+            new_data=obj,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return ADMonitoringRead.from_orm(obj)
 
 
@@ -190,6 +211,10 @@ async def update_ad_monitoring(
     upload_file: UploadFile = None,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> Optional[ADMonitoringRead]:
     """Update ADMonitoring with optional file upload."""
     result = await session.execute(
@@ -204,6 +229,7 @@ async def update_ad_monitoring(
     obj = result.scalar_one_or_none()
     if not obj:
         return None
+    old_data_snapshot = serialize_audit_data(obj)
     update_data = data.dict(exclude_unset=True)
     if upload_file and getattr(upload_file, "filename", None):
         file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
@@ -222,11 +248,31 @@ async def update_ad_monitoring(
     except Exception as e:
         await session.rollback()
         raise HTTPException(status_code=400, detail=f"Failed to update AD monitoring: {str(e)}")
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=obj.id,
+            action=AuditAction.UPDATE,
+            old_data=old_data_snapshot,
+            new_data=obj,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return ADMonitoringRead.from_orm(obj)
 
 
 async def soft_delete_ad_monitoring(
-    session: AsyncSession, ad_id: int
+    session: AsyncSession,
+    ad_id: int,
+    *,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> bool:
     """Soft delete ADMonitoring."""
     result = await session.execute(
@@ -237,14 +283,36 @@ async def soft_delete_ad_monitoring(
     obj = result.scalar_one_or_none()
     if not obj:
         return False
+    old_data_snapshot = serialize_audit_data(obj)
     obj.soft_delete()
     session.add(obj)
     await session.commit()
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=ad_id,
+            action=AuditAction.DELETE,
+            old_data=old_data_snapshot,
+            new_data=None,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return True
 
 
 async def soft_delete_ad_monitoring_by_aircraft(
-    session: AsyncSession, ad_id: int, aircraft_id: int
+    session: AsyncSession,
+    ad_id: int,
+    aircraft_id: int,
+    *,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> bool:
     """Soft delete ADMonitoring scoped to aircraft_id."""
     result = await session.execute(
@@ -256,9 +324,24 @@ async def soft_delete_ad_monitoring_by_aircraft(
     obj = result.scalar_one_or_none()
     if not obj:
         return False
+    old_data_snapshot = serialize_audit_data(obj)
     obj.soft_delete()
     session.add(obj)
     await session.commit()
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=ad_id,
+            action=AuditAction.DELETE,
+            old_data=old_data_snapshot,
+            new_data=None,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return True
 
 
@@ -357,6 +440,10 @@ async def create_work_order_ad_monitoring(
     data: WorkOrderADMonitoringCreate,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> WorkOrderADMonitoringRead:
     """Create WorkOrderADMonitoring."""
     obj = WorkOrderADMonitoring(**data.dict())
@@ -372,6 +459,20 @@ async def create_work_order_ad_monitoring(
     )
     row = result.scalar_one_or_none()
     assert row is not None, "Work order just created"
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=row.id,
+            action=AuditAction.CREATE,
+            old_data=None,
+            new_data=row,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return WorkOrderADMonitoringRead.from_orm(row)
 
 
@@ -381,6 +482,10 @@ async def update_work_order_ad_monitoring(
     data: WorkOrderADMonitoringUpdate,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> Optional[WorkOrderADMonitoringRead]:
     """Update WorkOrderADMonitoring by ID."""
     result = await session.execute(
@@ -391,6 +496,7 @@ async def update_work_order_ad_monitoring(
     obj = result.scalar_one_or_none()
     if not obj:
         return None
+    old_data_snapshot = serialize_audit_data(obj)
     for k, v in data.dict(exclude_unset=True).items():
         setattr(obj, k, v)
     session.add(obj)
@@ -404,11 +510,31 @@ async def update_work_order_ad_monitoring(
         .where(WorkOrderADMonitoring.is_deleted == False)
     )
     row = result.scalar_one_or_none()
+
+    if row and audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=row.id,
+            action=AuditAction.UPDATE,
+            old_data=old_data_snapshot,
+            new_data=row,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return WorkOrderADMonitoringRead.from_orm(row) if row else None
 
 
 async def soft_delete_work_order_ad_monitoring(
-    session: AsyncSession, work_order_id: int
+    session: AsyncSession,
+    work_order_id: int,
+    *,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> bool:
     """Soft delete WorkOrderADMonitoring by ID."""
     result = await session.execute(
@@ -419,14 +545,36 @@ async def soft_delete_work_order_ad_monitoring(
     obj = result.scalar_one_or_none()
     if not obj:
         return False
+    old_data_snapshot = serialize_audit_data(obj)
     obj.soft_delete()
     session.add(obj)
     await session.commit()
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=work_order_id,
+            action=AuditAction.DELETE,
+            old_data=old_data_snapshot,
+            new_data=None,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return True
 
 
 async def soft_delete_work_order_ad_monitoring_by_ad(
-    session: AsyncSession, work_order_id: int, ad_monitoring_id: int
+    session: AsyncSession,
+    work_order_id: int,
+    ad_monitoring_id: int,
+    *,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> bool:
     """Soft delete WorkOrderADMonitoring by ID scoped to ad_monitoring_id."""
     result = await session.execute(
@@ -438,7 +586,22 @@ async def soft_delete_work_order_ad_monitoring_by_ad(
     obj = result.scalar_one_or_none()
     if not obj:
         return False
+    old_data_snapshot = serialize_audit_data(obj)
     obj.soft_delete()
     session.add(obj)
     await session.commit()
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=work_order_id,
+            action=AuditAction.DELETE,
+            old_data=old_data_snapshot,
+            new_data=None,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return True

@@ -1,13 +1,16 @@
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from sqlalchemy import select, func, case, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import set_audit_fields
+from app.models.account import AccountInformation
 from app.models.aircraft import Aircraft, StatusEnum
+from app.models.audit_log import AuditAction
 from app.models.fleet_daily_update import FleetDailyUpdate, FleetDailyUpdateStatusEnum
+from app.services.audit_trail_service import create_audit_log, serialize_audit_data
 from app.repository.aircraft import get_aircraft_raw
 from app.schemas.fleet_daily_update_schema import (
     FleetDailyUpdateCreate,
@@ -37,6 +40,10 @@ async def create_fleet_daily_update(
     data: FleetDailyUpdateCreate,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> FleetDailyUpdate:
     """Create a new Fleet Daily Update entry. aircraft_fk must be unique (one-to-one). Returns ORM."""
     payload = data.dict(exclude_unset=True)
@@ -75,6 +82,20 @@ async def create_fleet_daily_update(
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["aircraft"])
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=obj.id,
+            action=AuditAction.CREATE,
+            old_data=None,
+            new_data=obj,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return obj
 
 
@@ -185,6 +206,10 @@ async def update_fleet_daily_update(
     data: FleetDailyUpdateUpdate,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> Optional[FleetDailyUpdate]:
     """Update a Fleet Daily Update entry. Returns ORM with aircraft loaded."""
     result = await session.execute(
@@ -197,6 +222,7 @@ async def update_fleet_daily_update(
     if not obj:
         return None
 
+    old_data_snapshot = serialize_audit_data(obj)
     update_data = data.dict(exclude_unset=True)
     if "status" in update_data:
         status_val = _status_from_str(update_data["status"])
@@ -226,6 +252,20 @@ async def update_fleet_daily_update(
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["aircraft"])
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=obj.id,
+            action=AuditAction.UPDATE,
+            old_data=old_data_snapshot,
+            new_data=obj,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return obj
 
 
@@ -275,6 +315,10 @@ async def bulk_update_fleet_daily_updates(
     updates: List[FleetDailyUpdateBulkUpdateItem],
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> FleetDailyUpdateBulkUpdateResponse:
     """Bulk partial update Fleet Daily Update records in a single atomic transaction."""
     update_ids = [item.id for item in updates]
@@ -301,10 +345,13 @@ async def bulk_update_fleet_daily_updates(
         )
 
     updated_ids: List[int] = []
+    old_data_snapshots: Dict[int, dict] = {}
+    updated_objects: List[FleetDailyUpdate] = []
 
     try:
         for item in updates:
             obj = row_map[item.id]
+            old_data_snapshots[obj.id] = serialize_audit_data(obj)
             update_data = item.dict(exclude_unset=True)
             update_data.pop("id", None)
 
@@ -342,6 +389,7 @@ async def bulk_update_fleet_daily_updates(
             if audit_account_id is not None:
                 await set_audit_fields(obj, audit_account_id, is_create=False)
             updated_ids.append(obj.id)
+            updated_objects.append(obj)
 
         await session.commit()
     except HTTPException:
@@ -350,6 +398,21 @@ async def bulk_update_fleet_daily_updates(
     except Exception as exc:
         await session.rollback()
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    if audit_module_name and audit_table_name:
+        for obj in updated_objects:
+            await session.refresh(obj)
+            await create_audit_log(
+                db=session,
+                module_name=audit_module_name,
+                table_name=audit_table_name,
+                record_id=obj.id,
+                action=AuditAction.UPDATE,
+                old_data=old_data_snapshots.get(obj.id),
+                new_data=obj,
+                current_user=audit_user,
+                request=audit_request,
+            )
 
     return FleetDailyUpdateBulkUpdateResponse(
         message="Fleet Daily Update records updated successfully",
@@ -361,6 +424,11 @@ async def bulk_update_fleet_daily_updates(
 async def soft_delete_fleet_daily_update(
     session: AsyncSession,
     update_id: int,
+    *,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> bool:
     """Soft delete a Fleet Daily Update entry."""
     result = await session.execute(
@@ -371,9 +439,25 @@ async def soft_delete_fleet_daily_update(
     obj = result.scalar_one_or_none()
     if not obj:
         return False
+
+    old_data_snapshot = serialize_audit_data(obj)
     obj.soft_delete()
     session.add(obj)
     await session.commit()
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=update_id,
+            action=AuditAction.DELETE,
+            old_data=old_data_snapshot,
+            new_data=None,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return True
 
 
@@ -447,6 +531,11 @@ async def soft_delete_fleet_daily_update_by_aircraft(
     session: AsyncSession,
     update_id: int,
     aircraft_id: int,
+    *,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> bool:
     """Soft delete a Fleet Daily Update entry scoped to aircraft_id."""
     result = await session.execute(
@@ -458,7 +547,23 @@ async def soft_delete_fleet_daily_update_by_aircraft(
     obj = result.scalar_one_or_none()
     if not obj:
         return False
+
+    old_data_snapshot = serialize_audit_data(obj)
     obj.soft_delete()
     session.add(obj)
     await session.commit()
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=update_id,
+            action=AuditAction.DELETE,
+            old_data=old_data_snapshot,
+            new_data=None,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return True

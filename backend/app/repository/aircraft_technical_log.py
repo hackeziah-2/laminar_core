@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import date, time
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from sqlalchemy import select, or_, cast, String, Numeric, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
@@ -18,6 +18,8 @@ from app.models.aircraft_techinical_log import (
 from app.models.atl_batch import AtlBatch
 from app.models.aircraft import Aircraft
 from app.models.account import AccountInformation
+from app.models.audit_log import AuditAction
+from app.services.audit_trail_service import create_audit_log, serialize_audit_data
 from app.core.atl_edit_rbac import validate_atl_edit_allowed_for_account
 from app.core.atl_workflow_rbac import is_atl_work_status_transition_allowed
 from app.models.role import Role
@@ -457,6 +459,10 @@ async def create_aircraft_technical_log(
     data: AircraftTechnicalLogCreate,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> AircraftTechnicalLog:
     """Create a new Aircraft Technical Log entry with optional gap-fill (skipped when first ATL for aircraft/batch stream). Sequence numbers stored as number only (e.g. 001). Persists auto_* via compute_auto_fields before insert."""
     sequence_no = _sequence_no_digits_only(data.sequence_no)
@@ -585,6 +591,19 @@ async def create_aircraft_technical_log(
     await session.refresh(entry)
     await session.refresh(entry, ['aircraft', 'component_parts'])
 
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=entry.id,
+            action=AuditAction.CREATE,
+            old_data=None,
+            new_data=entry,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return entry
 
 def _normalize_atl_search(search: str) -> str:
@@ -653,12 +672,17 @@ async def update_aircraft_technical_log(
     *,
     audit_account_id: Optional[int] = None,
     current_account: Optional[AccountInformation] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> Optional[AircraftTechnicalLog]:
     """Update an Aircraft Technical Log entry. Re-persists auto_* via compute_auto_fields after field updates."""
     obj = await session.get(AircraftTechnicalLog, log_id)
     if not obj or obj.is_deleted:
         return None
 
+    old_data_snapshot = serialize_audit_data(obj)
     update_data = _atl_update_payload_from_schema(log_in)
     update_data = _clean_atl_update_data(update_data)
 
@@ -715,6 +739,20 @@ async def update_aircraft_technical_log(
         .where(AircraftTechnicalLog.is_deleted.is_(False))
     )
     reloaded = result.scalar_one_or_none()
+
+    if reloaded and audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=reloaded.id,
+            action=AuditAction.UPDATE,
+            old_data=old_data_snapshot,
+            new_data=reloaded,
+            current_user=audit_user or current_account,
+            request=audit_request,
+        )
+
     return reloaded
 
 
@@ -1133,16 +1171,36 @@ async def get_latest_aircraft_technical_log(
 
 async def soft_delete_aircraft_technical_log(
     session: AsyncSession,
-    log_id: int
+    log_id: int,
+    *,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> bool:
     """Soft delete an Aircraft Technical Log entry."""
     obj = await session.get(AircraftTechnicalLog, log_id)
     if not obj or obj.is_deleted:
         return False
 
+    old_data_snapshot = serialize_audit_data(obj)
     obj.soft_delete()
     session.add(obj)
     await session.commit()
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=log_id,
+            action=AuditAction.DELETE,
+            old_data=old_data_snapshot,
+            new_data=None,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return True
 
 

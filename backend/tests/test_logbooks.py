@@ -998,3 +998,138 @@ def test_reject_web_link_longer_than_2048(client: TestClient, aircraft_id: int, 
     response = _post_logbook(client, f"/api/v1/logbooks/{logbook_type}", logbook_data)
     assert response.status_code == 400
     assert "Validation error" in response.json()["detail"]
+
+
+# ========== Audit Log Tests ==========
+_LOGBOOK_AUDIT_CASES = [
+    pytest.param(
+        "engine",
+        "ENG-AUDIT",
+        "engine_logbook",
+        id="engine",
+    ),
+    pytest.param(
+        "airframe",
+        "AF-AUDIT",
+        "airframe_logbook",
+        id="airframe",
+    ),
+    pytest.param(
+        "avionics",
+        "AV-AUDIT",
+        "avionics_logbook",
+        id="avionics",
+    ),
+    pytest.param(
+        "propeller",
+        "PROP-AUDIT",
+        "propeller_logbook",
+        id="propeller",
+    ),
+]
+
+
+def _audit_logbook_payload(aircraft_id: int, sequence_no: str) -> dict:
+    return {
+        "aircraft_fk": aircraft_id,
+        "date": "2026-01-27",
+        "sequence_no": sequence_no,
+        "description": "Audit test entry",
+    }
+
+
+@pytest.mark.parametrize("logbook_type,sequence_no,module_name", _LOGBOOK_AUDIT_CASES)
+def test_logbook_create_writes_audit_log(
+    client: TestClient,
+    aircraft_id: int,
+    logbook_type: str,
+    sequence_no: str,
+    module_name: str,
+):
+    """Logbook create should persist a CREATE audit log after commit."""
+    create_response = _post_logbook(
+        client,
+        f"/api/v1/logbooks/{logbook_type}",
+        _audit_logbook_payload(aircraft_id, sequence_no),
+    )
+    assert create_response.status_code == 201
+    logbook_id = create_response.json()["id"]
+
+    audit_response = client.get(
+        f"/api/v1/audit-logs/?module_name={module_name}&record_id={logbook_id}"
+    )
+    assert audit_response.status_code == 200
+    payload = audit_response.json()
+    create_logs = [item for item in payload["items"] if item["action"] == "CREATE"]
+    assert len(create_logs) == 1
+    assert create_logs[0]["table_name"] == module_name
+    assert create_logs[0]["new_data"]["sequence_no"] == sequence_no
+
+
+@pytest.mark.parametrize("logbook_type,sequence_no,module_name", _LOGBOOK_AUDIT_CASES)
+def test_logbook_update_writes_audit_log(
+    client: TestClient,
+    aircraft_id: int,
+    logbook_type: str,
+    sequence_no: str,
+    module_name: str,
+):
+    """Logbook update should persist an UPDATE audit log after commit."""
+    create_response = _post_logbook(
+        client,
+        f"/api/v1/logbooks/{logbook_type}",
+        _audit_logbook_payload(aircraft_id, sequence_no),
+    )
+    assert create_response.status_code == 201
+    logbook_id = create_response.json()["id"]
+
+    update_response = _put_logbook(
+        client,
+        f"/api/v1/logbooks/{logbook_type}/{logbook_id}",
+        {"description": "Updated for audit test"},
+    )
+    assert update_response.status_code == 200
+
+    audit_response = client.get(
+        f"/api/v1/audit-logs/?module_name={module_name}&record_id={logbook_id}&action=UPDATE"
+    )
+    assert audit_response.status_code == 200
+    payload = audit_response.json()
+    assert payload["total"] >= 1
+    update_log = payload["items"][0]
+    assert update_log["action"] == "UPDATE"
+    assert update_log["old_data"] is not None
+    assert update_log["new_data"] is not None
+    assert "description" in (update_log["changed_fields"] or [])
+
+
+@pytest.mark.parametrize("logbook_type,sequence_no,module_name", _LOGBOOK_AUDIT_CASES)
+def test_logbook_delete_writes_audit_log(
+    client: TestClient,
+    aircraft_id: int,
+    logbook_type: str,
+    sequence_no: str,
+    module_name: str,
+):
+    """Logbook delete should persist a DELETE audit log after commit."""
+    create_response = _post_logbook(
+        client,
+        f"/api/v1/logbooks/{logbook_type}",
+        _audit_logbook_payload(aircraft_id, sequence_no),
+    )
+    assert create_response.status_code == 201
+    logbook_id = create_response.json()["id"]
+
+    delete_response = client.delete(f"/api/v1/logbooks/{logbook_type}/{logbook_id}")
+    assert delete_response.status_code == 204
+
+    audit_response = client.get(
+        f"/api/v1/audit-logs/?module_name={module_name}&record_id={logbook_id}&action=DELETE"
+    )
+    assert audit_response.status_code == 200
+    payload = audit_response.json()
+    assert payload["total"] >= 1
+    delete_log = payload["items"][0]
+    assert delete_log["action"] == "DELETE"
+    assert delete_log["old_data"] is not None
+    assert delete_log["new_data"] is None
