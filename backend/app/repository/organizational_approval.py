@@ -1,12 +1,15 @@
 from datetime import date
 from typing import Optional, List, Tuple
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, Request, status
 from sqlalchemy import and_, select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import set_audit_fields
+from app.models.account import AccountInformation
+from app.models.audit_log import AuditAction
+from app.services.audit_trail_service import create_audit_log, serialize_audit_data
 from app.models.organizational_approval import OrganizationalApproval
 from app.models.organizational_approval_history import OrganizationalApprovalHistory
 from app.models.certificate_category_type import CertificateCategoryType
@@ -247,6 +250,10 @@ async def create_organizational_approval(
     data: OrganizationalApprovalCreate,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> OrganizationalApprovalRead:
     """Create or update organizational approval with history snapshot.
 
@@ -273,7 +280,12 @@ async def create_organizational_approval(
             session, data.certificate_fk, data.number
         )
 
+        is_update = False
+        old_data_snapshot = None
+
         if existing:
+            old_data_snapshot = serialize_audit_data(existing)
+            is_update = True
             # 📝 Create history snapshot
             snapshot = OrganizationalApprovalHistory(
                 certificate_fk=existing.certificate_fk,
@@ -315,6 +327,19 @@ async def create_organizational_approval(
         await session.refresh(obj)
         await session.refresh(obj, attribute_names=["certificate"])
 
+        if audit_module_name and audit_table_name:
+            await create_audit_log(
+                db=session,
+                module_name=audit_module_name,
+                table_name=audit_table_name,
+                record_id=obj.id,
+                action=AuditAction.UPDATE if is_update else AuditAction.CREATE,
+                old_data=old_data_snapshot if is_update else None,
+                new_data=obj,
+                current_user=audit_user,
+                request=audit_request,
+            )
+
         return OrganizationalApprovalRead.from_orm(obj)
 
     except HTTPException:
@@ -335,6 +360,10 @@ async def update_organizational_approval(
     data: OrganizationalApprovalUpdate,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> Optional[OrganizationalApprovalRead]:
     """Update organizational approval (no file upload)."""
     result = await session.execute(
@@ -346,6 +375,8 @@ async def update_organizational_approval(
     obj = result.scalar_one_or_none()
     if not obj:
         return None
+
+    old_data_snapshot = serialize_audit_data(obj)
     update_data = data.dict(exclude_unset=True)
     for k, v in update_data.items():
         setattr(obj, k, v)
@@ -355,18 +386,53 @@ async def update_organizational_approval(
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["certificate"])
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=obj.id,
+            action=AuditAction.UPDATE,
+            old_data=old_data_snapshot,
+            new_data=obj,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return OrganizationalApprovalRead.from_orm(obj)
 
 
 async def soft_delete_organizational_approval(
     session: AsyncSession,
     approval_id: int,
+    *,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> bool:
     """Soft delete."""
     obj = await session.get(OrganizationalApproval, approval_id)
     if not obj or obj.is_deleted:
         return False
+
+    old_data_snapshot = serialize_audit_data(obj)
     obj.soft_delete()
     session.add(obj)
     await session.commit()
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=approval_id,
+            action=AuditAction.DELETE,
+            old_data=old_data_snapshot,
+            new_data=None,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return True

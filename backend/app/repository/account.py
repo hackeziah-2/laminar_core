@@ -1,15 +1,17 @@
 from datetime import datetime, timezone
 import secrets
 import string
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Any, Dict
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import set_audit_fields
 from app.models.account import AccountInformation
+from app.models.audit_log import AuditAction
 from app.models.role import Role
+from app.services.audit_trail_service import create_audit_log, serialize_audit_data
 from app.schemas.account_schema import (
     AccountInformationCreate,
     AccountInformationUpdate,
@@ -18,11 +20,24 @@ from app.schemas.account_schema import (
 from app.core.security import get_password_hash
 
 
+def _serialize_account_audit_data(data: Any) -> Optional[Dict[str, Any]]:
+    """Serialize account row for audit storage without exposing password hashes."""
+    snapshot = serialize_audit_data(data)
+    if isinstance(snapshot, dict) and "password" in snapshot:
+        snapshot = dict(snapshot)
+        snapshot["password"] = "[REDACTED]"
+    return snapshot
+
+
 async def create_account_information(
     session: AsyncSession,
     data: AccountInformationCreate,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
     commit: bool = True,
 ) -> AccountInformationRead:
     """Create a new Account Information entry."""
@@ -98,6 +113,20 @@ async def create_account_information(
             status_code=400,
             detail=f"Failed to create account: {str(e)}"
         )
+
+    if commit and audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=account.id,
+            action=AuditAction.CREATE,
+            old_data=None,
+            new_data=_serialize_account_audit_data(account),
+            current_user=audit_user or account,
+            request=audit_request,
+        )
+
     return AccountInformationRead.from_orm(account)
 
 
@@ -153,12 +182,17 @@ async def update_account_information(
     account_in: AccountInformationUpdate,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> Optional[AccountInformationRead]:
     """Update an Account Information entry."""
     obj = await session.get(AccountInformation, account_id)
     if not obj or obj.is_deleted:
         return None
 
+    old_data_snapshot = _serialize_account_audit_data(obj)
     update_data = account_in.dict(exclude_unset=True, exclude={'password'})
     
     # Check for duplicate username if username is being updated (excluding soft-deleted)
@@ -228,6 +262,19 @@ async def update_account_information(
         raise HTTPException(
             status_code=400,
             detail=f"Failed to update account: {str(e)}"
+        )
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=obj.id,
+            action=AuditAction.UPDATE,
+            old_data=old_data_snapshot,
+            new_data=_serialize_account_audit_data(obj),
+            current_user=audit_user,
+            request=audit_request,
         )
 
     return AccountInformationRead.from_orm(obj)
@@ -467,23 +514,70 @@ async def get_all_account_informations_list(
 
 async def soft_delete_account_information(
     session: AsyncSession,
-    account_id: int
+    account_id: int,
+    *,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> bool:
     """Soft delete an Account Information entry."""
     obj = await session.get(AccountInformation, account_id)
     if not obj or obj.is_deleted:
         return False
 
+    old_data_snapshot = _serialize_account_audit_data(obj)
     obj.soft_delete()
     session.add(obj)
     await session.commit()
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=account_id,
+            action=AuditAction.DELETE,
+            old_data=old_data_snapshot,
+            new_data=None,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return True
+
+
+async def audit_account_creates_after_commit(
+    session: AsyncSession,
+    account_ids: List[int],
+    *,
+    audit_module_name: str,
+    audit_table_name: str,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
+) -> None:
+    """Write CREATE audit logs after a deferred bulk commit."""
+    for account_id in account_ids:
+        obj = await session.get(AccountInformation, account_id)
+        if not obj:
+            continue
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=account_id,
+            action=AuditAction.CREATE,
+            old_data=None,
+            new_data=_serialize_account_audit_data(obj),
+            current_user=audit_user or obj,
+            request=audit_request,
+        )
 
 
 async def update_last_login(
     session: AsyncSession,
     account_id: int,
-    login_time: Optional[datetime] = None
+    login_time: Optional[datetime] = None,
 ) -> bool:
     """Update last_login timestamp for an Account Information entry."""
     obj = await session.get(AccountInformation, account_id)

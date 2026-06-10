@@ -35,3 +35,18 @@ PROPELLER_LOGBOOK_TABLE_NAME = "propeller_logbook"
 
 FLEET_DAILY_UPDATE_MODULE_NAME = "fleet_daily_update"
 FLEET_DAILY_UPDATE_TABLE_NAME = "fleet_daily_update"
+
+AIRCRAFT_STATUTORY_CERTIFICATE_MODULE_NAME = "aircraft_statutory_certificates"
+AIRCRAFT_STATUTORY_CERTIFICATE_TABLE_NAME = "aircraft_statutory_certificates"
+
+ORGANIZATIONAL_APPROVAL_MODULE_NAME = "organizational_approvals"
+ORGANIZATIONAL_APPROVAL_TABLE_NAME = "organizational_approvals"
+
+OEM_TECHNICAL_PUBLICATION_MODULE_NAME = "oem_technical_publications"
+OEM_TECHNICAL_PUBLICATION_TABLE_NAME = "oem_technical_publications"
+
+PERSONNEL_COMPLIANCE_MODULE_NAME = "personnel_compliance"
+PERSONNEL_COMPLIANCE_TABLE_NAME = "personnel_compliance"
+
+ACCOUNT_INFORMATION_MODULE_NAME = "account_information"
+ACCOUNT_INFORMATION_TABLE_NAME = "account_information"

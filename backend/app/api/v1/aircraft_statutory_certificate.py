@@ -7,6 +7,7 @@ from fastapi import (
     Depends,
     Query,
     HTTPException,
+    Request,
     status,
     Form,
     File,
@@ -26,6 +27,10 @@ from app.repository.aircraft_statutory_certificate import (
     soft_delete_aircraft_statutory_certificate,
 )
 from app.api.deps import get_current_active_account
+from app.constants.audit import (
+    AIRCRAFT_STATUTORY_CERTIFICATE_MODULE_NAME,
+    AIRCRAFT_STATUTORY_CERTIFICATE_TABLE_NAME,
+)
 from app.database import get_session
 from app.models.account import AccountInformation
 
@@ -85,6 +90,7 @@ async def api_get(
     status_code=status.HTTP_201_CREATED,
 )
 async def api_create(
+    request: Request,
     json_data: str = Form(...),
     upload_file: Optional[UploadFile] = File(None, description="Upload file (optional)"),
     session: AsyncSession = Depends(get_session),
@@ -99,6 +105,10 @@ async def api_create(
             payload,
             upload_file,
             audit_account_id=current_account.id,
+            audit_module_name=AIRCRAFT_STATUTORY_CERTIFICATE_MODULE_NAME,
+            audit_table_name=AIRCRAFT_STATUTORY_CERTIFICATE_TABLE_NAME,
+            audit_user=current_account,
+            audit_request=request,
         )
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
@@ -118,6 +128,7 @@ async def api_create(
     response_model=aircraft_statutory_certificate_schema.AircraftStatutoryCertificateRead,
 )
 async def api_update(
+    request: Request,
     cert_id: int,
     json_data: str = Form(...),
     upload_file: Optional[UploadFile] = File(None, description="Upload file (optional)"),
@@ -134,6 +145,10 @@ async def api_update(
             data=payload,
             upload_file=upload_file,
             audit_account_id=current_account.id,
+            audit_module_name=AIRCRAFT_STATUTORY_CERTIFICATE_MODULE_NAME,
+            audit_table_name=AIRCRAFT_STATUTORY_CERTIFICATE_TABLE_NAME,
+            audit_user=current_account,
+            audit_request=request,
         )
         if not updated:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Certificate not found")
@@ -153,11 +168,20 @@ async def api_update(
 
 @router.delete("/{cert_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def api_delete(
+    request: Request,
     cert_id: int,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Soft delete an aircraft statutory certificate."""
-    deleted = await soft_delete_aircraft_statutory_certificate(session, cert_id)
+    deleted = await soft_delete_aircraft_statutory_certificate(
+        session,
+        cert_id,
+        audit_module_name=AIRCRAFT_STATUTORY_CERTIFICATE_MODULE_NAME,
+        audit_table_name=AIRCRAFT_STATUTORY_CERTIFICATE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Certificate not found")
     return None
@@ -214,6 +238,7 @@ async def api_get_by_aircraft(
     status_code=status.HTTP_201_CREATED,
 )
 async def api_create_by_aircraft(
+    request: Request,
     aircraft_id: int,
     json_data: str = Form(...),
     upload_file: Optional[UploadFile] = File(None, description="Upload file (optional)"),
@@ -230,6 +255,10 @@ async def api_create_by_aircraft(
             payload,
             upload_file,
             audit_account_id=current_account.id,
+            audit_module_name=AIRCRAFT_STATUTORY_CERTIFICATE_MODULE_NAME,
+            audit_table_name=AIRCRAFT_STATUTORY_CERTIFICATE_TABLE_NAME,
+            audit_user=current_account,
+            audit_request=request,
         )
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
@@ -249,6 +278,7 @@ async def api_create_by_aircraft(
     response_model=aircraft_statutory_certificate_schema.AircraftStatutoryCertificateRead,
 )
 async def api_update_by_aircraft(
+    request: Request,
     aircraft_id: int,
     cert_id: int,
     json_data: str = Form(...),
@@ -269,6 +299,10 @@ async def api_update_by_aircraft(
             data=payload,
             upload_file=upload_file,
             audit_account_id=current_account.id,
+            audit_module_name=AIRCRAFT_STATUTORY_CERTIFICATE_MODULE_NAME,
+            audit_table_name=AIRCRAFT_STATUTORY_CERTIFICATE_TABLE_NAME,
+            audit_user=current_account,
+            audit_request=request,
         )
         return updated
     except json.JSONDecodeError as e:
@@ -289,13 +323,22 @@ async def api_update_by_aircraft(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def api_delete_by_aircraft(
+    request: Request,
     aircraft_id: int,
     cert_id: int,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Soft delete a certificate scoped to aircraft."""
     existing = await get_aircraft_statutory_certificate_by_aircraft(session, cert_id, aircraft_id)
     if not existing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Certificate not found")
-    await soft_delete_aircraft_statutory_certificate(session, cert_id)
+    await soft_delete_aircraft_statutory_certificate(
+        session,
+        cert_id,
+        audit_module_name=AIRCRAFT_STATUTORY_CERTIFICATE_MODULE_NAME,
+        audit_table_name=AIRCRAFT_STATUTORY_CERTIFICATE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
     return None

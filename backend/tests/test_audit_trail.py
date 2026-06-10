@@ -12,7 +12,7 @@ from starlette.datastructures import Headers
 from app.constants.audit import AIRCRAFT_MODULE_NAME, AIRCRAFT_TABLE_NAME
 from app.models.account import AccountInformation
 from app.models.audit_log import AuditAction
-from app.repository.audit_log import list_audit_logs
+from app.repository.audit_log import enrich_audit_log_reads, list_audit_logs
 from app.services.audit_trail_service import create_audit_log, detect_changed_fields
 from tests.factories.rbac import seed_account, seed_role
 
@@ -125,6 +125,65 @@ async def test_delete_audit_log(db_session: AsyncSession):
     assert audit_log.old_data == old_data
     assert audit_log.new_data is None
     assert audit_log.changed_fields is None
+
+
+@pytest.mark.asyncio
+async def test_audit_log_resolves_created_by_updated_by_to_full_name(
+    db_session: AsyncSession,
+):
+    """Audit log API should expose created_by/updated_by as account full_name."""
+    role_id = await seed_role(db_session)
+    creator_id = await seed_account(
+        db_session,
+        role_id=role_id,
+        username="kevin_audit_user",
+    )
+    updater_id = await seed_account(
+        db_session,
+        role_id=role_id,
+        username="vivien_audit_user",
+    )
+    creator_result = await db_session.execute(
+        select(AccountInformation).where(AccountInformation.id == creator_id)
+    )
+    updater_result = await db_session.execute(
+        select(AccountInformation).where(AccountInformation.id == updater_id)
+    )
+    creator = creator_result.scalar_one()
+    updater = updater_result.scalar_one()
+    creator.first_name = "Kevin Paul"
+    creator.last_name = "Lamadrid"
+    updater.first_name = "Vivien"
+    updater.last_name = "Lamadrid"
+    await db_session.flush()
+
+    await create_audit_log(
+        db=db_session,
+        module_name=AIRCRAFT_MODULE_NAME,
+        table_name=AIRCRAFT_TABLE_NAME,
+        record_id=501,
+        action=AuditAction.UPDATE,
+        old_data={"registration": "RP-C501", "created_by": creator_id, "updated_by": creator_id},
+        new_data={"registration": "RP-C502", "created_by": creator_id, "updated_by": updater_id},
+        current_user=updater,
+        request=None,
+    )
+
+    items, _ = await list_audit_logs(
+        db_session,
+        module_name=AIRCRAFT_MODULE_NAME,
+        record_id=501,
+    )
+    assert len(items) == 1
+    assert items[0].old_data["created_by"] == "Kevin Paul Lamadrid"
+    assert items[0].old_data["updated_by"] == "Kevin Paul Lamadrid"
+    assert items[0].new_data["created_by"] == "Kevin Paul Lamadrid"
+    assert items[0].new_data["updated_by"] == "Vivien Lamadrid"
+
+
+@pytest.mark.asyncio
+async def test_enrich_audit_log_reads_handles_empty_items(db_session: AsyncSession):
+    assert await enrich_audit_log_reads(db_session, []) == []
 
 
 @pytest.mark.asyncio
@@ -254,6 +313,47 @@ def test_aircraft_create_writes_audit_log(client: TestClient, test_aircraft_data
     assert len(create_logs) == 1
     assert create_logs[0]["new_data"]["registration"] == test_aircraft_data["registration"]
     assert create_logs[0]["old_data"] is None
+
+
+def test_audit_log_detail_endpoint(client: TestClient, test_aircraft_data: dict):
+    """Audit log detail endpoint returns a single record."""
+    response = client.post(
+        "/api/v1/aircraft/",
+        data={"json_data": json.dumps(test_aircraft_data)},
+        files={},
+    )
+    assert response.status_code == 200
+    aircraft_id = response.json()["id"]
+
+    list_response = client.get(
+        f"/api/v1/audit-logs/?module_name={AIRCRAFT_MODULE_NAME}&record_id={aircraft_id}"
+    )
+    assert list_response.status_code == 200
+    audit_id = list_response.json()["items"][0]["id"]
+
+    detail_response = client.get(f"/api/v1/audit-logs/{audit_id}")
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["id"] == audit_id
+    assert detail["module_name"] == AIRCRAFT_MODULE_NAME
+    assert detail["action"] == "CREATE"
+
+
+def test_audit_logs_api_summary_counts(client: TestClient, test_aircraft_data: dict):
+    """Audit logs list response includes summary counts."""
+    response = client.post(
+        "/api/v1/aircraft/",
+        data={"json_data": json.dumps(test_aircraft_data)},
+        files={},
+    )
+    assert response.status_code == 200
+
+    list_response = client.get("/api/v1/audit-logs/?limit=10&page=1")
+    assert list_response.status_code == 200
+    payload = list_response.json()
+    assert "summary" in payload
+    assert payload["summary"]["total"] >= 1
+    assert payload["summary"]["creates"] >= 1
 
 
 def test_audit_logs_api_pagination_response(client: TestClient, test_aircraft_data: dict):

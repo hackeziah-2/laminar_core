@@ -1,7 +1,7 @@
 from math import ceil
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_account
@@ -12,6 +12,7 @@ from app.repository.advisory import (
     list_advisory_items,
     update_advisory_expiry,
     update_advisory_withhold,
+    write_advisory_update_audit_log,
 )
 from app.repository.aircraft_statutory_certificate_history import (
     create_aircraft_statutory_certificate_history,
@@ -197,6 +198,7 @@ async def get_advisory_by_id(
     summary="Renew advisory (update expiry_date, auth_issue_date, web_link)",
 )
 async def put_advisory_renew(
+    request: Request,
     id: int,
     body: AdvisoryRenewBody,
     session: AsyncSession = Depends(get_session),
@@ -211,7 +213,7 @@ async def put_advisory_renew(
     history tables before applying the new expiry (same pattern as create-with-update flows).
     """
     try:
-        history_oa, history_asc = await update_advisory_expiry(
+        history_oa, history_asc, old_data_snapshot = await update_advisory_expiry(
             session=session,
             regulatory_compliance=body.regulatory_compliance,
             id=id,
@@ -237,6 +239,15 @@ async def put_advisory_renew(
             )
 
         await session.commit()
+
+        await write_advisory_update_audit_log(
+            session,
+            regulatory_compliance=body.regulatory_compliance,
+            row_id=id,
+            old_data=old_data_snapshot,
+            audit_user=current_account,
+            audit_request=request,
+        )
     except ValueError as e:
         await session.rollback()
         msg = str(e)
@@ -265,6 +276,7 @@ async def put_advisory_renew(
     summary="Set advisory item to withhold",
 )
 async def put_advisory_withhold(
+    request: Request,
     id: int,
     regulatory_compliance: RegulatoryComplianceSource,
     session: AsyncSession = Depends(get_session),
@@ -282,6 +294,8 @@ async def put_advisory_withhold(
             regulatory_compliance=regulatory_compliance,
             id=id,
             audit_account_id=current_account.id,
+            audit_user=current_account,
+            audit_request=request,
         )
     except ValueError as e:
         msg = str(e)
