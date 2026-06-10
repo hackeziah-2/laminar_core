@@ -1,9 +1,13 @@
 from math import ceil
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, Query, HTTPException, status
+from fastapi import APIRouter, Depends, Query, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.constants.audit import (
+    CERTIFICATE_CATEGORY_TYPE_MODULE_NAME,
+    CERTIFICATE_CATEGORY_TYPE_TABLE_NAME,
+)
 from app.schemas.certificate_category_type_schema import (
     CertificateCategoryTypeCreate,
     CertificateCategoryTypeUpdate,
@@ -79,26 +83,41 @@ async def api_get(
     status_code=status.HTTP_201_CREATED,
 )
 async def api_create(
+    request: Request,
     payload: CertificateCategoryTypeCreate,
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new certificate category type."""
     return await create_certificate_category_type(
-        session, payload, audit_account_id=current_account.id
+        session,
+        payload,
+        audit_account_id=current_account.id,
+        audit_module_name=CERTIFICATE_CATEGORY_TYPE_MODULE_NAME,
+        audit_table_name=CERTIFICATE_CATEGORY_TYPE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
 
 @router.put("/{category_id}", response_model=CertificateCategoryTypeRead)
 async def api_update(
     category_id: int,
+    request: Request,
     payload: CertificateCategoryTypeUpdate,
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update a certificate category type."""
     updated = await update_certificate_category_type(
-        session, category_id, payload, audit_account_id=current_account.id
+        session,
+        category_id,
+        payload,
+        audit_account_id=current_account.id,
+        audit_module_name=CERTIFICATE_CATEGORY_TYPE_MODULE_NAME,
+        audit_table_name=CERTIFICATE_CATEGORY_TYPE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Certificate category type not found")
@@ -108,10 +127,19 @@ async def api_update(
 @router.delete("/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def api_delete(
     category_id: int,
+    request: Request,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Soft delete a certificate category type."""
-    deleted = await soft_delete_certificate_category_type(session, category_id)
+    deleted = await soft_delete_certificate_category_type(
+        session,
+        category_id,
+        audit_module_name=CERTIFICATE_CATEGORY_TYPE_MODULE_NAME,
+        audit_table_name=CERTIFICATE_CATEGORY_TYPE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Certificate category type not found")
     return None

@@ -6,11 +6,13 @@ from fastapi import (
     Depends,
     Query,
     HTTPException,
+    Request,
     status
 )
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.constants.audit import ROLE_MODULE_NAME, ROLE_TABLE_NAME
 from app.schemas.role_schema import (
     RoleCreate,
     RoleUpdate,
@@ -140,13 +142,20 @@ async def api_get(
     status_code=status.HTTP_201_CREATED
 )
 async def api_create(
+    request: Request,
     payload: RoleCreate,
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new Role. Optionally include permissions (module, read, create, update, delete, approve) per module."""
     role = await create_role(
-        session, payload, audit_account_id=current_account.id
+        session,
+        payload,
+        audit_account_id=current_account.id,
+        audit_module_name=ROLE_MODULE_NAME,
+        audit_table_name=ROLE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     role_with_perms = await get_role_with_permissions(session, role.id)
     base = RoleRead.from_orm(role_with_perms)
@@ -159,6 +168,7 @@ async def api_create(
 @router.put("/{role_id}", response_model=RoleReadWithPermissions)
 async def api_update(
     role_id: int,
+    request: Request,
     role_in: RoleUpdate,
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
@@ -169,6 +179,10 @@ async def api_update(
         role_id=role_id,
         role_in=role_in,
         audit_account_id=current_account.id,
+        audit_module_name=ROLE_MODULE_NAME,
+        audit_table_name=ROLE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not updated:
         raise HTTPException(
@@ -186,10 +200,19 @@ async def api_update(
 @router.delete("/{role_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def api_delete(
     role_id: int,
+    request: Request,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Soft delete a Role."""
-    deleted = await soft_delete_role(session, role_id)
+    deleted = await soft_delete_role(
+        session,
+        role_id,
+        audit_module_name=ROLE_MODULE_NAME,
+        audit_table_name=ROLE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

@@ -1,10 +1,11 @@
 from math import ceil
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_account
+from app.constants.audit import ATL_BATCH_MODULE_NAME, ATL_BATCH_TABLE_NAME
 from app.database import get_session
 from app.models.account import AccountInformation
 from app.repository.atl_batch import (
@@ -73,23 +74,40 @@ async def api_get(batch_id: int, session: AsyncSession = Depends(get_session)):
     status_code=status.HTTP_201_CREATED,
 )
 async def api_create(
+    request: Request,
     payload: AtlBatchCreate,
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
 ):
-    return await create_atl_batch(session, payload, audit_account_id=current_account.id)
+    return await create_atl_batch(
+        session,
+        payload,
+        audit_account_id=current_account.id,
+        audit_module_name=ATL_BATCH_MODULE_NAME,
+        audit_table_name=ATL_BATCH_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
 
 
 @router.put("/{batch_id}", response_model=AtlBatchRead)
 @router.patch("/{batch_id}", response_model=AtlBatchRead)
 async def api_update(
     batch_id: int,
+    request: Request,
     payload: AtlBatchUpdate,
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
 ):
     updated = await update_atl_batch(
-        session, batch_id, payload, audit_account_id=current_account.id
+        session,
+        batch_id,
+        payload,
+        audit_account_id=current_account.id,
+        audit_module_name=ATL_BATCH_MODULE_NAME,
+        audit_table_name=ATL_BATCH_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ATL batch not found")
@@ -97,8 +115,20 @@ async def api_update(
 
 
 @router.delete("/{batch_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def api_delete(batch_id: int, session: AsyncSession = Depends(get_session)):
-    deleted = await soft_delete_atl_batch(session, batch_id)
+async def api_delete(
+    batch_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
+):
+    deleted = await soft_delete_atl_batch(
+        session,
+        batch_id,
+        audit_module_name=ATL_BATCH_MODULE_NAME,
+        audit_table_name=ATL_BATCH_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ATL batch not found")
     return None
