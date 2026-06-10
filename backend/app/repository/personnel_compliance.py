@@ -1,11 +1,13 @@
 from typing import List, Optional, Tuple
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, Request, status
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import set_audit_fields
+from app.models.audit_log import AuditAction
+from app.services.audit_trail_service import create_audit_log, serialize_audit_data
 from app.models.account import AccountInformation
 from app.models.personnel_authorization import PersonnelAuthorization
 from app.models.personnel_compliance import PersonnelCompliance, PersonnelComplianceItemType
@@ -254,6 +256,10 @@ async def create_personnel_compliance(
     data: PersonnelComplianceCreate,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> PersonnelComplianceRead:
     await validate_personnel_compliance_duplicate(session, data)
     obj = PersonnelCompliance(**data.dict())
@@ -274,6 +280,20 @@ async def create_personnel_compliance(
         .where(PersonnelCompliance.is_deleted == False)
     )
     loaded = result.scalar_one()
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=loaded.id,
+            action=AuditAction.CREATE,
+            old_data=None,
+            new_data=loaded,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return PersonnelComplianceRead.from_orm(loaded)
 
 
@@ -283,6 +303,10 @@ async def update_personnel_compliance(
     data: PersonnelComplianceUpdate,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> Optional[PersonnelComplianceRead]:
     result = await session.execute(
         select(PersonnelCompliance)
@@ -298,6 +322,8 @@ async def update_personnel_compliance(
     obj = result.scalar_one_or_none()
     if not obj:
         return None
+
+    old_data_snapshot = serialize_audit_data(obj)
     update_data = data.dict(exclude_unset=True)
     # Do not write None onto NOT NULL columns when clients send explicit nulls.
     skip_none_for = {"account_information_id", "item_type", "is_withhold"}
@@ -319,17 +345,52 @@ async def update_personnel_compliance(
             "authorization_scope_others",
         ],
     )
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=obj.id,
+            action=AuditAction.UPDATE,
+            old_data=old_data_snapshot,
+            new_data=obj,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return PersonnelComplianceRead.from_orm(obj)
 
 
 async def soft_delete_personnel_compliance(
     session: AsyncSession,
     compliance_id: int,
+    *,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> bool:
     obj = await session.get(PersonnelCompliance, compliance_id)
     if not obj or obj.is_deleted:
         return False
+
+    old_data_snapshot = serialize_audit_data(obj)
     obj.soft_delete()
     session.add(obj)
     await session.commit()
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=compliance_id,
+            action=AuditAction.DELETE,
+            old_data=old_data_snapshot,
+            new_data=None,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return True

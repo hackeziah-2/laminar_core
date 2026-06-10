@@ -1,10 +1,14 @@
 from typing import Optional, List, Tuple
 
+from fastapi import Request
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import set_audit_fields
+from app.models.account import AccountInformation
+from app.models.audit_log import AuditAction
+from app.services.audit_trail_service import create_audit_log, serialize_audit_data
 from app.models.oem_technical_publication import (
     OemTechnicalPublication,
     OemTechnicalPublicationCategoryTypeEnum,
@@ -118,6 +122,10 @@ async def create_oem_technical_publication(
     data: OemTechnicalPublicationCreate,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> OemTechnicalPublicationRead:
     """Create."""
     payload = data.dict()
@@ -135,6 +143,20 @@ async def create_oem_technical_publication(
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["item"])
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=obj.id,
+            action=AuditAction.CREATE,
+            old_data=None,
+            new_data=obj,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return OemTechnicalPublicationRead.from_orm(obj)
 
 
@@ -144,6 +166,10 @@ async def update_oem_technical_publication(
     data: OemTechnicalPublicationUpdate,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> Optional[OemTechnicalPublicationRead]:
     """Update."""
     result = await session.execute(
@@ -155,6 +181,8 @@ async def update_oem_technical_publication(
     obj = result.scalar_one_or_none()
     if not obj:
         return None
+
+    old_data_snapshot = serialize_audit_data(obj)
     update_data = data.dict(exclude_unset=True)
     if "category_type" in update_data and isinstance(update_data["category_type"], str):
         cat_enum = _category_type_from_str(update_data["category_type"])
@@ -168,18 +196,53 @@ async def update_oem_technical_publication(
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["item"])
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=obj.id,
+            action=AuditAction.UPDATE,
+            old_data=old_data_snapshot,
+            new_data=obj,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return OemTechnicalPublicationRead.from_orm(obj)
 
 
 async def soft_delete_oem_technical_publication(
     session: AsyncSession,
     publication_id: int,
+    *,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> bool:
     """Soft delete."""
     obj = await session.get(OemTechnicalPublication, publication_id)
     if not obj or obj.is_deleted:
         return False
+
+    old_data_snapshot = serialize_audit_data(obj)
     obj.soft_delete()
     session.add(obj)
     await session.commit()
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=publication_id,
+            action=AuditAction.DELETE,
+            old_data=old_data_snapshot,
+            new_data=None,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return True

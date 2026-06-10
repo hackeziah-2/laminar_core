@@ -1,11 +1,15 @@
 from typing import Optional, List, Tuple
 
+from fastapi import Request
 from sqlalchemy import select, func, or_, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import set_audit_fields
+from app.models.account import AccountInformation
 from app.models.atl_monitoring import LDNDMonitoring, UnitEnum
+from app.models.audit_log import AuditAction
+from app.services.audit_trail_service import create_audit_log, serialize_audit_data
 from app.schemas.ldnd_monitoring_schema import (
     AircraftSummary,
     LDNDMonitoringCreate,
@@ -289,6 +293,10 @@ async def create_ldnd_monitoring(
     data: LDNDMonitoringCreate,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> LDNDMonitoringRead:
     """Create a new LDNDMonitoring entry."""
     payload = data.dict()
@@ -300,6 +308,20 @@ async def create_ldnd_monitoring(
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["aircraft"])
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=obj.id,
+            action=AuditAction.CREATE,
+            old_data=None,
+            new_data=obj,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return LDNDMonitoringRead.from_orm(obj)
 
 
@@ -309,6 +331,10 @@ async def update_ldnd_monitoring(
     data: LDNDMonitoringUpdate,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> Optional[LDNDMonitoringRead]:
     """Update an LDNDMonitoring entry."""
     result = await session.execute(
@@ -320,6 +346,7 @@ async def update_ldnd_monitoring(
     obj = result.scalar_one_or_none()
     if not obj:
         return None
+    old_data_snapshot = serialize_audit_data(obj)
     update_data = data.dict(exclude_unset=True)
     if "unit" in update_data and update_data["unit"] is not None:
         update_data["unit"] = _unit_to_enum(update_data["unit"]).value
@@ -331,11 +358,31 @@ async def update_ldnd_monitoring(
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["aircraft"])
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=obj.id,
+            action=AuditAction.UPDATE,
+            old_data=old_data_snapshot,
+            new_data=obj,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return LDNDMonitoringRead.from_orm(obj)
 
 
 async def soft_delete_ldnd_monitoring(
-    session: AsyncSession, ldnd_id: int
+    session: AsyncSession,
+    ldnd_id: int,
+    *,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> bool:
     """Soft delete an LDNDMonitoring entry."""
     result = await session.execute(
@@ -346,14 +393,36 @@ async def soft_delete_ldnd_monitoring(
     obj = result.scalar_one_or_none()
     if not obj:
         return False
+    old_data_snapshot = serialize_audit_data(obj)
     obj.soft_delete()
     session.add(obj)
     await session.commit()
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=ldnd_id,
+            action=AuditAction.DELETE,
+            old_data=old_data_snapshot,
+            new_data=None,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return True
 
 
 async def soft_delete_ldnd_monitoring_by_aircraft(
-    session: AsyncSession, ldnd_id: int, aircraft_id: int
+    session: AsyncSession,
+    ldnd_id: int,
+    aircraft_id: int,
+    *,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> bool:
     """Soft delete an LDNDMonitoring entry, scoped to aircraft_id."""
     result = await session.execute(
@@ -365,7 +434,22 @@ async def soft_delete_ldnd_monitoring_by_aircraft(
     obj = result.scalar_one_or_none()
     if not obj:
         return False
+    old_data_snapshot = serialize_audit_data(obj)
     obj.soft_delete()
     session.add(obj)
     await session.commit()
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=ldnd_id,
+            action=AuditAction.DELETE,
+            old_data=old_data_snapshot,
+            new_data=None,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return True

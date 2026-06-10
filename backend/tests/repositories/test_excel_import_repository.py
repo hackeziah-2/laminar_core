@@ -15,10 +15,26 @@ from app.repository.excel_import import (
 from app.services.excel_import.hooks.aircraft import AircraftImportHook
 
 
+@pytest.mark.parametrize(
+    "field,value,expected",
+    [
+        ("engine_tsn", "UNK", 0.0),
+        ("engine_tsn", "unk", 0.0),
+        ("engine_tsn", "", 0.0),
+        ("engine_tsn", 2500.5, 2500.5),
+        ("propeller_tsn", "UNK", 0.0),
+        ("propeller_tsn", "", 0.0),
+        ("propeller_tsn", None, 0.0),
+    ],
+)
+def test_aircraft_import_schema_normalizes_unk_tsn(field, value, expected):
+    validated = _validated(**{field: value})
+    assert getattr(validated, field) == expected
+
+
 def _validated(**overrides) -> AircraftImportSchema:
     data = {
         "registration": "REPO-001",
-        "manufacturer": "Cessna",
         "model": "172",
         "msn": "REPO-MSN-001",
         "base": "Base",
@@ -42,13 +58,13 @@ async def test_upsert_inserts_then_updates(db_session: AsyncSession):
     assert created is True
     await db_session.commit()
 
-    validated2 = _validated(manufacturer="Piper")
+    validated2 = _validated(model="182")
     obj2, created2 = await upsert_validated_row(
         db_session, Aircraft, validated2, fields, hook
     )
     assert created2 is False
     assert obj2.id == obj.id
-    assert obj2.manufacturer == "Piper"
+    assert obj2.model == "182"
 
 
 @pytest.mark.asyncio

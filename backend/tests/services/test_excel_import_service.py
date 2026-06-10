@@ -87,7 +87,6 @@ async def test_import_duplicate_row_in_file_reports_errors(db_session: AsyncSess
     duplicate_rows = [
         {
             "registration": "DUP-001",
-            "manufacturer": "Cessna",
             "model": "172",
             "msn": "DUP-MSN-1",
             "base": "Base",
@@ -96,7 +95,6 @@ async def test_import_duplicate_row_in_file_reports_errors(db_session: AsyncSess
         },
         {
             "registration": "DUP-001",
-            "manufacturer": "Cessna",
             "model": "172",
             "msn": "DUP-MSN-1",
             "base": "Base",

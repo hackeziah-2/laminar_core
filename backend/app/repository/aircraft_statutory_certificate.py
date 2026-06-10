@@ -2,12 +2,15 @@ import os
 import uuid
 from typing import Optional, List, Tuple
 
-from fastapi import HTTPException, UploadFile
+from fastapi import HTTPException, Request, UploadFile
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import set_audit_fields
+from app.models.account import AccountInformation
+from app.models.audit_log import AuditAction
+from app.services.audit_trail_service import create_audit_log, serialize_audit_data
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 from app.models.aircraft_statutory_certificate import (
     AircraftStatutoryCertificate,
@@ -156,6 +159,10 @@ async def create_aircraft_statutory_certificate(
     upload_file: Optional[UploadFile] = None,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> AircraftStatutoryCertificateRead:
     """Create a new certificate, or update expiry, web link, and clear withhold if one exists for aircraft + type."""
     
@@ -178,6 +185,7 @@ async def create_aircraft_statutory_certificate(
         
     result = await get_existing_record(session, data.aircraft_fk, data.category_type)
     if result:
+        old_data_snapshot = serialize_audit_data(result)
         history_payload = AircraftStatutoryCertificateHistoryCreate(
             aircraft_fk=result.aircraft_fk,
             asc_history=result.id,
@@ -201,6 +209,20 @@ async def create_aircraft_statutory_certificate(
         except Exception as e:
             await session.rollback()
             raise HTTPException(status_code=400, detail=f"Failed to update certificate: {str(e)}")
+
+        if audit_module_name and audit_table_name:
+            await create_audit_log(
+                db=session,
+                module_name=audit_module_name,
+                table_name=audit_table_name,
+                record_id=result.id,
+                action=AuditAction.UPDATE,
+                old_data=old_data_snapshot,
+                new_data=result,
+                current_user=audit_user,
+                request=audit_request,
+            )
+
         return AircraftStatutoryCertificateRead.from_orm(result)
 
     cert_data = data.dict()
@@ -218,6 +240,20 @@ async def create_aircraft_statutory_certificate(
     except Exception as e:
         await session.rollback()
         raise HTTPException(status_code=400, detail=f"Failed to create certificate: {str(e)}")
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=obj.id,
+            action=AuditAction.CREATE,
+            old_data=None,
+            new_data=obj,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return AircraftStatutoryCertificateRead.from_orm(obj)
 
 
@@ -228,6 +264,10 @@ async def update_aircraft_statutory_certificate(
     upload_file: Optional[UploadFile] = None,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> Optional[AircraftStatutoryCertificateRead]:
     """Update a certificate; optional file upload replaces file_path."""
     result = await session.execute(
@@ -239,6 +279,8 @@ async def update_aircraft_statutory_certificate(
     obj = result.scalar_one_or_none()
     if not obj:
         return None
+
+    old_data_snapshot = serialize_audit_data(obj)
     update_data = data.dict(exclude_unset=True)
     file_path = await _save_certificate_upload(upload_file)
     if file_path:
@@ -251,17 +293,53 @@ async def update_aircraft_statutory_certificate(
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["aircraft"])
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=obj.id,
+            action=AuditAction.UPDATE,
+            old_data=old_data_snapshot,
+            new_data=obj,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return AircraftStatutoryCertificateRead.from_orm(obj)
 
 
 async def soft_delete_aircraft_statutory_certificate(
-    session: AsyncSession, cert_id: int
+    session: AsyncSession,
+    cert_id: int,
+    *,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> bool:
     """Soft delete a certificate."""
     obj = await session.get(AircraftStatutoryCertificate, cert_id)
     if not obj or obj.is_deleted:
         return False
+
+    old_data_snapshot = serialize_audit_data(obj)
     obj.soft_delete()
     session.add(obj)
     await session.commit()
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=cert_id,
+            action=AuditAction.DELETE,
+            old_data=old_data_snapshot,
+            new_data=None,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return True

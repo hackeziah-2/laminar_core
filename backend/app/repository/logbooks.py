@@ -2,7 +2,7 @@ import os
 from typing import Optional, List, Tuple, Type
 from math import ceil
 
-from fastapi import HTTPException, UploadFile
+from fastapi import HTTPException, UploadFile, Request
 from sqlalchemy import select, func, or_, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -14,6 +14,9 @@ from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 ensure_uploads_dir()
 
 from app.database import set_audit_fields
+from app.models.account import AccountInformation
+from app.models.audit_log import AuditAction
+from app.services.audit_trail_service import create_audit_log, serialize_audit_data
 from app.models.logbooks import (
     EngineLogbook,
     EngineComponentRecord,
@@ -162,6 +165,10 @@ async def create_engine_logbook(
     upload_file: UploadFile = None,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> EngineLogbookRead:
     """Create a new Engine Logbook entry (with optional component_parts)."""
     logbook_data = data.dict(exclude={"component_parts"})
@@ -204,6 +211,20 @@ async def create_engine_logbook(
     except Exception as e:
         await session.rollback()
         raise HTTPException(status_code=400, detail=f"Failed to create engine logbook: {str(e)}")
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=entry.id,
+            action=AuditAction.CREATE,
+            old_data=None,
+            new_data=entry,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return EngineLogbookRead.from_orm(entry)
 
 async def get_engine_logbook(
@@ -300,6 +321,10 @@ async def update_engine_logbook(
     upload_file: UploadFile = None,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> Optional[EngineLogbookRead]:
     """Update an Engine Logbook entry (optionally replace component_records)."""
     result = await session.execute(
@@ -315,6 +340,7 @@ async def update_engine_logbook(
     if not obj:
         return None
 
+    old_data_snapshot = serialize_audit_data(obj)
     update_data = logbook_in.dict(exclude_unset=True, exclude={"component_parts"})
     if upload_file:
         file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
@@ -356,20 +382,55 @@ async def update_engine_logbook(
     except Exception as e:
         await session.rollback()
         raise HTTPException(status_code=400, detail=f"Failed to update engine logbook: {str(e)}")
+
+    if obj and audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=obj.id,
+            action=AuditAction.UPDATE,
+            old_data=old_data_snapshot,
+            new_data=obj,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return EngineLogbookRead.from_orm(obj)
 
 
 async def soft_delete_engine_logbook(
     session: AsyncSession,
-    logbook_id: int
+    logbook_id: int,
+    *,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> bool:
     """Soft delete an Engine Logbook entry."""
     obj = await session.get(EngineLogbook, logbook_id)
     if not obj or obj.is_deleted:
         return False
+
+    old_data_snapshot = serialize_audit_data(obj)
     obj.soft_delete()
     session.add(obj)
     await session.commit()
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=logbook_id,
+            action=AuditAction.DELETE,
+            old_data=old_data_snapshot,
+            new_data=None,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return True
 
 
@@ -380,6 +441,10 @@ async def create_airframe_logbook(
     upload_file: UploadFile = None,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> AirframeLogbookRead:
     """Create a new Airframe Logbook entry (with optional component_parts)."""
     logbook_data = data.dict(exclude={"component_parts"})
@@ -422,6 +487,20 @@ async def create_airframe_logbook(
     except Exception as e:
         await session.rollback()
         raise HTTPException(status_code=400, detail=f"Failed to create airframe logbook: {str(e)}")
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=entry.id,
+            action=AuditAction.CREATE,
+            old_data=None,
+            new_data=entry,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return AirframeLogbookRead.from_orm(entry)
 
 
@@ -519,6 +598,10 @@ async def update_airframe_logbook(
     upload_file: UploadFile = None,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> Optional[AirframeLogbookRead]:
     """Update an Airframe Logbook entry (optionally replace component_records)."""
     result = await session.execute(
@@ -534,6 +617,7 @@ async def update_airframe_logbook(
     if not obj:
         return None
 
+    old_data_snapshot = serialize_audit_data(obj)
     update_data = logbook_in.dict(exclude_unset=True, exclude={"component_parts"})
     if upload_file:
         file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
@@ -575,20 +659,55 @@ async def update_airframe_logbook(
     except Exception as e:
         await session.rollback()
         raise HTTPException(status_code=400, detail=f"Failed to update airframe logbook: {str(e)}")
+
+    if obj and audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=obj.id,
+            action=AuditAction.UPDATE,
+            old_data=old_data_snapshot,
+            new_data=obj,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return AirframeLogbookRead.from_orm(obj)
 
 
 async def soft_delete_airframe_logbook(
     session: AsyncSession,
-    logbook_id: int
+    logbook_id: int,
+    *,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> bool:
     """Soft delete an Airframe Logbook entry."""
     obj = await session.get(AirframeLogbook, logbook_id)
     if not obj or obj.is_deleted:
         return False
+
+    old_data_snapshot = serialize_audit_data(obj)
     obj.soft_delete()
     session.add(obj)
     await session.commit()
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=logbook_id,
+            action=AuditAction.DELETE,
+            old_data=old_data_snapshot,
+            new_data=None,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return True
 
 
@@ -599,6 +718,10 @@ async def create_avionics_logbook(
     upload_file: UploadFile = None,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> AvionicsLogbookRead:
     """Create a new Avionics Logbook entry (with optional component_parts)."""
     logbook_data = data.dict(exclude={"component_parts"})
@@ -641,6 +764,20 @@ async def create_avionics_logbook(
     except Exception as e:
         await session.rollback()
         raise HTTPException(status_code=400, detail=f"Failed to create avionics logbook: {str(e)}")
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=entry.id,
+            action=AuditAction.CREATE,
+            old_data=None,
+            new_data=entry,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return AvionicsLogbookRead.from_orm(entry)
 
 
@@ -744,6 +881,10 @@ async def update_avionics_logbook(
     upload_file: UploadFile = None,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> Optional[AvionicsLogbookRead]:
     """Update an Avionics Logbook entry (optionally replace component_records)."""
     result = await session.execute(
@@ -759,6 +900,7 @@ async def update_avionics_logbook(
     if not obj:
         return None
 
+    old_data_snapshot = serialize_audit_data(obj)
     update_data = logbook_in.dict(exclude_unset=True, exclude={"component_parts"})
     if upload_file:
         file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
@@ -800,20 +942,55 @@ async def update_avionics_logbook(
     except Exception as e:
         await session.rollback()
         raise HTTPException(status_code=400, detail=f"Failed to update avionics logbook: {str(e)}")
+
+    if obj and audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=obj.id,
+            action=AuditAction.UPDATE,
+            old_data=old_data_snapshot,
+            new_data=obj,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return AvionicsLogbookRead.from_orm(obj)
 
 
 async def soft_delete_avionics_logbook(
     session: AsyncSession,
-    logbook_id: int
+    logbook_id: int,
+    *,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> bool:
     """Soft delete an Avionics Logbook entry."""
     obj = await session.get(AvionicsLogbook, logbook_id)
     if not obj or obj.is_deleted:
         return False
+
+    old_data_snapshot = serialize_audit_data(obj)
     obj.soft_delete()
     session.add(obj)
     await session.commit()
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=logbook_id,
+            action=AuditAction.DELETE,
+            old_data=old_data_snapshot,
+            new_data=None,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return True
 
 
@@ -824,6 +1001,10 @@ async def create_propeller_logbook(
     upload_file: UploadFile = None,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> PropellerLogbookRead:
     """Create a new Propeller Logbook entry."""
     logbook_data = data.dict()
@@ -846,6 +1027,20 @@ async def create_propeller_logbook(
     except Exception as e:
         await session.rollback()
         raise HTTPException(status_code=400, detail=f"Failed to create propeller logbook: {str(e)}")
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=entry.id,
+            action=AuditAction.CREATE,
+            old_data=None,
+            new_data=entry,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return PropellerLogbookRead.from_orm(entry)
 
 
@@ -937,6 +1132,10 @@ async def update_propeller_logbook(
     upload_file: UploadFile = None,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> Optional[PropellerLogbookRead]:
     """Update a Propeller Logbook entry."""
     result = await session.execute(
@@ -949,6 +1148,7 @@ async def update_propeller_logbook(
     if not obj:
         return None
 
+    old_data_snapshot = serialize_audit_data(obj)
     update_data = logbook_in.dict(exclude_unset=True)
     
     # Handle file upload
@@ -971,18 +1171,53 @@ async def update_propeller_logbook(
     except Exception as e:
         await session.rollback()
         raise HTTPException(status_code=400, detail=f"Failed to update propeller logbook: {str(e)}")
+
+    if obj and audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=obj.id,
+            action=AuditAction.UPDATE,
+            old_data=old_data_snapshot,
+            new_data=obj,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return PropellerLogbookRead.from_orm(obj)
 
 
 async def soft_delete_propeller_logbook(
     session: AsyncSession,
-    logbook_id: int
+    logbook_id: int,
+    *,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> bool:
     """Soft delete a Propeller Logbook entry."""
     obj = await session.get(PropellerLogbook, logbook_id)
     if not obj or obj.is_deleted:
         return False
+
+    old_data_snapshot = serialize_audit_data(obj)
     obj.soft_delete()
     session.add(obj)
     await session.commit()
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=logbook_id,
+            action=AuditAction.DELETE,
+            old_data=old_data_snapshot,
+            new_data=None,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return True

@@ -9,13 +9,26 @@ REMAINING VALIDITY: expiry_date - today (positive = days left). Only rows with i
 Display: if REMAINING VALIDITY <= 0 → "Expired"; elif <= 30 → int. Only items with REMAINING VALIDITY <= 30 are returned.
 """
 from datetime import date
-from typing import List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
+from fastapi import Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.constants.audit import (
+    AIRCRAFT_STATUTORY_CERTIFICATE_MODULE_NAME,
+    AIRCRAFT_STATUTORY_CERTIFICATE_TABLE_NAME,
+    OEM_TECHNICAL_PUBLICATION_MODULE_NAME,
+    OEM_TECHNICAL_PUBLICATION_TABLE_NAME,
+    ORGANIZATIONAL_APPROVAL_MODULE_NAME,
+    ORGANIZATIONAL_APPROVAL_TABLE_NAME,
+    PERSONNEL_COMPLIANCE_MODULE_NAME,
+    PERSONNEL_COMPLIANCE_TABLE_NAME,
+)
 from app.database import set_audit_fields
+from app.models.audit_log import AuditAction
+from app.services.audit_trail_service import create_audit_log, serialize_audit_data
 from app.models.account import AccountInformation
 from app.models.aircraft import Aircraft
 from app.models.aircraft_statutory_certificate import (
@@ -282,6 +295,93 @@ def _normalize_advisory_web_link(web_link: str) -> Optional[str]:
     return stripped or None
 
 
+def _audit_names_for_regulatory_compliance(
+    regulatory_compliance: RegulatoryComplianceSource,
+) -> Tuple[str, str]:
+    mapping = {
+        "aircraft-statutory-certificates": (
+            AIRCRAFT_STATUTORY_CERTIFICATE_MODULE_NAME,
+            AIRCRAFT_STATUTORY_CERTIFICATE_TABLE_NAME,
+        ),
+        "organizational-approvals": (
+            ORGANIZATIONAL_APPROVAL_MODULE_NAME,
+            ORGANIZATIONAL_APPROVAL_TABLE_NAME,
+        ),
+        "oem-technical-publication": (
+            OEM_TECHNICAL_PUBLICATION_MODULE_NAME,
+            OEM_TECHNICAL_PUBLICATION_TABLE_NAME,
+        ),
+        "personnel-compliance": (
+            PERSONNEL_COMPLIANCE_MODULE_NAME,
+            PERSONNEL_COMPLIANCE_TABLE_NAME,
+        ),
+    }
+    names = mapping.get(regulatory_compliance)
+    if names is None:
+        raise ValueError("Invalid regulatory_compliance")
+    return names
+
+
+async def _load_advisory_row(
+    session: AsyncSession,
+    regulatory_compliance: RegulatoryComplianceSource,
+    row_id: int,
+) -> Any:
+    if regulatory_compliance == "personnel-compliance":
+        stmt = select(PersonnelCompliance).where(
+            PersonnelCompliance.id == row_id,
+            PersonnelCompliance.is_deleted == False,
+        )
+    elif regulatory_compliance == "aircraft-statutory-certificates":
+        stmt = select(AircraftStatutoryCertificate).where(
+            AircraftStatutoryCertificate.id == row_id,
+            AircraftStatutoryCertificate.is_deleted == False,
+        )
+    elif regulatory_compliance == "organizational-approvals":
+        stmt = select(OrganizationalApproval).where(
+            OrganizationalApproval.id == row_id,
+            OrganizationalApproval.is_deleted == False,
+        )
+    elif regulatory_compliance == "oem-technical-publication":
+        stmt = select(OemTechnicalPublication).where(
+            OemTechnicalPublication.id == row_id,
+            OemTechnicalPublication.is_deleted == False,
+        )
+    else:
+        raise ValueError("Invalid regulatory_compliance")
+
+    result = await session.execute(stmt)
+    instance = result.scalars().one_or_none()
+    if not instance:
+        raise ValueError("Advisory item not found")
+    return instance
+
+
+async def write_advisory_update_audit_log(
+    session: AsyncSession,
+    *,
+    regulatory_compliance: RegulatoryComplianceSource,
+    row_id: int,
+    old_data: Optional[Dict[str, Any]],
+    audit_user: Optional[AccountInformation],
+    audit_request: Optional[Request] = None,
+) -> None:
+    """Persist UPDATE audit log for advisory renew/withhold after commit."""
+    module_name, table_name = _audit_names_for_regulatory_compliance(regulatory_compliance)
+    new_row = await _load_advisory_row(session, regulatory_compliance, row_id)
+    await create_audit_log(
+        db=session,
+        module_name=module_name,
+        table_name=table_name,
+        record_id=row_id,
+        action=AuditAction.UPDATE,
+        old_data=old_data,
+        new_data=new_row,
+        current_user=audit_user,
+        request=audit_request,
+    )
+
+
 async def _latest_auth_issue_date_for_account(
     session: AsyncSession,
     account_information_id: int,
@@ -397,6 +497,7 @@ async def update_advisory_expiry(
 ) -> Tuple[
     Optional[OrganizationalApprovalHistoryCreate],
     Optional[AircraftStatutoryCertificateHistoryCreate],
+    Optional[Dict[str, Any]],
 ]:
     """Update expiry for an advisory item by id and regulatory_compliance.
 
@@ -416,6 +517,7 @@ async def update_advisory_expiry(
     """
     history_oa: Optional[OrganizationalApprovalHistoryCreate] = None
     history_asc: Optional[AircraftStatutoryCertificateHistoryCreate] = None
+    old_data_snapshot: Optional[Dict[str, Any]] = None
 
     if regulatory_compliance == "personnel-compliance":
         stmt = select(PersonnelCompliance).where(
@@ -426,6 +528,7 @@ async def update_advisory_expiry(
         instance = result.scalars().one_or_none()
         if not instance:
             raise ValueError("Advisory item not found")
+        old_data_snapshot = serialize_audit_data(instance)
         instance.expiry_date = expiry
         if auth_issue_date is not None:
             instance.auth_issue_date = auth_issue_date
@@ -438,6 +541,7 @@ async def update_advisory_expiry(
         instance = result.scalars().one_or_none()
         if not instance:
             raise ValueError("Advisory item not found")
+        old_data_snapshot = serialize_audit_data(instance)
         history_asc = AircraftStatutoryCertificateHistoryCreate(
             aircraft_fk=instance.aircraft_fk,
             asc_history=instance.id,
@@ -457,6 +561,7 @@ async def update_advisory_expiry(
         instance = result.scalars().one_or_none()
         if not instance:
             raise ValueError("Advisory item not found")
+        old_data_snapshot = serialize_audit_data(instance)
         history_oa = OrganizationalApprovalHistoryCreate(
             certificate_fk=instance.certificate_fk,
             oa_history=instance.id,
@@ -476,6 +581,7 @@ async def update_advisory_expiry(
         instance = result.scalars().one_or_none()
         if not instance:
             raise ValueError("Advisory item not found")
+        old_data_snapshot = serialize_audit_data(instance)
         instance.date_of_expiration = expiry
         if web_link is not None:
             instance.web_link = _normalize_advisory_web_link(web_link)
@@ -483,7 +589,7 @@ async def update_advisory_expiry(
         raise ValueError("Invalid regulatory_compliance")
     if audit_account_id is not None:
         await set_audit_fields(instance, audit_account_id, is_create=False)
-    return history_oa, history_asc
+    return history_oa, history_asc, old_data_snapshot
 
 
 async def update_advisory_withhold(
@@ -492,6 +598,8 @@ async def update_advisory_withhold(
     id: int,
     *,
     audit_account_id: Optional[int] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> None:
     """Set is_withhold=True for an advisory item by id and regulatory_compliance.
 
@@ -534,7 +642,17 @@ async def update_advisory_withhold(
     if not instance:
         raise ValueError("Advisory item not found")
 
+    old_data_snapshot = serialize_audit_data(instance)
     instance.is_withhold = True
     if audit_account_id is not None:
         await set_audit_fields(instance, audit_account_id, is_create=False)
     await session.commit()
+
+    await write_advisory_update_audit_log(
+        session,
+        regulatory_compliance=regulatory_compliance,
+        row_id=id,
+        old_data=old_data_snapshot,
+        audit_user=audit_user,
+        audit_request=audit_request,
+    )

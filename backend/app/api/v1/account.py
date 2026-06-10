@@ -6,6 +6,7 @@ from fastapi import (
     Depends,
     Query,
     HTTPException,
+    Request,
     status
 )
 
@@ -27,6 +28,10 @@ from app.repository.account import (
     get_all_account_informations_list,
 )
 from app.api.deps import get_current_active_account, get_current_active_account_optional
+from app.constants.audit import (
+    ACCOUNT_INFORMATION_MODULE_NAME,
+    ACCOUNT_INFORMATION_TABLE_NAME,
+)
 from app.database import get_session
 from app.models.account import AccountInformation
 
@@ -148,6 +153,7 @@ async def api_get(
     status_code=status.HTTP_201_CREATED
 )
 async def api_create(
+    request: Request,
     payload: account_schema.AccountInformationCreate,
     session: AsyncSession = Depends(get_session),
     current_account: Optional[AccountInformation] = Depends(
@@ -164,6 +170,10 @@ async def api_create(
         session,
         payload,
         audit_account_id=audit_id,
+        audit_module_name=ACCOUNT_INFORMATION_MODULE_NAME,
+        audit_table_name=ACCOUNT_INFORMATION_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
 
@@ -172,6 +182,7 @@ async def api_create(
     response_model=account_schema.AccountInformationRead
 )
 async def api_update(
+    request: Request,
     account_id: int,
     account_in: account_schema.AccountInformationUpdate,
     session: AsyncSession = Depends(get_session),
@@ -183,6 +194,10 @@ async def api_update(
         account_id=account_id,
         account_in=account_in,
         audit_account_id=current_account.id,
+        audit_module_name=ACCOUNT_INFORMATION_MODULE_NAME,
+        audit_table_name=ACCOUNT_INFORMATION_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
     if not updated:
@@ -199,11 +214,20 @@ async def api_update(
     status_code=status.HTTP_204_NO_CONTENT
 )
 async def api_delete(
+    request: Request,
     account_id: int,
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Soft delete an Account Information entry."""
-    deleted = await soft_delete_account_information(session, account_id)
+    deleted = await soft_delete_account_information(
+        session,
+        account_id,
+        audit_module_name=ACCOUNT_INFORMATION_MODULE_NAME,
+        audit_table_name=ACCOUNT_INFORMATION_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
 
     if not deleted:
         raise HTTPException(

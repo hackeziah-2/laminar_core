@@ -584,3 +584,59 @@ def test_latest_with_sequence_no_returns_previous_atl(
         "/api/v1/aircraft-technical-log/latest?sequence_no=1006"
     )
     assert no_aircraft.status_code == 422
+
+
+def test_atl_create_writes_audit_log(
+    client_with_atl_auth: TestClient,
+    test_aircraft_technical_log_data: dict,
+):
+    """ATL create should persist a CREATE audit log after commit."""
+    from app.constants.audit import ATL_MODULE_NAME
+
+    create_response = client_with_atl_auth.post(
+        "/api/v1/aircraft-technical-log/",
+        json=test_aircraft_technical_log_data,
+    )
+    assert create_response.status_code == 201
+    log_id = create_response.json()["id"]
+
+    audit_response = client_with_atl_auth.get(
+        f"/api/v1/audit-logs/?module_name={ATL_MODULE_NAME}&record_id={log_id}"
+    )
+    assert audit_response.status_code == 200
+    payload = audit_response.json()
+    create_logs = [item for item in payload["items"] if item["action"] == "CREATE"]
+    assert len(create_logs) == 1
+    assert create_logs[0]["table_name"] == "aircraft_technical_log"
+    assert create_logs[0]["new_data"]["sequence_no"] == "001"
+
+
+def test_atl_delete_writes_audit_log(
+    client_with_atl_auth: TestClient,
+    test_aircraft_technical_log_data: dict,
+):
+    """ATL delete should persist a DELETE audit log after commit."""
+    from app.constants.audit import ATL_MODULE_NAME
+
+    create_response = client_with_atl_auth.post(
+        "/api/v1/aircraft-technical-log/",
+        json=test_aircraft_technical_log_data,
+    )
+    assert create_response.status_code == 201
+    log_id = create_response.json()["id"]
+
+    delete_response = client_with_atl_auth.delete(
+        f"/api/v1/aircraft-technical-log/{log_id}"
+    )
+    assert delete_response.status_code == 204
+
+    audit_response = client_with_atl_auth.get(
+        f"/api/v1/audit-logs/?module_name={ATL_MODULE_NAME}&record_id={log_id}&action=DELETE"
+    )
+    assert audit_response.status_code == 200
+    payload = audit_response.json()
+    assert payload["total"] >= 1
+    delete_log = payload["items"][0]
+    assert delete_log["action"] == "DELETE"
+    assert delete_log["old_data"] is not None
+    assert delete_log["new_data"] is None

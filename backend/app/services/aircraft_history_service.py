@@ -4,14 +4,17 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any, Dict, Iterable, Optional, Tuple
 
-from fastapi import HTTPException, UploadFile
+from fastapi import HTTPException, Request, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import set_audit_fields
+from app.models.account import AccountInformation
 from app.models.aircraft import Aircraft
 from app.models.aircraft_history import AircraftHistory
+from app.models.audit_log import AuditAction
+from app.services.audit_trail_service import create_audit_log, serialize_audit_data
 from app.repository.aircraft import _persist_upload_file
 from app.schemas.aircraft_history_schema import (
     AircraftHistoryRead,
@@ -136,6 +139,10 @@ async def update_aircraft_with_history(
     *,
     engine_file: UploadFile = None,
     propeller_file: UploadFile = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> AircraftUpdateWithHistoryResponse:
     result = await session.execute(select(Aircraft).where(Aircraft.id == aircraft_id))
     aircraft = result.scalar_one_or_none()
@@ -153,6 +160,7 @@ async def update_aircraft_with_history(
 
     await _validate_unique_fields(session, aircraft_id, update_data)
 
+    old_data_snapshot = serialize_audit_data(aircraft)
     old_data = _extract_old_values(aircraft, update_data.keys())
     changes = track_changes(old_data, update_data, user_id)
 
@@ -186,6 +194,19 @@ async def update_aircraft_with_history(
     await session.commit()
     await session.refresh(aircraft)
 
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=aircraft.id,
+            action=AuditAction.UPDATE,
+            old_data=old_data_snapshot,
+            new_data=aircraft,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     for history in history_rows:
         await session.refresh(history)
 
@@ -203,6 +224,10 @@ async def update_aircraft_and_log_history(
     *,
     engine_file: UploadFile = None,
     propeller_file: UploadFile = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> AircraftOut:
     result = await update_aircraft_with_history(
         session=session,
@@ -211,5 +236,9 @@ async def update_aircraft_and_log_history(
         user_id=user_id,
         engine_file=engine_file,
         propeller_file=propeller_file,
+        audit_module_name=audit_module_name,
+        audit_table_name=audit_table_name,
+        audit_user=audit_user,
+        audit_request=audit_request,
     )
     return result.aircraft

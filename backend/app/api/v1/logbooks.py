@@ -10,6 +10,7 @@ from fastapi import (
     UploadFile,
     File,
     Form,
+    Request,
     status
 )
 
@@ -43,6 +44,16 @@ from app.repository.logbooks import (
     soft_delete_propeller_logbook,
 )
 from app.api.deps import get_current_active_account
+from app.constants.audit import (
+    ENGINE_LOGBOOK_MODULE_NAME,
+    ENGINE_LOGBOOK_TABLE_NAME,
+    AIRFRAME_LOGBOOK_MODULE_NAME,
+    AIRFRAME_LOGBOOK_TABLE_NAME,
+    AVIONICS_LOGBOOK_MODULE_NAME,
+    AVIONICS_LOGBOOK_TABLE_NAME,
+    PROPELLER_LOGBOOK_MODULE_NAME,
+    PROPELLER_LOGBOOK_TABLE_NAME,
+)
 from app.database import get_session
 from app.models.account import AccountInformation
 
@@ -197,6 +208,7 @@ async def api_get_engine_logbook(
     response_description="Created Engine Logbook entry"
 )
 async def api_create_engine_logbook(
+    request: Request,
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
@@ -216,6 +228,10 @@ async def api_create_engine_logbook(
         payload,
         upload_file,
         audit_account_id=current_account.id,
+        audit_module_name=ENGINE_LOGBOOK_MODULE_NAME,
+        audit_table_name=ENGINE_LOGBOOK_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
 
@@ -228,6 +244,7 @@ async def api_create_engine_logbook(
     response_description="Updated Engine Logbook entry"
 )
 async def api_update_engine_logbook(
+    request: Request,
     logbook_id: int,
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
@@ -250,6 +267,10 @@ async def api_update_engine_logbook(
         logbook_in=logbook_in,
         upload_file=upload_file,
         audit_account_id=current_account.id,
+        audit_module_name=ENGINE_LOGBOOK_MODULE_NAME,
+        audit_table_name=ENGINE_LOGBOOK_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
     if not updated:
@@ -271,11 +292,20 @@ async def api_update_engine_logbook(
     response_description="No content on successful deletion"
 )
 async def api_delete_engine_logbook(
+    request: Request,
     logbook_id: int,
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Soft delete an Engine Logbook entry."""
-    deleted = await soft_delete_engine_logbook(session, logbook_id)
+    deleted = await soft_delete_engine_logbook(
+        session,
+        logbook_id,
+        audit_module_name=ENGINE_LOGBOOK_MODULE_NAME,
+        audit_table_name=ENGINE_LOGBOOK_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
 
     if not deleted:
         raise HTTPException(
@@ -347,6 +377,7 @@ async def api_get_airframe_logbook(
     status_code=status.HTTP_201_CREATED
 )
 async def api_create_airframe_logbook(
+    request: Request,
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
@@ -366,6 +397,10 @@ async def api_create_airframe_logbook(
         payload,
         upload_file,
         audit_account_id=current_account.id,
+        audit_module_name=AIRFRAME_LOGBOOK_MODULE_NAME,
+        audit_table_name=AIRFRAME_LOGBOOK_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
 
@@ -374,6 +409,7 @@ async def api_create_airframe_logbook(
     response_model=logbook_schema.AirframeLogbookRead
 )
 async def api_update_airframe_logbook(
+    request: Request,
     logbook_id: int,
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
@@ -396,6 +432,10 @@ async def api_update_airframe_logbook(
         logbook_in=logbook_in,
         upload_file=upload_file,
         audit_account_id=current_account.id,
+        audit_module_name=AIRFRAME_LOGBOOK_MODULE_NAME,
+        audit_table_name=AIRFRAME_LOGBOOK_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
     if not updated:
@@ -412,11 +452,20 @@ async def api_update_airframe_logbook(
     status_code=status.HTTP_204_NO_CONTENT
 )
 async def api_delete_airframe_logbook(
+    request: Request,
     logbook_id: int,
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Soft delete an Airframe Logbook entry."""
-    deleted = await soft_delete_airframe_logbook(session, logbook_id)
+    deleted = await soft_delete_airframe_logbook(
+        session,
+        logbook_id,
+        audit_module_name=AIRFRAME_LOGBOOK_MODULE_NAME,
+        audit_table_name=AIRFRAME_LOGBOOK_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
 
     if not deleted:
         raise HTTPException(
@@ -488,6 +537,7 @@ async def api_get_avionics_logbook(
     status_code=status.HTTP_201_CREATED
 )
 async def api_create_avionics_logbook(
+    request: Request,
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
@@ -507,6 +557,10 @@ async def api_create_avionics_logbook(
         payload,
         upload_file,
         audit_account_id=current_account.id,
+        audit_module_name=AVIONICS_LOGBOOK_MODULE_NAME,
+        audit_table_name=AVIONICS_LOGBOOK_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
 
@@ -515,6 +569,7 @@ async def api_create_avionics_logbook(
     response_model=logbook_schema.AvionicsLogbookRead
 )
 async def api_update_avionics_logbook(
+    request: Request,
     logbook_id: int,
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
@@ -537,6 +592,10 @@ async def api_update_avionics_logbook(
         logbook_in=logbook_in,
         upload_file=upload_file,
         audit_account_id=current_account.id,
+        audit_module_name=AVIONICS_LOGBOOK_MODULE_NAME,
+        audit_table_name=AVIONICS_LOGBOOK_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
     if not updated:
@@ -553,11 +612,20 @@ async def api_update_avionics_logbook(
     status_code=status.HTTP_204_NO_CONTENT
 )
 async def api_delete_avionics_logbook(
+    request: Request,
     logbook_id: int,
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Soft delete an Avionics Logbook entry."""
-    deleted = await soft_delete_avionics_logbook(session, logbook_id)
+    deleted = await soft_delete_avionics_logbook(
+        session,
+        logbook_id,
+        audit_module_name=AVIONICS_LOGBOOK_MODULE_NAME,
+        audit_table_name=AVIONICS_LOGBOOK_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
 
     if not deleted:
         raise HTTPException(
@@ -626,6 +694,7 @@ async def api_get_propeller_logbook(
     status_code=status.HTTP_201_CREATED
 )
 async def api_create_propeller_logbook(
+    request: Request,
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
     session: AsyncSession = Depends(get_session),
@@ -644,6 +713,10 @@ async def api_create_propeller_logbook(
         payload,
         upload_file,
         audit_account_id=current_account.id,
+        audit_module_name=PROPELLER_LOGBOOK_MODULE_NAME,
+        audit_table_name=PROPELLER_LOGBOOK_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
 
@@ -652,6 +725,7 @@ async def api_create_propeller_logbook(
     response_model=logbook_schema.PropellerLogbookRead
 )
 async def api_update_propeller_logbook(
+    request: Request,
     logbook_id: int,
     json_data: str = Form(...),
     upload_file: UploadFile = File(None),
@@ -673,6 +747,10 @@ async def api_update_propeller_logbook(
         logbook_in=logbook_in,
         upload_file=upload_file,
         audit_account_id=current_account.id,
+        audit_module_name=PROPELLER_LOGBOOK_MODULE_NAME,
+        audit_table_name=PROPELLER_LOGBOOK_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
     if not updated:
@@ -689,11 +767,20 @@ async def api_update_propeller_logbook(
     status_code=status.HTTP_204_NO_CONTENT
 )
 async def api_delete_propeller_logbook(
+    request: Request,
     logbook_id: int,
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Soft delete a Propeller Logbook entry."""
-    deleted = await soft_delete_propeller_logbook(session, logbook_id)
+    deleted = await soft_delete_propeller_logbook(
+        session,
+        logbook_id,
+        audit_module_name=PROPELLER_LOGBOOK_MODULE_NAME,
+        audit_table_name=PROPELLER_LOGBOOK_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
 
     if not deleted:
         raise HTTPException(

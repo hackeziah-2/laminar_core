@@ -45,7 +45,6 @@ def test_resolve_auto_fields_handles_deep_predecessor_chain_without_recursion(
         async with TestSessionLocal() as session:
             ac = Aircraft(
                 registration="TEST-ATL-DEEP",
-                manufacturer="Cessna",
                 model="172",
                 msn="TEST-MSN-DEEP",
                 base="Base",
@@ -94,7 +93,6 @@ def test_get_atl_uses_stored_auto_fields_without_predecessor_queries(
         async with TestSessionLocal() as session:
             ac = Aircraft(
                 registration="TEST-ATL-STORED",
-                manufacturer="Cessna",
                 model="172",
                 msn="TEST-MSN-STORED",
                 base="Base",
@@ -163,7 +161,6 @@ def test_batch_resolve_matches_chain_for_three_row_sequence(
         async with TestSessionLocal() as session:
             ac = Aircraft(
                 registration="TEST-ATL-BATCH",
-                manufacturer="Cessna",
                 model="172",
                 msn="TEST-MSN-BATCH",
                 base="Base",

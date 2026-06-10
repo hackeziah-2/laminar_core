@@ -173,7 +173,6 @@ def test_atl_import_backfills_persisted_auto_columns(
         async with TestSessionLocal() as session:
             ac = Aircraft(
                 registration="ATL-IMP-BF",
-                manufacturer="Cessna",
                 model="172",
                 msn="ATL-MSN-BF",
                 base="Base",
@@ -236,7 +235,6 @@ def test_atl_import_batch_not_found(
         async with TestSessionLocal() as session:
             ac = Aircraft(
                 registration="ATL-IMP-AC",
-                manufacturer="Cessna",
                 model="172",
                 msn="ATL-MSN-1",
                 base="Base",
@@ -287,7 +285,6 @@ def test_ad_import_dry_run_success(
         async with TestSessionLocal() as session:
             ac = Aircraft(
                 registration="AD-IMP-AC",
-                manufacturer="Cessna",
                 model="172",
                 msn="AD-MSN-1",
                 base="Base",
@@ -326,7 +323,6 @@ def test_ad_import_dry_run_date_formats(
         async with TestSessionLocal() as session:
             ac = Aircraft(
                 registration="AD-DATE-AC",
-                manufacturer="Cessna",
                 model="172",
                 msn="AD-DATE-MSN",
                 base="Base",
@@ -379,7 +375,6 @@ def test_ad_import_upserts_on_ad_number(
         async with TestSessionLocal() as session:
             ac = Aircraft(
                 registration="AD-UPSERT-AC",
-                manufacturer="Cessna",
                 model="172",
                 msn="AD-UPSERT-MSN",
                 base="Base",
@@ -449,7 +444,6 @@ def test_ad_work_order_import_dry_run_success(
         async with TestSessionLocal() as session:
             ac = Aircraft(
                 registration="AD-WO-AC",
-                manufacturer="Cessna",
                 model="172",
                 msn="AD-WO-MSN",
                 base="Base",
@@ -497,7 +491,6 @@ def test_ad_work_order_import_dry_run_date_formats(
         async with TestSessionLocal() as session:
             ac = Aircraft(
                 registration="AD-WO-DATE-AC",
-                manufacturer="Cessna",
                 model="172",
                 msn="AD-WO-DATE-MSN",
                 base="Base",
@@ -565,7 +558,6 @@ def test_ad_work_order_import_upserts_on_work_order_number(
         async with TestSessionLocal() as session:
             ac = Aircraft(
                 registration="AD-WO-UPSERT-AC",
-                manufacturer="Cessna",
                 model="172",
                 msn="AD-WO-UPSERT-MSN",
                 base="Base",
@@ -646,7 +638,6 @@ def test_ldnd_import_dry_run_multiple_rows_same_inspection_type(
         async with TestSessionLocal() as session:
             ac = Aircraft(
                 registration="LDND-MULTI-AC",
-                manufacturer="Cessna",
                 model="172",
                 msn="LDND-MULTI-MSN",
                 base="Base",
@@ -714,7 +705,6 @@ def test_ldnd_import_dry_run_success(
         async with TestSessionLocal() as session:
             ac = Aircraft(
                 registration="LDND-IMP-AC",
-                manufacturer="Cessna",
                 model="172",
                 msn="LDND-MSN-1",
                 base="Base",
@@ -768,7 +758,6 @@ def test_tcc_import_dry_run_success(
         async with TestSessionLocal() as session:
             ac = Aircraft(
                 registration="TCC-IMP-AC",
-                manufacturer="Cessna",
                 model="172",
                 msn="TCC-MSN-1",
                 base="Base",
@@ -808,7 +797,6 @@ def test_tcc_import_dry_run_sequence_no_column_maps_to_atl_sequence(
         async with TestSessionLocal() as session:
             ac = Aircraft(
                 registration="TCC-SEQ-COL-AC",
-                manufacturer="Cessna",
                 model="172",
                 msn="TCC-SEQ-MSN",
                 base="Base",
@@ -851,7 +839,6 @@ def test_tcc_import_inspection_servicing_category_alias(
         async with TestSessionLocal() as session:
             ac = Aircraft(
                 registration="TCC-CAT-AC",
-                manufacturer="Cessna",
                 model="172",
                 msn="TCC-CAT-MSN",
                 base="Base",
@@ -897,7 +884,6 @@ def test_tcc_import_persist_without_part_number(
         async with TestSessionLocal() as session:
             ac = Aircraft(
                 registration="TCC-PERSIST-AC",
-                manufacturer="Cessna",
                 model="172",
                 msn="TCC-PERSIST-MSN",
                 base="Base",
@@ -989,7 +975,6 @@ def test_cpcp_import_dry_run_success(
         async with TestSessionLocal() as session:
             ac = Aircraft(
                 registration="CPCP-IMP-AC",
-                manufacturer="Cessna",
                 model="172",
                 msn="CPCP-MSN-1",
                 base="Base",
@@ -1029,7 +1014,6 @@ def test_cpcp_import_dry_run_date_formats(
         async with TestSessionLocal() as session:
             ac = Aircraft(
                 registration="CPCP-DATE-AC",
-                manufacturer="Cessna",
                 model="172",
                 msn="CPCP-DATE-MSN",
                 base="Base",

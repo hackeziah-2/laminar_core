@@ -31,7 +31,6 @@ def test_list_aircraft_minimal(client: TestClient):
     payloads = [
         {
             "registration": "TEST-002",
-            "manufacturer": "Boeing",
             "model": "737-800",
             "msn": "TEST-MSN-002",
             "base": "Test Base",
@@ -40,7 +39,6 @@ def test_list_aircraft_minimal(client: TestClient):
         },
         {
             "registration": "TEST-001",
-            "manufacturer": "Airbus",
             "model": "A320",
             "msn": "TEST-MSN-001",
             "base": "Test Base",
@@ -443,7 +441,6 @@ def test_list_aircraft_pagination(client: TestClient):
     for i in range(5):
         aircraft_data = {
             "registration": f"TEST-{i:03d}",
-            "manufacturer": "Boeing",
             "model": "737-800",
             "msn": f"TEST-MSN-{i:03d}",
             "base": "Test Base",

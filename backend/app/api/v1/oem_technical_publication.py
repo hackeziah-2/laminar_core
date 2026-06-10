@@ -1,7 +1,7 @@
 from math import ceil
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, HTTPException, status
+from fastapi import APIRouter, Depends, Query, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.oem_technical_publication_schema import (
@@ -19,6 +19,10 @@ from app.repository.oem_technical_publication import (
     soft_delete_oem_technical_publication,
 )
 from app.api.deps import get_current_active_account
+from app.constants.audit import (
+    OEM_TECHNICAL_PUBLICATION_MODULE_NAME,
+    OEM_TECHNICAL_PUBLICATION_TABLE_NAME,
+)
 from app.database import get_session
 from app.models.account import AccountInformation
 
@@ -81,18 +85,26 @@ async def api_get(
     status_code=status.HTTP_201_CREATED,
 )
 async def api_create(
+    request: Request,
     payload: OemTechnicalPublicationCreate,
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create an OEM technical publication."""
     return await create_oem_technical_publication(
-        session, payload, audit_account_id=current_account.id
+        session,
+        payload,
+        audit_account_id=current_account.id,
+        audit_module_name=OEM_TECHNICAL_PUBLICATION_MODULE_NAME,
+        audit_table_name=OEM_TECHNICAL_PUBLICATION_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
 
 @router.put("/{publication_id}", response_model=OemTechnicalPublicationRead)
 async def api_update(
+    request: Request,
     publication_id: int,
     payload: OemTechnicalPublicationUpdate,
     session: AsyncSession = Depends(get_session),
@@ -104,6 +116,10 @@ async def api_update(
         publication_id,
         payload,
         audit_account_id=current_account.id,
+        audit_module_name=OEM_TECHNICAL_PUBLICATION_MODULE_NAME,
+        audit_table_name=OEM_TECHNICAL_PUBLICATION_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OEM technical publication not found")
@@ -112,11 +128,20 @@ async def api_update(
 
 @router.delete("/{publication_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def api_delete(
+    request: Request,
     publication_id: int,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Soft delete an OEM technical publication."""
-    deleted = await soft_delete_oem_technical_publication(session, publication_id)
+    deleted = await soft_delete_oem_technical_publication(
+        session,
+        publication_id,
+        audit_module_name=OEM_TECHNICAL_PUBLICATION_MODULE_NAME,
+        audit_table_name=OEM_TECHNICAL_PUBLICATION_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OEM technical publication not found")
     return None

@@ -1,7 +1,7 @@
 from math import ceil
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, HTTPException, status
+from fastapi import APIRouter, Depends, Query, HTTPException, Request, status
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +18,7 @@ from app.repository.tcc_maintenance import (
 )
 from app.repository.aircraft import get_aircraft
 from app.api.deps import get_current_active_account
+from app.constants.audit import TCC_MAINTENANCE_MODULE_NAME, TCC_MAINTENANCE_TABLE_NAME
 from app.database import get_session
 from app.models.account import AccountInformation
 from app.services.tcc_computation import fetch_latest_atl_tach_aftt
@@ -103,13 +104,20 @@ async def api_get_tcc_maintenance(
     description="Create a new TCC Maintenance entry. Required: aircraft_fk, part_number. Optional: atl_ref.",
 )
 async def api_create_tcc_maintenance(
+    request: Request,
     payload: tcc_maintenance_schema.TCCMaintenanceCreate,
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new TCC Maintenance entry."""
     return await create_tcc_maintenance(
-        session, payload, audit_account_id=current_account.id
+        session,
+        payload,
+        audit_account_id=current_account.id,
+        audit_module_name=TCC_MAINTENANCE_MODULE_NAME,
+        audit_table_name=TCC_MAINTENANCE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
 
@@ -120,6 +128,7 @@ async def api_create_tcc_maintenance(
     description="Update an existing TCC Maintenance entry. Only provided fields are updated. Returns 404 if not found.",
 )
 async def api_update_tcc_maintenance(
+    request: Request,
     maintenance_id: int,
     payload: tcc_maintenance_schema.TCCMaintenanceUpdate,
     session: AsyncSession = Depends(get_session),
@@ -131,6 +140,10 @@ async def api_update_tcc_maintenance(
         maintenance_id,
         payload,
         audit_account_id=current_account.id,
+        audit_module_name=TCC_MAINTENANCE_MODULE_NAME,
+        audit_table_name=TCC_MAINTENANCE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not updated:
         raise HTTPException(
@@ -147,11 +160,20 @@ async def api_update_tcc_maintenance(
     description="Soft delete a TCC Maintenance entry (sets is_deleted). Returns 404 if not found.",
 )
 async def api_delete_tcc_maintenance(
+    request: Request,
     maintenance_id: int,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Soft delete a TCC Maintenance entry."""
-    deleted = await soft_delete_tcc_maintenance(session, maintenance_id)
+    deleted = await soft_delete_tcc_maintenance(
+        session,
+        maintenance_id,
+        audit_module_name=TCC_MAINTENANCE_MODULE_NAME,
+        audit_table_name=TCC_MAINTENANCE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -237,6 +259,7 @@ async def api_get_tcc_maintenance_by_aircraft(
     description="Create a new TCC Maintenance entry for the given aircraft. aircraft_id from path is required; part_number required in body. atl_ref optional.",
 )
 async def api_create_tcc_maintenance_by_aircraft(
+    request: Request,
     aircraft_id: int,
     payload: tcc_maintenance_schema.TCCMaintenanceCreate,
     session: AsyncSession = Depends(get_session),
@@ -251,7 +274,13 @@ async def api_create_tcc_maintenance_by_aircraft(
     data["aircraft_fk"] = aircraft_id
     create_payload = tcc_maintenance_schema.TCCMaintenanceCreate(**data)
     return await create_tcc_maintenance(
-        session, create_payload, audit_account_id=current_account.id
+        session,
+        create_payload,
+        audit_account_id=current_account.id,
+        audit_module_name=TCC_MAINTENANCE_MODULE_NAME,
+        audit_table_name=TCC_MAINTENANCE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
 
@@ -262,6 +291,7 @@ async def api_create_tcc_maintenance_by_aircraft(
     description="Update TCC entry. atl_ref: set from ATL search GET /api/v1/aircraft-technical-log/search?search={sequence_no}&aircraft_id={aircraft_id}; use response item id.",
 )
 async def api_update_tcc_maintenance_by_aircraft(
+    request: Request,
     aircraft_id: int,
     maintenance_id: int,
     payload: tcc_maintenance_schema.TCCMaintenanceUpdate,
@@ -277,6 +307,10 @@ async def api_update_tcc_maintenance_by_aircraft(
         maintenance_id,
         payload,
         audit_account_id=current_account.id,
+        audit_module_name=TCC_MAINTENANCE_MODULE_NAME,
+        audit_table_name=TCC_MAINTENANCE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not updated:
         raise HTTPException(status_code=404, detail="TCC Maintenance not found")
@@ -289,13 +323,21 @@ async def api_update_tcc_maintenance_by_aircraft(
     summary="Soft delete TCC Maintenance for aircraft",
 )
 async def api_delete_tcc_maintenance_by_aircraft(
+    request: Request,
     aircraft_id: int,
     maintenance_id: int,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Soft delete a TCC Maintenance entry for a specific aircraft."""
     deleted = await soft_delete_tcc_maintenance_by_aircraft(
-        session, maintenance_id, aircraft_id
+        session,
+        maintenance_id,
+        aircraft_id,
+        audit_module_name=TCC_MAINTENANCE_MODULE_NAME,
+        audit_table_name=TCC_MAINTENANCE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not deleted:
         raise HTTPException(

@@ -1,10 +1,14 @@
 from math import ceil
 from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_permission
+from app.constants.audit import (
+    PERSONNEL_COMPLIANCE_MODULE_NAME as PERSONNEL_COMPLIANCE_AUDIT_MODULE_NAME,
+    PERSONNEL_COMPLIANCE_TABLE_NAME,
+)
 from app.database import get_session
 from app.models.account import AccountInformation
 from app.models.personnel_compliance import (
@@ -138,6 +142,7 @@ async def api_list_paged(
 @router.post("", response_model=PersonnelComplianceRead, status_code=status.HTTP_201_CREATED)
 @router.post("/", response_model=PersonnelComplianceRead, status_code=status.HTTP_201_CREATED)
 async def api_create(
+    request: Request,
     payload: PersonnelComplianceCreate,
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(
@@ -145,7 +150,13 @@ async def api_create(
     ),
 ):
     return await create_personnel_compliance(
-        session, payload, audit_account_id=current_account.id
+        session,
+        payload,
+        audit_account_id=current_account.id,
+        audit_module_name=PERSONNEL_COMPLIANCE_AUDIT_MODULE_NAME,
+        audit_table_name=PERSONNEL_COMPLIANCE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
 
@@ -168,6 +179,7 @@ async def api_get(
 
 @router.put("/{compliance_id}", response_model=PersonnelComplianceRead)
 async def api_update(
+    request: Request,
     compliance_id: int = Path(..., ge=1, description="Personnel compliance ID"),
     payload: PersonnelComplianceUpdate = Body(...),
     session: AsyncSession = Depends(get_session),
@@ -180,6 +192,10 @@ async def api_update(
         compliance_id,
         payload,
         audit_account_id=current_account.id,
+        audit_module_name=PERSONNEL_COMPLIANCE_AUDIT_MODULE_NAME,
+        audit_table_name=PERSONNEL_COMPLIANCE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not updated:
         raise HTTPException(
@@ -191,13 +207,21 @@ async def api_update(
 
 @router.delete("/{compliance_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def api_delete(
+    request: Request,
     compliance_id: int = Path(..., ge=1, description="Personnel compliance ID"),
     session: AsyncSession = Depends(get_session),
-    _: AccountInformation = Depends(
+    current_account: AccountInformation = Depends(
         require_permission(PERSONNEL_COMPLIANCE_MODULE_NAME, "can_delete")
     ),
 ):
-    deleted = await soft_delete_personnel_compliance(session, compliance_id)
+    deleted = await soft_delete_personnel_compliance(
+        session,
+        compliance_id,
+        audit_module_name=PERSONNEL_COMPLIANCE_AUDIT_MODULE_NAME,
+        audit_table_name=PERSONNEL_COMPLIANCE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

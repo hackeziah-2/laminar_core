@@ -1,7 +1,7 @@
 from math import ceil
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, Query, HTTPException, status
+from fastapi import APIRouter, Depends, Query, HTTPException, Request, status
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +20,10 @@ from app.repository.organizational_approval import (
     soft_delete_organizational_approval,
 )
 from app.api.deps import get_current_active_account
+from app.constants.audit import (
+    ORGANIZATIONAL_APPROVAL_MODULE_NAME,
+    ORGANIZATIONAL_APPROVAL_TABLE_NAME,
+)
 from app.database import get_session
 from app.models.account import AccountInformation
 
@@ -90,6 +94,7 @@ async def api_get(
     status_code=status.HTTP_201_CREATED,
 )
 async def api_create(
+    request: Request,
     body: OrganizationalApprovalCreateRequestBody,
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
@@ -100,6 +105,10 @@ async def api_create(
             session,
             body.json_data,
             audit_account_id=current_account.id,
+            audit_module_name=ORGANIZATIONAL_APPROVAL_MODULE_NAME,
+            audit_table_name=ORGANIZATIONAL_APPROVAL_TABLE_NAME,
+            audit_user=current_account,
+            audit_request=request,
         )
     except ValidationError as e:
         raise HTTPException(
@@ -113,10 +122,11 @@ async def api_create(
 
 
 async def _api_update_impl(
+    request: Request,
     approval_id: int,
     body: OrganizationalApprovalUpdateRequestBody,
     session: AsyncSession,
-    audit_account_id: int,
+    current_account: AccountInformation,
 ):
     """Shared update logic for PUT and PATCH."""
     try:
@@ -124,7 +134,11 @@ async def _api_update_impl(
             session=session,
             approval_id=approval_id,
             data=body.json_data,
-            audit_account_id=audit_account_id,
+            audit_account_id=current_account.id,
+            audit_module_name=ORGANIZATIONAL_APPROVAL_MODULE_NAME,
+            audit_table_name=ORGANIZATIONAL_APPROVAL_TABLE_NAME,
+            audit_user=current_account,
+            audit_request=request,
         )
         if not updated:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organizational approval not found")
@@ -142,6 +156,7 @@ async def _api_update_impl(
 
 @router.put("/{approval_id}", response_model=OrganizationalApprovalRead)
 async def api_update(
+    request: Request,
     approval_id: int,
     body: OrganizationalApprovalUpdateRequestBody,
     session: AsyncSession = Depends(get_session),
@@ -149,12 +164,13 @@ async def api_update(
 ):
     """Update an organizational approval. Send JSON body: { \"json_data\": { certificate_fk?, number?, date_of_expiration?, web_link? } }."""
     return await _api_update_impl(
-        approval_id, body, session, current_account.id
+        request, approval_id, body, session, current_account
     )
 
 
 @router.patch("/{approval_id}", response_model=OrganizationalApprovalRead)
 async def api_patch(
+    request: Request,
     approval_id: int,
     body: OrganizationalApprovalUpdateRequestBody,
     session: AsyncSession = Depends(get_session),
@@ -162,17 +178,26 @@ async def api_patch(
 ):
     """Update an organizational approval (partial). Send JSON body: { \"json_data\": { ... } }."""
     return await _api_update_impl(
-        approval_id, body, session, current_account.id
+        request, approval_id, body, session, current_account
     )
 
 
 @router.delete("/{approval_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def api_delete(
+    request: Request,
     approval_id: int,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Soft delete an organizational approval."""
-    deleted = await soft_delete_organizational_approval(session, approval_id)
+    deleted = await soft_delete_organizational_approval(
+        session,
+        approval_id,
+        audit_module_name=ORGANIZATIONAL_APPROVAL_MODULE_NAME,
+        audit_table_name=ORGANIZATIONAL_APPROVAL_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organizational approval not found")
     return None
