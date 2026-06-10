@@ -50,3 +50,24 @@ PERSONNEL_COMPLIANCE_TABLE_NAME = "personnel_compliance"
 
 ACCOUNT_INFORMATION_MODULE_NAME = "account_information"
 ACCOUNT_INFORMATION_TABLE_NAME = "account_information"
+
+ATL_BATCH_MODULE_NAME = "atl_batch"
+ATL_BATCH_TABLE_NAME = "atl_batch"
+
+CERTIFICATE_CATEGORY_TYPE_MODULE_NAME = "certificate_category_types"
+CERTIFICATE_CATEGORY_TYPE_TABLE_NAME = "certificate_category_types"
+
+OEM_ITEM_TYPE_MODULE_NAME = "oem_item_types"
+OEM_ITEM_TYPE_TABLE_NAME = "oem_item_types"
+
+AUTHORIZATION_SCOPE_CESSNA_MODULE_NAME = "authorization_scope_cessna"
+AUTHORIZATION_SCOPE_CESSNA_TABLE_NAME = "authorization_scope_cessna"
+
+AUTHORIZATION_SCOPE_BARON_MODULE_NAME = "authorization_scope_baron"
+AUTHORIZATION_SCOPE_BARON_TABLE_NAME = "authorization_scope_baron"
+
+AUTHORIZATION_SCOPE_OTHERS_MODULE_NAME = "authorization_scope_others"
+AUTHORIZATION_SCOPE_OTHERS_TABLE_NAME = "authorization_scope_others"
+
+ROLE_MODULE_NAME = "roles"
+ROLE_TABLE_NAME = "roles"

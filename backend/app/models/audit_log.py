@@ -3,7 +3,7 @@ import enum
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.sql import func
 
-from app.database import Base
+from app.database import Base, ph_now
 
 
 class AuditAction(str, enum.Enum):
@@ -38,10 +38,19 @@ class AuditLog(Base):
     user_agent = Column(Text, nullable=True)
     created_at = Column(
         DateTime(timezone=True),
+        default=ph_now,
         server_default=func.now(),
         nullable=False,
         index=True,
     )
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=ph_now,
+        onupdate=ph_now,
+        server_default=func.now(),
+        nullable=False,
+    )
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
 
     def __repr__(self) -> str:
         return (

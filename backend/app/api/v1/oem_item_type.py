@@ -1,9 +1,13 @@
 from math import ceil
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, Query, HTTPException, status
+from fastapi import APIRouter, Depends, Query, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.constants.audit import (
+    OEM_ITEM_TYPE_MODULE_NAME,
+    OEM_ITEM_TYPE_TABLE_NAME,
+)
 from app.schemas.oem_item_type_schema import (
     OemItemTypeCreate,
     OemItemTypeUpdate,
@@ -79,19 +83,27 @@ async def api_get(
     status_code=status.HTTP_201_CREATED,
 )
 async def api_create(
+    request: Request,
     payload: OemItemTypeCreate,
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new OEM item type."""
     return await create_oem_item_type(
-        session, payload, audit_account_id=current_account.id
+        session,
+        payload,
+        audit_account_id=current_account.id,
+        audit_module_name=OEM_ITEM_TYPE_MODULE_NAME,
+        audit_table_name=OEM_ITEM_TYPE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
 
 @router.put("/{item_type_id}", response_model=OemItemTypeRead)
 async def api_update(
     item_type_id: int,
+    request: Request,
     payload: OemItemTypeUpdate,
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
@@ -102,6 +114,10 @@ async def api_update(
         item_type_id,
         payload,
         audit_account_id=current_account.id,
+        audit_module_name=OEM_ITEM_TYPE_MODULE_NAME,
+        audit_table_name=OEM_ITEM_TYPE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OEM item type not found")
@@ -111,10 +127,19 @@ async def api_update(
 @router.delete("/{item_type_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def api_delete(
     item_type_id: int,
+    request: Request,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Soft delete an OEM item type."""
-    deleted = await soft_delete_oem_item_type(session, item_type_id)
+    deleted = await soft_delete_oem_item_type(
+        session,
+        item_type_id,
+        audit_module_name=OEM_ITEM_TYPE_MODULE_NAME,
+        audit_table_name=OEM_ITEM_TYPE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OEM item type not found")
     return None
