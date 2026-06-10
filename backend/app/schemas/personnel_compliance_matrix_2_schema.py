@@ -13,8 +13,6 @@ from app.schemas.personnel_authorization_schema import _account_info_to_summary
 
 def _personnel_compliance_matrix_date(pc: PersonnelCompliance) -> Optional[date]:
     """Effective expiry for matrix columns, keyed by personnel_compliance.item_type."""
-    if pc.item_type == PersonnelComplianceItemType.AUTH_EXPIRY:
-        return pc.auth_issue_date
     return pc.expiry_date
 
 
