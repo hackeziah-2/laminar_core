@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import ph_now
 from app.repository.aircraft import get_aircraft_raw
 from app.repository.aircraft_technical_log import get_latest_aircraft_technical_log
 from app.core.atl_derived_times import resolve_auto_fields, map_auto_fields_to_comp
@@ -181,7 +182,7 @@ async def build_computed_tcc_field_values(
 ) -> Dict[str, Any]:
     """Compute all server-derived TCC columns for create/update."""
     if as_of_date is None:
-        as_of_date = datetime.now(timezone.utc).date()
+        as_of_date = ph_now().date()
     if prefetched_latest_atl_tach_aftt is not None:
         latest_tach, latest_aftt = prefetched_latest_atl_tach_aftt
     else:

@@ -5,11 +5,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Set environment variables
+# Set environment variables (TZ pins container clock to Philippine Standard Time)
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    TZ=Asia/Manila
 
 # Install system dependencies (shared across dev/uat/prod)
 RUN apt-get update && apt-get install -y --no-install-recommends \

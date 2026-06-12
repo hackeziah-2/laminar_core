@@ -4,8 +4,11 @@ services:
   db:
     image: postgres:15-alpine
     container_name: laminar_db_uat
+    command: postgres -c timezone=Asia/Manila -c log_timezone=Asia/Manila
     env_file:
       - .env.uat
+    environment:
+      - TZ=Asia/Manila
     volumes:
       - pgdata_uat:/var/lib/postgresql/data
       - ./backend/docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d

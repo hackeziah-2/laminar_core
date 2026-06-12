@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 import secrets
 import string
 from typing import Optional, List, Tuple, Any, Dict
@@ -7,7 +7,7 @@ from fastapi import HTTPException, Request
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import set_audit_fields
+from app.database import ph_now, set_audit_fields
 from app.models.account import AccountInformation
 from app.models.audit_log import AuditAction
 from app.models.role import Role
@@ -583,7 +583,7 @@ async def update_last_login(
     obj = await session.get(AccountInformation, account_id)
     if not obj or obj.is_deleted:
         return False
-    obj.last_login = login_time or datetime.now(timezone.utc)
+    obj.last_login = login_time or ph_now()
     session.add(obj)
     await session.commit()
     return True

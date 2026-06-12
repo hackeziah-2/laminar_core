@@ -1,5 +1,7 @@
 from datetime import date, datetime
 from io import BytesIO
+
+from app.database import ph_now
 from typing import Any, Dict, List, Optional, Sequence
 
 from reportlab.lib import colors
@@ -328,7 +330,7 @@ def generate_enterprise_pdf_report(
     """
     module_label = _humanize_module_name(module_name)
     resolved_title = title or f"{module_label} Report"
-    generated_at = generated_at or datetime.now()
+    generated_at = generated_at or ph_now()
 
     selected_size = _PAGE_SIZES.get((page_size or "a4").strip().lower(), A4)
     page = landscape(selected_size) if (orientation or "landscape").lower() == "landscape" else portrait(selected_size)
