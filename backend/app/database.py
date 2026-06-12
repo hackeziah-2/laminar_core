@@ -21,8 +21,13 @@ DATABASE_URL = os.getenv(
     "DATABASE_URL", "postgresql+asyncpg://postgres:postgres@db:5432/laminar_database"
 )
 
-# Async engine
-engine = create_async_engine(DATABASE_URL, future=True)
+# Async engine – PostgreSQL session timezone pinned to Asia/Manila so that
+# now()/CURRENT_TIMESTAMP and timestamptz rendering use PH time regardless of host TZ
+engine = create_async_engine(
+    DATABASE_URL,
+    future=True,
+    connect_args={"server_settings": {"timezone": "Asia/Manila"}},
+)
 
 # Async session factory
 AsyncSessionLocal = sessionmaker(
@@ -37,13 +42,19 @@ async def get_session() -> AsyncSession:
     async with AsyncSessionLocal() as session:
         yield session
 
-# Mixin for timestamps
+# Mixin for timestamps – generated in Asia/Manila (PH) time
 class TimestampMixin:
     created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        DateTime(timezone=True),
+        default=ph_now,
+        server_default=func.now(),
+        nullable=False,
     )
     updated_at = Column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True),
+        default=ph_now,
+        onupdate=ph_now,
+        server_default=func.now(),
     )
 
 # Mixin for soft deletes

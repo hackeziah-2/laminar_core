@@ -2,9 +2,8 @@ from sqlalchemy import (
     Column, Integer,
      String, Boolean, DateTime
 )
-import datetime
 
-from app.database import Base, AuditMixin
+from app.database import Base, AuditMixin, ph_now
 
 
 class User(Base, AuditMixin):
@@ -15,4 +14,4 @@ class User(Base, AuditMixin):
     hashed_password = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True)
     is_superuser = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=ph_now)
