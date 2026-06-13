@@ -482,6 +482,7 @@ async def api_update(
     response_model=aircraft_technical_log_schema.AircraftTechnicalLogBulkWorkStatusUpdateResponse,
 )
 async def api_bulk_update_work_status(
+    request: Request,
     payload: aircraft_technical_log_schema.AircraftTechnicalLogBulkWorkStatusUpdateRequest,
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
@@ -494,6 +495,10 @@ async def api_bulk_update_work_status(
         atomic=payload.atomic,
         audit_account_id=current_account.id,
         current_account=current_account,
+        audit_module_name=ATL_MODULE_NAME,
+        audit_table_name=ATL_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
 

@@ -764,6 +764,10 @@ async def bulk_update_aircraft_technical_log_work_status(
     atomic: bool = False,
     audit_account_id: Optional[int] = None,
     current_account: Optional[AccountInformation] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> AircraftTechnicalLogBulkWorkStatusUpdateResponse:
     """Bulk update ATL work_status with optional atomic rollback behavior."""
     unique_ids = list(dict.fromkeys(atl_ids))
@@ -772,7 +776,7 @@ async def bulk_update_aircraft_technical_log_work_status(
 
     result_items: List[AircraftTechnicalLogBulkWorkStatusUpdateItem] = []
     updated_count = 0
-    touched_rows: List[AircraftTechnicalLog] = []
+    touched_rows: List[Tuple[AircraftTechnicalLog, Optional[Dict[str, Any]]]] = []
 
     rows_result = await session.execute(
         select(AircraftTechnicalLog).where(AircraftTechnicalLog.id.in_(unique_ids))
@@ -807,11 +811,12 @@ async def bulk_update_aircraft_technical_log_work_status(
                 update_data={"work_status": work_status},
                 current_account=current_account,
             )
+            old_data_snapshot = serialize_audit_data(obj)
             obj.work_status = work_status
             if audit_account_id is not None:
                 await set_audit_fields(obj, audit_account_id, is_create=False)
             session.add(obj)
-            touched_rows.append(obj)
+            touched_rows.append((obj, old_data_snapshot))
             updated_count += 1
             result_items.append(
                 AircraftTechnicalLogBulkWorkStatusUpdateItem(
@@ -848,6 +853,20 @@ async def bulk_update_aircraft_technical_log_work_status(
         await session.commit()
     else:
         await session.rollback()
+
+    if touched_rows and audit_module_name and audit_table_name:
+        for obj, old_data_snapshot in touched_rows:
+            await create_audit_log(
+                db=session,
+                module_name=audit_module_name,
+                table_name=audit_table_name,
+                record_id=obj.id,
+                action=AuditAction.BULK_UPDATE,
+                old_data=old_data_snapshot,
+                new_data=obj,
+                current_user=audit_user or current_account,
+                request=audit_request,
+            )
 
     return AircraftTechnicalLogBulkWorkStatusUpdateResponse(
         updated_count=updated_count,
