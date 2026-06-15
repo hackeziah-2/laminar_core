@@ -1,7 +1,7 @@
 from math import ceil
 from typing import Optional, Set
 
-from fastapi import APIRouter, Depends, Query, HTTPException, status
+from fastapi import APIRouter, Depends, Query, HTTPException, Request, status
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +14,7 @@ from app.repository.cpcp_monitoring import (
     soft_delete_cpcp_monitoring,
 )
 from app.api.deps import get_current_active_account
+from app.constants.audit import CPCP_MONITORING_MODULE_NAME, CPCP_MONITORING_TABLE_NAME
 from app.database import get_session
 from app.models.account import AccountInformation
 from app.repository.aircraft import get_aircraft
@@ -98,6 +99,7 @@ async def api_get(
     summary="Create CPCP Monitoring entry",
 )
 async def api_create(
+    request: Request,
     payload: cpcp_monitoring_schema.CPCPMonitoringCreate,
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
@@ -110,7 +112,13 @@ async def api_create(
             detail="Aircraft not found",
         )
     return await create_cpcp_monitoring(
-        session, payload, audit_account_id=current_account.id
+        session,
+        payload,
+        audit_account_id=current_account.id,
+        audit_module_name=CPCP_MONITORING_MODULE_NAME,
+        audit_table_name=CPCP_MONITORING_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
 
@@ -120,6 +128,7 @@ async def api_create(
     summary="Update CPCP Monitoring entry",
 )
 async def api_update(
+    request: Request,
     entry_id: int,
     payload: cpcp_monitoring_schema.CPCPMonitoringUpdate,
     session: AsyncSession = Depends(get_session),
@@ -134,7 +143,14 @@ async def api_update(
                 detail="Aircraft not found",
             )
     updated = await update_cpcp_monitoring(
-        session, entry_id, payload, audit_account_id=current_account.id
+        session,
+        entry_id,
+        payload,
+        audit_account_id=current_account.id,
+        audit_module_name=CPCP_MONITORING_MODULE_NAME,
+        audit_table_name=CPCP_MONITORING_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not updated:
         raise HTTPException(
@@ -150,11 +166,20 @@ async def api_update(
     summary="Soft delete CPCP Monitoring entry",
 )
 async def api_delete(
+    request: Request,
     entry_id: int,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Soft delete a CPCP Monitoring entry."""
-    deleted = await soft_delete_cpcp_monitoring(session, entry_id)
+    deleted = await soft_delete_cpcp_monitoring(
+        session,
+        entry_id,
+        audit_module_name=CPCP_MONITORING_MODULE_NAME,
+        audit_table_name=CPCP_MONITORING_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

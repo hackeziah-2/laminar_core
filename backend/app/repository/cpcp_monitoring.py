@@ -1,11 +1,15 @@
 from typing import Optional, List, Tuple
 
+from fastapi import Request
 from sqlalchemy import select, func, or_, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import set_audit_fields
+from app.models.account import AccountInformation
+from app.models.audit_log import AuditAction
 from app.models.cpcp_monitoring import CPCPMonitoring
+from app.services.audit_trail_service import create_audit_log, serialize_audit_data
 from app.models.aircraft_techinical_log import AircraftTechnicalLog
 from app.schemas.cpcp_monitoring_schema import (
     CPCPMonitoringCreate,
@@ -20,6 +24,10 @@ async def create_cpcp_monitoring(
     data: CPCPMonitoringCreate,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> CPCPMonitoringRead:
     """Create a new CPCP Monitoring entry."""
     obj = CPCPMonitoring(**data.dict())
@@ -30,6 +38,20 @@ async def create_cpcp_monitoring(
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["atl"])
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=obj.id,
+            action=AuditAction.CREATE,
+            old_data=None,
+            new_data=obj,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return await to_cpcp_monitoring_read(session, obj)
 
 
@@ -133,6 +155,10 @@ async def update_cpcp_monitoring(
     data: CPCPMonitoringUpdate,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> Optional[CPCPMonitoringRead]:
     """Update a CPCP Monitoring entry."""
     result = await session.execute(
@@ -145,6 +171,7 @@ async def update_cpcp_monitoring(
     if not obj:
         return None
 
+    old_data_snapshot = serialize_audit_data(obj)
     update_data = data.dict(exclude_unset=True)
     for k, v in update_data.items():
         setattr(obj, k, v)
@@ -156,12 +183,31 @@ async def update_cpcp_monitoring(
     await session.commit()
     await session.refresh(obj)
     await session.refresh(obj, ["atl"])
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=obj.id,
+            action=AuditAction.UPDATE,
+            old_data=old_data_snapshot,
+            new_data=obj,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return await to_cpcp_monitoring_read(session, obj)
 
 
 async def soft_delete_cpcp_monitoring(
     session: AsyncSession,
     entry_id: int,
+    *,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> bool:
     """Soft delete a CPCP Monitoring entry."""
     result = await session.execute(
@@ -172,7 +218,22 @@ async def soft_delete_cpcp_monitoring(
     obj = result.scalar_one_or_none()
     if not obj:
         return False
+    old_data_snapshot = serialize_audit_data(obj)
     obj.soft_delete()
     session.add(obj)
     await session.commit()
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=entry_id,
+            action=AuditAction.DELETE,
+            old_data=old_data_snapshot,
+            new_data=None,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return True

@@ -7,6 +7,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_current_active_account
+from app.constants.audit import (
+    FLEET_DAILY_UPDATE_MODULE_NAME as FLEET_DAILY_UPDATE_AUDIT_MODULE_NAME,
+)
 from app.main import app
 from app.models.fleet_daily_update import FLEET_DAILY_UPDATE_MODULE_NAME
 from tests.conftest import TestSessionLocal
@@ -46,7 +49,6 @@ def client_with_daily_update_auth(client: TestClient):
 def _create_aircraft(client: TestClient, registration: str) -> int:
     payload = {
         "registration": registration,
-        "manufacturer": "Cessna",
         "model": "172",
         "msn": f"MSN-{registration}",
         "base": "Test Base",
@@ -173,3 +175,80 @@ def test_bulk_update_fleet_daily_updates_requires_can_update(client: TestClient)
         assert response.status_code == 403, response.text
     finally:
         app.dependency_overrides.pop(get_current_active_account, None)
+
+
+def test_bulk_update_fleet_daily_updates_writes_audit_logs(
+    client_with_daily_update_auth: TestClient,
+):
+    """Bulk update should persist an UPDATE audit log per updated record."""
+    client = client_with_daily_update_auth
+    ac1 = _create_aircraft(client, "FDU-AUDIT-001")
+    ac2 = _create_aircraft(client, "FDU-AUDIT-002")
+    update_id_1 = _fleet_update_id_for_aircraft(client, ac1)
+    update_id_2 = _fleet_update_id_for_aircraft(client, ac2)
+
+    response = client.patch(
+        "/api/v1/fleet-daily-update/bulk/",
+        json={
+            "updates": [
+                {"id": update_id_1, "remarks": "Audit bulk update 1"},
+                {"id": update_id_2, "status": "AOG", "remarks": "Audit bulk update 2"},
+            ]
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    all_logs = client.get("/api/v1/audit-logs/").json()
+    fleet_update_logs = [
+        item
+        for item in all_logs["items"]
+        if item.get("module_name") == FLEET_DAILY_UPDATE_AUDIT_MODULE_NAME
+        and item.get("action") == "UPDATE"
+    ]
+    assert len(fleet_update_logs) >= 2
+
+    for update_id, expected_remarks in (
+        (update_id_1, "Audit bulk update 1"),
+        (update_id_2, "Audit bulk update 2"),
+    ):
+        update_logs = [
+            item
+            for item in all_logs["items"]
+            if item["module_name"] == FLEET_DAILY_UPDATE_AUDIT_MODULE_NAME
+            and item["record_id"] == update_id
+            and item["action"] == "UPDATE"
+        ]
+        assert len(update_logs) >= 1
+        update_log = update_logs[0]
+        assert update_log["action"] == "UPDATE"
+        assert update_log["table_name"] == "fleet_daily_update"
+        assert update_log["old_data"] is not None
+        assert update_log["new_data"] is not None
+        assert update_log["new_data"]["remarks"] == expected_remarks
+        assert "remarks" in (update_log["changed_fields"] or [])
+
+
+def test_fleet_daily_update_delete_writes_audit_log(
+    client_with_daily_update_auth: TestClient,
+):
+    """Fleet Daily Update delete should persist a DELETE audit log after commit."""
+    client = client_with_daily_update_auth
+    ac1 = _create_aircraft(client, "FDU-AUDIT-DEL")
+    update_id = _fleet_update_id_for_aircraft(client, ac1)
+
+    delete_response = client.delete(f"/api/v1/fleet-daily-update/{update_id}")
+    assert delete_response.status_code == 204
+
+    all_logs = client.get("/api/v1/audit-logs/").json()
+    delete_logs = [
+        item
+        for item in all_logs["items"]
+        if item["module_name"] == FLEET_DAILY_UPDATE_AUDIT_MODULE_NAME
+        and item["record_id"] == update_id
+        and item["action"] == "DELETE"
+    ]
+    assert len(delete_logs) >= 1
+    delete_log = delete_logs[0]
+    assert delete_log["action"] == "DELETE"
+    assert delete_log["old_data"] is not None
+    assert delete_log["new_data"] is None

@@ -6,6 +6,7 @@ from fastapi import (
     Depends,
     Query,
     HTTPException,
+    Request,
     status,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +24,7 @@ from app.repository.ldnd_monitoring import (
     soft_delete_ldnd_monitoring_by_aircraft,
 )
 from app.api.deps import get_current_active_account
+from app.constants.audit import LDND_MONITORING_MODULE_NAME, LDND_MONITORING_TABLE_NAME
 from app.database import get_session
 from app.models.account import AccountInformation
 from app.repository.aircraft import get_aircraft
@@ -100,13 +102,20 @@ async def api_get_ldnd_monitoring(
     summary="Create LDNDMonitoring entry",
 )
 async def api_create_ldnd_monitoring(
+    request: Request,
     data: ldnd_monitoring_schema.LDNDMonitoringCreate,
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new LDNDMonitoring entry."""
     return await create_ldnd_monitoring(
-        session, data, audit_account_id=current_account.id
+        session,
+        data,
+        audit_account_id=current_account.id,
+        audit_module_name=LDND_MONITORING_MODULE_NAME,
+        audit_table_name=LDND_MONITORING_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
 
@@ -116,6 +125,7 @@ async def api_create_ldnd_monitoring(
     summary="Update LDNDMonitoring entry",
 )
 async def api_update_ldnd_monitoring(
+    request: Request,
     ldnd_id: int,
     data: ldnd_monitoring_schema.LDNDMonitoringUpdate,
     session: AsyncSession = Depends(get_session),
@@ -123,7 +133,14 @@ async def api_update_ldnd_monitoring(
 ):
     """Update an LDNDMonitoring entry."""
     updated = await update_ldnd_monitoring(
-        session, ldnd_id, data, audit_account_id=current_account.id
+        session,
+        ldnd_id,
+        data,
+        audit_account_id=current_account.id,
+        audit_module_name=LDND_MONITORING_MODULE_NAME,
+        audit_table_name=LDND_MONITORING_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not updated:
         raise HTTPException(status_code=404, detail="LDNDMonitoring not found")
@@ -136,11 +153,20 @@ async def api_update_ldnd_monitoring(
     summary="Soft delete LDNDMonitoring entry",
 )
 async def api_delete_ldnd_monitoring(
+    request: Request,
     ldnd_id: int,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Soft delete an LDNDMonitoring entry (sets is_deleted)."""
-    deleted = await soft_delete_ldnd_monitoring(session, ldnd_id)
+    deleted = await soft_delete_ldnd_monitoring(
+        session,
+        ldnd_id,
+        audit_module_name=LDND_MONITORING_MODULE_NAME,
+        audit_table_name=LDND_MONITORING_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
     if not deleted:
         raise HTTPException(status_code=404, detail="LDNDMonitoring not found")
     return None
@@ -243,6 +269,7 @@ async def api_get_ldnd_monitoring_by_aircraft(
     summary="Create LDND monitoring for aircraft",
 )
 async def api_create_ldnd_monitoring_by_aircraft(
+    request: Request,
     aircraft_id: int,
     data: ldnd_monitoring_schema.LDNDMonitoringCreate,
     session: AsyncSession = Depends(get_session),
@@ -256,7 +283,13 @@ async def api_create_ldnd_monitoring_by_aircraft(
         **{**data.dict(), "aircraft_fk": aircraft_id}
     )
     return await create_ldnd_monitoring(
-        session, create_data, audit_account_id=current_account.id
+        session,
+        create_data,
+        audit_account_id=current_account.id,
+        audit_module_name=LDND_MONITORING_MODULE_NAME,
+        audit_table_name=LDND_MONITORING_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
 
@@ -266,6 +299,7 @@ async def api_create_ldnd_monitoring_by_aircraft(
     summary="Update LDND monitoring for aircraft",
 )
 async def api_update_ldnd_monitoring_by_aircraft(
+    request: Request,
     aircraft_id: int,
     ldnd_id: int,
     data: ldnd_monitoring_schema.LDNDMonitoringUpdate,
@@ -277,7 +311,14 @@ async def api_update_ldnd_monitoring_by_aircraft(
     if not existing:
         raise HTTPException(status_code=404, detail="LDNDMonitoring not found")
     updated = await update_ldnd_monitoring(
-        session, ldnd_id, data, audit_account_id=current_account.id
+        session,
+        ldnd_id,
+        data,
+        audit_account_id=current_account.id,
+        audit_module_name=LDND_MONITORING_MODULE_NAME,
+        audit_table_name=LDND_MONITORING_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not updated:
         raise HTTPException(status_code=404, detail="LDNDMonitoring not found")
@@ -290,12 +331,22 @@ async def api_update_ldnd_monitoring_by_aircraft(
     summary="Soft delete LDND monitoring for aircraft",
 )
 async def api_delete_ldnd_monitoring_by_aircraft(
+    request: Request,
     aircraft_id: int,
     ldnd_id: int,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Soft delete an LDNDMonitoring entry for a specific aircraft."""
-    deleted = await soft_delete_ldnd_monitoring_by_aircraft(session, ldnd_id, aircraft_id)
+    deleted = await soft_delete_ldnd_monitoring_by_aircraft(
+        session,
+        ldnd_id,
+        aircraft_id,
+        audit_module_name=LDND_MONITORING_MODULE_NAME,
+        audit_table_name=LDND_MONITORING_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
     if not deleted:
         raise HTTPException(status_code=404, detail="LDNDMonitoring not found")
     return None

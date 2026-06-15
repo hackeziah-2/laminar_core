@@ -23,6 +23,12 @@ from app.repository.ad_monitoring import (
     soft_delete_work_order_ad_monitoring_by_ad,
 )
 from app.api.deps import get_current_active_account
+from app.constants.audit import (
+    AD_MONITORING_MODULE_NAME,
+    AD_MONITORING_TABLE_NAME,
+    WORK_ORDER_AD_MONITORING_MODULE_NAME,
+    WORK_ORDER_AD_MONITORING_TABLE_NAME,
+)
 from app.database import get_session
 from app.models.account import AccountInformation
 from app.repository.aircraft import get_aircraft
@@ -134,7 +140,14 @@ async def api_create_ad_monitoring(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
     return await create_ad_monitoring(
-        session, data, upload_file, audit_account_id=current_account.id
+        session,
+        data,
+        upload_file,
+        audit_account_id=current_account.id,
+        audit_module_name=AD_MONITORING_MODULE_NAME,
+        audit_table_name=AD_MONITORING_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
 
@@ -163,6 +176,10 @@ async def api_update_ad_monitoring(
         data,
         upload_file,
         audit_account_id=current_account.id,
+        audit_module_name=AD_MONITORING_MODULE_NAME,
+        audit_table_name=AD_MONITORING_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not updated:
         raise HTTPException(status_code=404, detail="ADMonitoring not found")
@@ -171,10 +188,19 @@ async def api_update_ad_monitoring(
 
 @router.delete("/{ad_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def api_delete_ad_monitoring(
+    request: Request,
     ad_id: int,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
-    deleted = await soft_delete_ad_monitoring(session, ad_id)
+    deleted = await soft_delete_ad_monitoring(
+        session,
+        ad_id,
+        audit_module_name=AD_MONITORING_MODULE_NAME,
+        audit_table_name=AD_MONITORING_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
     if not deleted:
         raise HTTPException(status_code=404, detail="ADMonitoring not found")
     return None
@@ -274,6 +300,10 @@ async def api_create_ad_monitoring_by_aircraft(
         create_data,
         upload_file,
         audit_account_id=current_account.id,
+        audit_module_name=AD_MONITORING_MODULE_NAME,
+        audit_table_name=AD_MONITORING_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
 
@@ -309,6 +339,10 @@ async def api_update_ad_monitoring_by_aircraft(
         data,
         upload_file,
         audit_account_id=current_account.id,
+        audit_module_name=AD_MONITORING_MODULE_NAME,
+        audit_table_name=AD_MONITORING_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not updated:
         raise HTTPException(status_code=404, detail="ADMonitoring not found")
@@ -320,12 +354,20 @@ async def api_update_ad_monitoring_by_aircraft(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def api_delete_ad_monitoring_by_aircraft(
+    request: Request,
     aircraft_fk: int,
     ad_id: int,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     deleted = await soft_delete_ad_monitoring_by_aircraft(
-        session, ad_id, aircraft_fk
+        session,
+        ad_id,
+        aircraft_fk,
+        audit_module_name=AD_MONITORING_MODULE_NAME,
+        audit_table_name=AD_MONITORING_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not deleted:
         raise HTTPException(status_code=404, detail="ADMonitoring not found")
@@ -395,6 +437,7 @@ async def api_get_work_order_by_aircraft_ad(
     tags=["work-order-ad-monitoring"],
 )
 async def api_create_work_order_by_aircraft_ad(
+    request: Request,
     aircraft_fk: int,
     ad_monitoring_fk: int,
     data: ad_monitoring_schema.WorkOrderADMonitoringCreate,
@@ -406,7 +449,13 @@ async def api_create_work_order_by_aircraft_ad(
         **{**data.dict(), "ad_monitoring_fk": ad_monitoring_fk}
     )
     return await create_work_order_ad_monitoring(
-        session, create_data, audit_account_id=current_account.id
+        session,
+        create_data,
+        audit_account_id=current_account.id,
+        audit_module_name=WORK_ORDER_AD_MONITORING_MODULE_NAME,
+        audit_table_name=WORK_ORDER_AD_MONITORING_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
 
@@ -416,6 +465,7 @@ async def api_create_work_order_by_aircraft_ad(
     tags=["work-order-ad-monitoring"],
 )
 async def api_update_work_order_by_aircraft_ad(
+    request: Request,
     aircraft_fk: int,
     ad_monitoring_fk: int,
     work_order_id: int,
@@ -436,6 +486,10 @@ async def api_update_work_order_by_aircraft_ad(
         work_order_id,
         data,
         audit_account_id=current_account.id,
+        audit_module_name=WORK_ORDER_AD_MONITORING_MODULE_NAME,
+        audit_table_name=WORK_ORDER_AD_MONITORING_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not updated:
         raise HTTPException(
@@ -450,14 +504,22 @@ async def api_update_work_order_by_aircraft_ad(
     tags=["work-order-ad-monitoring"],
 )
 async def api_delete_work_order_by_aircraft_ad(
+    request: Request,
     aircraft_fk: int,
     ad_monitoring_fk: int,
     work_order_id: int,
     session: AsyncSession = Depends(get_session),
     _: None = Depends(get_ad_monitoring_scoped_to_aircraft),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     deleted = await soft_delete_work_order_ad_monitoring_by_ad(
-        session, work_order_id, ad_monitoring_fk
+        session,
+        work_order_id,
+        ad_monitoring_fk,
+        audit_module_name=WORK_ORDER_AD_MONITORING_MODULE_NAME,
+        audit_table_name=WORK_ORDER_AD_MONITORING_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not deleted:
         raise HTTPException(
@@ -517,12 +579,19 @@ async def api_get_work_order_ad_monitoring(
     status_code=status.HTTP_201_CREATED,
 )
 async def api_create_work_order_ad_monitoring(
+    request: Request,
     data: ad_monitoring_schema.WorkOrderADMonitoringCreate,
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
 ):
     return await create_work_order_ad_monitoring(
-        session, data, audit_account_id=current_account.id
+        session,
+        data,
+        audit_account_id=current_account.id,
+        audit_module_name=WORK_ORDER_AD_MONITORING_MODULE_NAME,
+        audit_table_name=WORK_ORDER_AD_MONITORING_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
 
@@ -531,6 +600,7 @@ async def api_create_work_order_ad_monitoring(
     response_model=ad_monitoring_schema.WorkOrderADMonitoringRead,
 )
 async def api_update_work_order_ad_monitoring(
+    request: Request,
     work_order_id: int,
     data: ad_monitoring_schema.WorkOrderADMonitoringUpdate,
     session: AsyncSession = Depends(get_session),
@@ -541,6 +611,10 @@ async def api_update_work_order_ad_monitoring(
         work_order_id,
         data,
         audit_account_id=current_account.id,
+        audit_module_name=WORK_ORDER_AD_MONITORING_MODULE_NAME,
+        audit_table_name=WORK_ORDER_AD_MONITORING_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not updated:
         raise HTTPException(
@@ -554,11 +628,18 @@ async def api_update_work_order_ad_monitoring(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def api_delete_work_order_ad_monitoring(
+    request: Request,
     work_order_id: int,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     deleted = await soft_delete_work_order_ad_monitoring(
-        session, work_order_id
+        session,
+        work_order_id,
+        audit_module_name=WORK_ORDER_AD_MONITORING_MODULE_NAME,
+        audit_table_name=WORK_ORDER_AD_MONITORING_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not deleted:
         raise HTTPException(

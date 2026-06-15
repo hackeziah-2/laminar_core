@@ -1,11 +1,12 @@
 from typing import Optional, List, Tuple
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import set_audit_fields
+from app.models.audit_log import AuditAction
 from app.models.role import Role
 from app.models.role_permission import RolePermission
 from app.models.account import AccountInformation
@@ -16,6 +17,7 @@ from app.schemas.role_schema import (
     RoleRead,
 )
 from app.repository.module import get_module_by_name
+from app.services.audit_trail_service import create_audit_log, serialize_audit_data
 
 
 async def create_role(
@@ -23,6 +25,10 @@ async def create_role(
     data: RoleCreate,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> Role:
     """Create a new Role and optional permissions. Returns Role ORM with permissions loaded."""
     result = await session.execute(
@@ -70,6 +76,20 @@ async def create_role(
 
     await session.commit()
     await session.refresh(role)
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=role.id,
+            action=AuditAction.CREATE,
+            old_data=None,
+            new_data=role,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return role
 
 
@@ -109,12 +129,17 @@ async def update_role(
     role_in: RoleUpdate,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> Optional[RoleRead]:
     """Update a Role and optionally replace its permissions."""
     obj = await session.get(Role, role_id)
     if not obj or obj.is_deleted:
         return None
 
+    old_data_snapshot = serialize_audit_data(obj)
     update_data = role_in.dict(exclude_unset=True)
     permissions_payload = update_data.pop("permissions", None)
 
@@ -198,6 +223,20 @@ async def update_role(
             await set_audit_fields(rp, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=obj.id,
+            action=AuditAction.UPDATE,
+            old_data=old_data_snapshot,
+            new_data=obj,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return RoleRead.from_orm(obj)
 
 
@@ -286,13 +325,33 @@ async def get_all_roles_list(
 
 async def soft_delete_role(
     session: AsyncSession,
-    role_id: int
+    role_id: int,
+    *,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> bool:
     """Soft delete a Role."""
     obj = await session.get(Role, role_id)
     if not obj or obj.is_deleted:
         return False
+    old_data_snapshot = serialize_audit_data(obj)
     obj.soft_delete()
     session.add(obj)
     await session.commit()
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=role_id,
+            action=AuditAction.DELETE,
+            old_data=old_data_snapshot,
+            new_data=None,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return True

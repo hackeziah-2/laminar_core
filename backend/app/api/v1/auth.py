@@ -1,7 +1,7 @@
 """Authentication API using AccountInformation."""
 from typing import List, Set, Union
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +19,11 @@ from app.repository.account import (
     create_account_information,
     update_last_login,
     change_account_password,
+    audit_account_creates_after_commit,
+)
+from app.constants.audit import (
+    ACCOUNT_INFORMATION_MODULE_NAME,
+    ACCOUNT_INFORMATION_TABLE_NAME,
 )
 from app.core.security import create_access_token, _truncate_password
 from app.models.account import AccountInformation
@@ -108,6 +113,7 @@ async def token(
     include_in_schema=False,
 )
 async def register(
+    request: Request,
     payload: Union[List[AccountInformationCreate], AccountInformationCreate],
     session: AsyncSession = Depends(get_session),
 ):
@@ -140,11 +146,31 @@ async def register(
         created: List[AccountInformationRead] = []
         for item in payload:
             created.append(
-                await create_account_information(session, item, commit=False)
+                await create_account_information(
+                    session,
+                    item,
+                    commit=False,
+                    audit_module_name=ACCOUNT_INFORMATION_MODULE_NAME,
+                    audit_table_name=ACCOUNT_INFORMATION_TABLE_NAME,
+                    audit_request=request,
+                )
             )
         await session.commit()
+        await audit_account_creates_after_commit(
+            session,
+            [account.id for account in created],
+            audit_module_name=ACCOUNT_INFORMATION_MODULE_NAME,
+            audit_table_name=ACCOUNT_INFORMATION_TABLE_NAME,
+            audit_request=request,
+        )
         return created
-    return await create_account_information(session, payload)
+    return await create_account_information(
+        session,
+        payload,
+        audit_module_name=ACCOUNT_INFORMATION_MODULE_NAME,
+        audit_table_name=ACCOUNT_INFORMATION_TABLE_NAME,
+        audit_request=request,
+    )
 
 
 @router.get("/me", response_model=AccountMe)

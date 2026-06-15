@@ -1,16 +1,19 @@
 from typing import Optional, List, Tuple
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import set_audit_fields
+from app.models.account import AccountInformation
+from app.models.audit_log import AuditAction
 from app.models.certificate_category_type import CertificateCategoryType
 from app.schemas.certificate_category_type_schema import (
     CertificateCategoryTypeCreate,
     CertificateCategoryTypeUpdate,
     CertificateCategoryTypeRead,
 )
+from app.services.audit_trail_service import create_audit_log, serialize_audit_data
 
 
 async def create_certificate_category_type(
@@ -18,6 +21,10 @@ async def create_certificate_category_type(
     data: CertificateCategoryTypeCreate,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> CertificateCategoryTypeRead:
     """Create a new Certificate Category Type."""
     result = await session.execute(
@@ -37,6 +44,20 @@ async def create_certificate_category_type(
         await set_audit_fields(obj, audit_account_id, is_create=True)
     await session.commit()
     await session.refresh(obj)
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=obj.id,
+            action=AuditAction.CREATE,
+            old_data=None,
+            new_data=obj,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return CertificateCategoryTypeRead.from_orm(obj)
 
 
@@ -62,11 +83,16 @@ async def update_certificate_category_type(
     data: CertificateCategoryTypeUpdate,
     *,
     audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> Optional[CertificateCategoryTypeRead]:
     """Update a Certificate Category Type."""
     obj = await session.get(CertificateCategoryType, category_id)
     if not obj or obj.is_deleted:
         return None
+    old_data_snapshot = serialize_audit_data(obj)
     update_data = data.dict(exclude_unset=True)
     if "name" in update_data:
         result = await session.execute(
@@ -88,6 +114,20 @@ async def update_certificate_category_type(
         await set_audit_fields(obj, audit_account_id, is_create=False)
     await session.commit()
     await session.refresh(obj)
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=obj.id,
+            action=AuditAction.UPDATE,
+            old_data=old_data_snapshot,
+            new_data=obj,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return CertificateCategoryTypeRead.from_orm(obj)
 
 
@@ -153,12 +193,32 @@ async def get_all_certificate_category_types_list(
 async def soft_delete_certificate_category_type(
     session: AsyncSession,
     category_id: int,
+    *,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
 ) -> bool:
     """Soft delete a Certificate Category Type."""
     obj = await session.get(CertificateCategoryType, category_id)
     if not obj or obj.is_deleted:
         return False
+    old_data_snapshot = serialize_audit_data(obj)
     obj.soft_delete()
     session.add(obj)
     await session.commit()
+
+    if audit_module_name and audit_table_name:
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=category_id,
+            action=AuditAction.DELETE,
+            old_data=old_data_snapshot,
+            new_data=None,
+            current_user=audit_user,
+            request=audit_request,
+        )
+
     return True

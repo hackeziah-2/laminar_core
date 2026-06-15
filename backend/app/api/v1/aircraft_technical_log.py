@@ -37,6 +37,7 @@ from app.repository.aircraft_technical_log import (
     bulk_soft_delete_aircraft_technical_logs,
 )
 from app.api.deps import get_current_active_account
+from app.constants.audit import ATL_MODULE_NAME, ATL_TABLE_NAME
 from app.database import get_session
 from app.models.account import AccountInformation
 from app.models.aircraft_techinical_log import WorkStatus
@@ -375,13 +376,20 @@ async def api_get(
     status_code=status.HTTP_201_CREATED
 )
 async def api_create(
+    request: Request,
     payload: aircraft_technical_log_schema.AircraftTechnicalLogCreate,
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new Aircraft Technical Log entry."""
     entry = await create_aircraft_technical_log(
-        session, payload, audit_account_id=current_account.id
+        session,
+        payload,
+        audit_account_id=current_account.id,
+        audit_module_name=ATL_MODULE_NAME,
+        audit_table_name=ATL_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     return await aircraft_technical_log_read_with_computed(session, entry)
 
@@ -454,6 +462,10 @@ async def api_update(
         log_in=log_in,
         audit_account_id=current_account.id,
         current_account=current_account,
+        audit_module_name=ATL_MODULE_NAME,
+        audit_table_name=ATL_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
     if not updated:
@@ -470,6 +482,7 @@ async def api_update(
     response_model=aircraft_technical_log_schema.AircraftTechnicalLogBulkWorkStatusUpdateResponse,
 )
 async def api_bulk_update_work_status(
+    request: Request,
     payload: aircraft_technical_log_schema.AircraftTechnicalLogBulkWorkStatusUpdateRequest,
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
@@ -482,6 +495,10 @@ async def api_bulk_update_work_status(
         atomic=payload.atomic,
         audit_account_id=current_account.id,
         current_account=current_account,
+        audit_module_name=ATL_MODULE_NAME,
+        audit_table_name=ATL_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
 
@@ -509,11 +526,20 @@ async def api_bulk_delete(
     response_class=Response,
 )
 async def api_delete(
+    request: Request,
     log_id: int,
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Soft delete an Aircraft Technical Log entry."""
-    deleted = await soft_delete_aircraft_technical_log(session, log_id)
+    deleted = await soft_delete_aircraft_technical_log(
+        session,
+        log_id,
+        audit_module_name=ATL_MODULE_NAME,
+        audit_table_name=ATL_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
 
     if not deleted:
         raise HTTPException(

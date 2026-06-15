@@ -1,9 +1,13 @@
 from math import ceil
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, Query, HTTPException, status
+from fastapi import APIRouter, Depends, Query, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.constants.audit import (
+    AUTHORIZATION_SCOPE_BARON_MODULE_NAME,
+    AUTHORIZATION_SCOPE_BARON_TABLE_NAME,
+)
 from app.schemas.authorization_scope_baron_schema import (
     AuthorizationScopeBaronCreate,
     AuthorizationScopeBaronUpdate,
@@ -82,19 +86,27 @@ async def api_get(
     status_code=status.HTTP_201_CREATED,
 )
 async def api_create(
+    request: Request,
     payload: AuthorizationScopeBaronCreate,
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Create a new Authorization Scope Baron."""
     return await create_authorization_scope_baron(
-        session, payload, audit_account_id=current_account.id
+        session,
+        payload,
+        audit_account_id=current_account.id,
+        audit_module_name=AUTHORIZATION_SCOPE_BARON_MODULE_NAME,
+        audit_table_name=AUTHORIZATION_SCOPE_BARON_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
 
 @router.put("/{scope_id}", response_model=AuthorizationScopeBaronRead)
 async def api_update(
     scope_id: int,
+    request: Request,
     payload: AuthorizationScopeBaronUpdate,
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
@@ -105,6 +117,10 @@ async def api_update(
         scope_id,
         payload,
         audit_account_id=current_account.id,
+        audit_module_name=AUTHORIZATION_SCOPE_BARON_MODULE_NAME,
+        audit_table_name=AUTHORIZATION_SCOPE_BARON_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not updated:
         raise HTTPException(
@@ -117,10 +133,19 @@ async def api_update(
 @router.delete("/{scope_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def api_delete(
     scope_id: int,
+    request: Request,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Soft delete an Authorization Scope Baron."""
-    deleted = await soft_delete_authorization_scope_baron(session, scope_id)
+    deleted = await soft_delete_authorization_scope_baron(
+        session,
+        scope_id,
+        audit_module_name=AUTHORIZATION_SCOPE_BARON_MODULE_NAME,
+        audit_table_name=AUTHORIZATION_SCOPE_BARON_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

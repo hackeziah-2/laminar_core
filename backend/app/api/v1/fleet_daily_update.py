@@ -1,7 +1,7 @@
 from math import ceil
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, HTTPException, status
+from fastapi import APIRouter, Depends, Query, HTTPException, Request, status
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,6 +24,10 @@ from app.repository.ldnd_monitoring import (
 from app.repository.aircraft_technical_log import get_latest_aircraft_technical_log
 from app.repository.tcc_maintenance import get_latest_tcc_by_aircraft_and_description
 from app.api.deps import get_current_active_account, require_permission
+from app.constants.audit import (
+    FLEET_DAILY_UPDATE_MODULE_NAME as FLEET_DAILY_UPDATE_AUDIT_MODULE_NAME,
+    FLEET_DAILY_UPDATE_TABLE_NAME,
+)
 from app.database import get_session
 from app.models.account import AccountInformation
 from app.models.fleet_daily_update import FLEET_DAILY_UPDATE_MODULE_NAME
@@ -178,6 +182,7 @@ async def api_list_fleet_daily_updates_paged(
     ),
 )
 async def api_bulk_update_fleet_daily_updates(
+    request: Request,
     payload: fleet_daily_update_schema.FleetDailyUpdateBulkUpdateRequest,
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(
@@ -196,6 +201,10 @@ async def api_bulk_update_fleet_daily_updates(
         session,
         payload.updates,
         audit_account_id=current_account.id,
+        audit_module_name=FLEET_DAILY_UPDATE_AUDIT_MODULE_NAME,
+        audit_table_name=FLEET_DAILY_UPDATE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
 
 
@@ -221,12 +230,19 @@ async def api_get_fleet_daily_update(
     description="One record per aircraft (one-to-one). aircraft_fk required. Returns body with aircraft: { id, registration }.",
 )
 async def api_create_fleet_daily_update(
+    request: Request,
     payload: fleet_daily_update_schema.FleetDailyUpdateCreate,
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
 ):
     obj = await create_fleet_daily_update(
-        session, payload, audit_account_id=current_account.id
+        session,
+        payload,
+        audit_account_id=current_account.id,
+        audit_module_name=FLEET_DAILY_UPDATE_AUDIT_MODULE_NAME,
+        audit_table_name=FLEET_DAILY_UPDATE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     return _fleet_daily_update_item_with_aircraft(obj)
 
@@ -237,6 +253,7 @@ async def api_create_fleet_daily_update(
     description="Returns body with aircraft: { id, registration }.",
 )
 async def api_update_fleet_daily_update(
+    request: Request,
     update_id: int,
     payload: fleet_daily_update_schema.FleetDailyUpdateUpdate,
     session: AsyncSession = Depends(get_session),
@@ -244,7 +261,14 @@ async def api_update_fleet_daily_update(
 ):
     """Update any field; send only status and/or remarks to update just those."""
     obj = await update_fleet_daily_update(
-        session, update_id, payload, audit_account_id=current_account.id
+        session,
+        update_id,
+        payload,
+        audit_account_id=current_account.id,
+        audit_module_name=FLEET_DAILY_UPDATE_AUDIT_MODULE_NAME,
+        audit_table_name=FLEET_DAILY_UPDATE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not obj:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found")
@@ -257,6 +281,7 @@ async def api_update_fleet_daily_update(
     description="Returns body with aircraft: { id, registration }.",
 )
 async def api_patch_fleet_daily_update(
+    request: Request,
     update_id: int,
     payload: fleet_daily_update_schema.FleetDailyUpdateUpdate,
     session: AsyncSession = Depends(get_session),
@@ -264,7 +289,14 @@ async def api_patch_fleet_daily_update(
 ):
     """Partial update: only provided fields are updated (e.g. status, remarks)."""
     obj = await update_fleet_daily_update(
-        session, update_id, payload, audit_account_id=current_account.id
+        session,
+        update_id,
+        payload,
+        audit_account_id=current_account.id,
+        audit_module_name=FLEET_DAILY_UPDATE_AUDIT_MODULE_NAME,
+        audit_table_name=FLEET_DAILY_UPDATE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not obj:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found")
@@ -277,10 +309,19 @@ async def api_patch_fleet_daily_update(
     summary="Soft delete Fleet Daily Update entry",
 )
 async def api_delete_fleet_daily_update(
+    request: Request,
     update_id: int,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
-    deleted = await soft_delete_fleet_daily_update(session, update_id)
+    deleted = await soft_delete_fleet_daily_update(
+        session,
+        update_id,
+        audit_module_name=FLEET_DAILY_UPDATE_AUDIT_MODULE_NAME,
+        audit_table_name=FLEET_DAILY_UPDATE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
     if not deleted:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found")
     return None
@@ -313,6 +354,7 @@ async def api_get_fleet_daily_update_by_aircraft(
     description="Update the single Fleet Daily Update for this aircraft. Returns body with aircraft: { id, registration }.",
 )
 async def api_update_fleet_daily_update_by_aircraft_only(
+    request: Request,
     aircraft_id: int,
     payload: fleet_daily_update_schema.FleetDailyUpdateUpdate,
     session: AsyncSession = Depends(get_session),
@@ -326,7 +368,14 @@ async def api_update_fleet_daily_update_by_aircraft_only(
     if not record:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found for this aircraft")
     obj = await update_fleet_daily_update(
-        session, record.id, payload, audit_account_id=current_account.id
+        session,
+        record.id,
+        payload,
+        audit_account_id=current_account.id,
+        audit_module_name=FLEET_DAILY_UPDATE_AUDIT_MODULE_NAME,
+        audit_table_name=FLEET_DAILY_UPDATE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not obj:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found")
@@ -339,6 +388,7 @@ async def api_update_fleet_daily_update_by_aircraft_only(
     description="Returns body with aircraft: { id, registration }.",
 )
 async def api_patch_fleet_daily_update_by_aircraft(
+    request: Request,
     aircraft_id: int,
     payload: fleet_daily_update_schema.FleetDailyUpdateUpdate,
     session: AsyncSession = Depends(get_session),
@@ -352,7 +402,14 @@ async def api_patch_fleet_daily_update_by_aircraft(
     if not record:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found for this aircraft")
     obj = await update_fleet_daily_update(
-        session, record.id, payload, audit_account_id=current_account.id
+        session,
+        record.id,
+        payload,
+        audit_account_id=current_account.id,
+        audit_module_name=FLEET_DAILY_UPDATE_AUDIT_MODULE_NAME,
+        audit_table_name=FLEET_DAILY_UPDATE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not obj:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found")
@@ -415,6 +472,7 @@ async def api_list_fleet_daily_updates_by_aircraft_paged(
     description="One record per aircraft. Creates for the given aircraft_id. Returns body with aircraft: { id, registration }.",
 )
 async def api_create_fleet_daily_update_by_aircraft(
+    request: Request,
     aircraft_id: int,
     payload: fleet_daily_update_schema.FleetDailyUpdateCreate,
     session: AsyncSession = Depends(get_session),
@@ -427,7 +485,13 @@ async def api_create_fleet_daily_update_by_aircraft(
     data["aircraft_fk"] = aircraft_id
     create_payload = fleet_daily_update_schema.FleetDailyUpdateCreate(**data)
     obj = await create_fleet_daily_update(
-        session, create_payload, audit_account_id=current_account.id
+        session,
+        create_payload,
+        audit_account_id=current_account.id,
+        audit_module_name=FLEET_DAILY_UPDATE_AUDIT_MODULE_NAME,
+        audit_table_name=FLEET_DAILY_UPDATE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     return _fleet_daily_update_item_with_aircraft(obj)
 
@@ -438,6 +502,7 @@ async def api_create_fleet_daily_update_by_aircraft(
     description="Returns body with aircraft: { id, registration }.",
 )
 async def api_update_fleet_daily_update_by_aircraft(
+    request: Request,
     aircraft_id: int,
     update_id: int,
     payload: fleet_daily_update_schema.FleetDailyUpdateUpdate,
@@ -449,7 +514,14 @@ async def api_update_fleet_daily_update_by_aircraft(
     if not existing or existing.id != update_id:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found")
     obj = await update_fleet_daily_update(
-        session, update_id, payload, audit_account_id=current_account.id
+        session,
+        update_id,
+        payload,
+        audit_account_id=current_account.id,
+        audit_module_name=FLEET_DAILY_UPDATE_AUDIT_MODULE_NAME,
+        audit_table_name=FLEET_DAILY_UPDATE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not obj:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found")
@@ -462,12 +534,20 @@ async def api_update_fleet_daily_update_by_aircraft(
     summary="Soft delete Fleet Daily Update for aircraft",
 )
 async def api_delete_fleet_daily_update_by_aircraft(
+    request: Request,
     aircraft_id: int,
     update_id: int,
     session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
 ):
     deleted = await soft_delete_fleet_daily_update_by_aircraft(
-        session, update_id, aircraft_id
+        session,
+        update_id,
+        aircraft_id,
+        audit_module_name=FLEET_DAILY_UPDATE_AUDIT_MODULE_NAME,
+        audit_table_name=FLEET_DAILY_UPDATE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
     )
     if not deleted:
         raise HTTPException(status_code=404, detail="Fleet Daily Update not found")

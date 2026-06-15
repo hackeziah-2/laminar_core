@@ -13,7 +13,6 @@ async def test_create_aircraft_model(db_session: AsyncSession):
     """Test creating an Aircraft model instance."""
     aircraft = Aircraft(
         registration="TEST-REG-001",
-        manufacturer="Boeing",
         model="737-800",
         msn="MSN-001",
         base="Test Base",
@@ -74,7 +73,6 @@ async def test_aircraft_soft_delete(db_session: AsyncSession):
     """Test soft delete functionality on Aircraft model."""
     aircraft = Aircraft(
         registration="TEST-SOFT-DELETE",
-        manufacturer="Boeing",
         model="737-800",
         msn="MSN-SOFT-DELETE",
         base="Test Base",

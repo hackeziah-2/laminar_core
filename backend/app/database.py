@@ -1,10 +1,19 @@
 import os
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base, declared_attr, relationship
 from sqlalchemy import Boolean, Column, DateTime, Integer, ForeignKey, select
 from sqlalchemy.sql import func
+
+# Philippine timezone – use ph_now() for all app-generated timestamps
+PH_TZ = ZoneInfo("Asia/Manila")
+
+
+def ph_now() -> datetime:
+    return datetime.now(PH_TZ)
 
 
 # Load database URL from environment
@@ -12,8 +21,13 @@ DATABASE_URL = os.getenv(
     "DATABASE_URL", "postgresql+asyncpg://postgres:postgres@db:5432/laminar_database"
 )
 
-# Async engine
-engine = create_async_engine(DATABASE_URL, future=True)
+# Async engine – PostgreSQL session timezone pinned to Asia/Manila so that
+# now()/CURRENT_TIMESTAMP and timestamptz rendering use PH time regardless of host TZ
+engine = create_async_engine(
+    DATABASE_URL,
+    future=True,
+    connect_args={"server_settings": {"timezone": "Asia/Manila"}},
+)
 
 # Async session factory
 AsyncSessionLocal = sessionmaker(
@@ -28,13 +42,19 @@ async def get_session() -> AsyncSession:
     async with AsyncSessionLocal() as session:
         yield session
 
-# Mixin for timestamps
+# Mixin for timestamps – generated in Asia/Manila (PH) time
 class TimestampMixin:
     created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        DateTime(timezone=True),
+        default=ph_now,
+        server_default=func.now(),
+        nullable=False,
     )
     updated_at = Column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True),
+        default=ph_now,
+        onupdate=ph_now,
+        server_default=func.now(),
     )
 
 # Mixin for soft deletes
@@ -74,3 +94,12 @@ async def set_audit_fields(obj: Any, user_id: int, is_create: bool = False) -> N
     if is_create:
         obj.created_by = user_id
     obj.updated_by = user_id
+
+
+async def soft_delete(record: Any, db: AsyncSession) -> Any:
+    """Soft-delete a record that has a deleted_at column (stamped with PH time)."""
+    record.deleted_at = ph_now()
+    db.add(record)
+    await db.commit()
+    await db.refresh(record)
+    return record

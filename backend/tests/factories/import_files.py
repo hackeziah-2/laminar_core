@@ -10,7 +10,6 @@ def aircraft_csv_bytes(rows: Optional[List[Dict[str, Any]]] = None) -> bytes:
     """Minimal valid aircraft import CSV (headers lowercased as in production)."""
     default_row = {
         "registration": "IMP-001",
-        "manufacturer": "Cessna",
         "model": "172",
         "msn": "MSN-IMP-001",
         "base": "Test Base",

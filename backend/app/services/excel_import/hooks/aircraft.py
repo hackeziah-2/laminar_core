@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any, Dict, Set
 
+from app.database import ph_now
 from app.services.excel_import.hooks.base import ImportHook
 
 
@@ -12,7 +12,7 @@ class AircraftImportHook(ImportHook):
 
     def apply_defaults(self, out: Dict[str, Any], schema_fields: Set[str]) -> None:
         if "created_at" in schema_fields and not out.get("created_at"):
-            out["created_at"] = datetime.now(timezone.utc)
+            out["created_at"] = ph_now()
 
     async def after_upsert(self, session, *, validated, existing, obj, audit_account_id) -> None:
         registration = getattr(existing or obj, "registration", None)

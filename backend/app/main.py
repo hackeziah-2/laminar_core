@@ -1,8 +1,10 @@
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
+from pydantic.json import ENCODERS_BY_TYPE
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi import UploadFile, File
@@ -43,13 +45,28 @@ from app.api.v1 import (
     atl_batch as atl_batch_router,
     atl_excel_import as atl_excel_import_router,
     report_generator as report_generator_router,
+    audit_log as audit_log_router,
 )
-from app.database import engine, Base
+from app.database import engine, Base, PH_TZ
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 from app.services.file_upload_service import (
     is_safe_module_folder,
     save_module_upload,
 )
+
+def _isoformat_ph(dt: datetime) -> str:
+    """Serialize datetimes in API responses as Asia/Manila (PH) time.
+
+    Timezone-aware values are converted to UTC+8; naive values (legacy rows /
+    user-entered local times) are emitted as-is to avoid corrupting them.
+    """
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(PH_TZ)
+    return dt.isoformat()
+
+
+# Global JSON encoder override (Pydantic v1 / FastAPI jsonable_encoder)
+ENCODERS_BY_TYPE[datetime] = _isoformat_ph
 
 OPENAPI_TAGS = [
     {"name": "ad-monitoring", "description": "**Aircraft-scoped AD monitoring** – `api/v1/aircraft/{aircraft_fk}/ad_monitoring/` (CRUD). **Work-order AD monitoring** – `api/v1/aircraft/{aircraft_fk}/ad_monitoring/{ad_monitoring_fk}/work-order-ad-monitoring/` (CRUD). See README **AD Monitoring** section."},
@@ -253,6 +270,7 @@ async def upload_file(
 
 app.include_router(flights_router.router)
 app.include_router(auth_router.router)
+app.include_router(audit_log_router.router)
 # Aircraft-scoped sub-routes first (longer paths) so /api/v1/aircraft/{id}/.../ is matched correctly
 app.include_router(aircraft_statutory_certificate_router.router_aircraft_scoped)
 app.include_router(document_on_board_router.router_aircraft_scoped)

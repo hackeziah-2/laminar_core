@@ -5,11 +5,11 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Dict, Optional, Set, Tuple, Union
 
-import pytz
 from dateutil.relativedelta import relativedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.atl_derived_times import map_auto_fields_to_comp, resolve_auto_fields
+from app.database import ph_now
 from app.models.cpcp_monitoring import CPCPMonitoring
 from app.repository.aircraft import get_aircraft_raw
 from app.repository.aircraft_technical_log import get_latest_aircraft_technical_log
@@ -90,8 +90,7 @@ def _effective_next_dues(obj: CPCPMonitoring) -> Tuple[Optional[float], Optional
 
 def _manila_today() -> date:
     """Calendar 'today' for CPCP remaining_* (Asia/Manila)."""
-    tz = pytz.timezone("Asia/Manila")
-    return datetime.now(tz).date()
+    return ph_now().date()
 
 
 def _yearfrac_times_12(today: date, end: date) -> float:

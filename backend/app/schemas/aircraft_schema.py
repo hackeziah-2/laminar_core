@@ -5,6 +5,8 @@ from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, validator, root_validator, Field
 
+from app.services.excel_import.parsers import is_spreadsheet_empty
+
 # Extensions treated as images (for modal preview in Aircraft Details)
 _IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"})
 
@@ -14,9 +16,9 @@ class AircrarftStatus(str, Enum):
     inactive = "Inactive"
     maintenance = "Maintenance"
 
+
 class AircraftBase(BaseModel):
     registration: Optional[str] = None
-    manufacturer: Optional[str] = None
     report_description: Optional[str] = None
 
     model: Optional[str] = None
@@ -61,7 +63,6 @@ class AircraftCreate(AircraftBase):
     """Schema for creating an aircraft. Required fields match DB NOT NULL columns."""
 
     registration: str
-    manufacturer: str
     model: str
     msn: str
     base: str
@@ -92,7 +93,7 @@ class AircraftOut(AircraftBase):
             return v
         # Build dict from ORM for Pydantic; add download URLs and is_image hints
         base_keys = [
-            "id", "created_at", "registration", "manufacturer", "report_description", "model", "model_year", "msn",
+            "id", "created_at", "registration", "report_description", "model", "model_year", "msn",
             "base", "ownership", "status", "airframe_aftt", "airframe_service_manual", "airframe_ipc",
             "engine_model", "engine_serial_number", "engine_life_time_limit",
             "engine_tsn", "engine_tso",
@@ -132,7 +133,6 @@ class AircraftListItem(BaseModel):
 # Pydantic schema
 class AircraftImportSchema(BaseModel):
     registration: str
-    manufacturer: str
     report_description: Optional[str] = None
     model: str
     model_year: Optional[int] = None
@@ -158,6 +158,16 @@ class AircraftImportSchema(BaseModel):
     propeller_life_time_limit: Optional[float] = None
     propeller_tsn: Optional[float] = Field(None, ge=0)
     propeller_tso: Optional[float] = Field(0, ge=0)
+
+    @validator("engine_tsn", "propeller_tsn", pre=True)
+    def normalize_import_tsn(cls, v):
+        if is_spreadsheet_empty(v):
+            return 0
+        if isinstance(v, str):
+            s = v.strip()
+            if not s or s.upper() == "UNK":
+                return 0
+        return v
 
     @validator("status", pre=True)
     def normalize_status(cls, v):
