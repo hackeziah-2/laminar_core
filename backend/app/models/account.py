@@ -48,6 +48,16 @@ class AccountInformation(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
         foreign_keys="[PersonnelCompliance.account_information_id]",
         back_populates="account_information",
     )
+    notifications_received = relationship(
+        "Notification",
+        foreign_keys="[Notification.recipient_account_id]",
+        back_populates="recipient",
+    )
+    notifications_sent = relationship(
+        "Notification",
+        foreign_keys="[Notification.sender_account_id]",
+        back_populates="sender",
+    )
 
     def __repr__(self):
         return f"<AccountInformation(username='{self.username}', name='{self.first_name} {self.last_name}')>"

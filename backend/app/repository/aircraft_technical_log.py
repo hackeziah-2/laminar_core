@@ -20,6 +20,7 @@ from app.models.aircraft import Aircraft
 from app.models.account import AccountInformation
 from app.models.audit_log import AuditAction
 from app.services.audit_trail_service import create_audit_log, serialize_audit_data
+from app.services.atl_service import AtlService
 from app.core.atl_edit_rbac import validate_atl_edit_allowed_for_account
 from app.core.atl_workflow_rbac import is_atl_work_status_transition_allowed
 from app.models.role import Role
@@ -753,6 +754,14 @@ async def update_aircraft_technical_log(
             request=audit_request,
         )
 
+    if reloaded and "work_status" in update_data:
+        atl_service = AtlService(session)
+        await atl_service.publish_status_change_notifications(
+            atl=reloaded,
+            old_status=(old_data_snapshot or {}).get("work_status"),
+            changed_by_account=audit_user or current_account,
+        )
+
     return reloaded
 
 
@@ -854,18 +863,38 @@ async def bulk_update_aircraft_technical_log_work_status(
     else:
         await session.rollback()
 
+    reloaded_by_id: Dict[int, AircraftTechnicalLog] = {}
+    if touched_rows:
+        reloaded_result = await session.execute(
+            select(AircraftTechnicalLog)
+            .options(selectinload(AircraftTechnicalLog.aircraft))
+            .where(AircraftTechnicalLog.id.in_([obj.id for obj, _ in touched_rows]))
+        )
+        reloaded_by_id = {row.id: row for row in reloaded_result.scalars().all()}
+
     if touched_rows and audit_module_name and audit_table_name:
         for obj, old_data_snapshot in touched_rows:
+            atl_row = reloaded_by_id.get(obj.id, obj)
             await create_audit_log(
                 db=session,
                 module_name=audit_module_name,
                 table_name=audit_table_name,
-                record_id=obj.id,
+                record_id=atl_row.id,
                 action=AuditAction.BULK_UPDATE,
                 old_data=old_data_snapshot,
-                new_data=obj,
+                new_data=atl_row,
                 current_user=audit_user or current_account,
                 request=audit_request,
+            )
+
+    if touched_rows:
+        atl_service = AtlService(session)
+        for obj, old_data_snapshot in touched_rows:
+            atl_row = reloaded_by_id.get(obj.id, obj)
+            await atl_service.publish_status_change_notifications(
+                atl=atl_row,
+                old_status=(old_data_snapshot or {}).get("work_status"),
+                changed_by_account=audit_user or current_account,
             )
 
     return AircraftTechnicalLogBulkWorkStatusUpdateResponse(
