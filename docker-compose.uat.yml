@@ -83,6 +83,27 @@ services:
     networks:
       - laminar_network_uat
 
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: laminar_celery_beat_uat
+    command: celery -A app.worker.celery_app beat --loglevel=info
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      celery:
+        condition: service_started
+    env_file:
+      - .env.uat
+    volumes:
+      - ./backend/uploads:/app/uploads
+    restart: unless-stopped
+    networks:
+      - laminar_network_uat
+
   nginx:
     image: nginx:alpine
     container_name: laminar_nginx_uat
