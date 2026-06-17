@@ -50,6 +50,7 @@ from app.api.v1 import (
 )
 from app.database import engine, Base, PH_TZ
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
+from app.websocket.notification_broker import start_notification_subscriber
 from app.services.file_upload_service import (
     is_safe_module_folder,
     save_module_upload,
@@ -331,3 +332,4 @@ async def startup():
     except Exception as e:
         print(f"Database connection warning: {e}")
         # Don't fail startup - migrations should handle table creation
+    start_notification_subscriber()

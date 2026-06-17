@@ -22,6 +22,7 @@ from app.websocket.notification_manager import (
     NotificationConnectionManager,
     get_notification_manager,
 )
+from app.websocket.notification_broker import publish_notification_realtime
 
 logger = logging.getLogger(__name__)
 
@@ -286,7 +287,7 @@ class NotificationService:
             },
         }
         try:
-            await self.ws_manager.send_to_user(recipient_account_id, payload)
+            await publish_notification_realtime(recipient_account_id, payload)
         except Exception:
             logger.warning(
                 "Realtime notification push failed for account_id=%s",
@@ -300,7 +301,7 @@ class NotificationService:
             "data": {"unread_count": unread_count},
         }
         try:
-            await self.ws_manager.send_to_user(recipient_account_id, payload)
+            await publish_notification_realtime(recipient_account_id, payload)
         except Exception:
             logger.warning(
                 "Unread count push failed for account_id=%s",

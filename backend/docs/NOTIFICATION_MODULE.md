@@ -157,19 +157,49 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ## Run Tests
 
+### Local / CI (pytest)
+
 ```bash
 cd backend
 pytest tests/test_notification_repository.py \
        tests/test_notification_service.py \
        tests/test_notifications_api.py \
        tests/test_notification_permissions.py \
-       tests/test_notification_websocket.py -v
+       tests/test_notification_websocket.py \
+       tests/test_notification_broker.py \
+       tests/test_advisory_notification_service.py \
+       tests/test_atl_notification_events.py \
+       tests/test_fleet_daily_update_notification_events.py -v
 ```
 
 Or all tests:
 
 ```bash
 pytest tests -v
+```
+
+### Per environment (Docker)
+
+From the repo root, with the target stack already running:
+
+```bash
+./scripts/test_notifications.sh dev
+./scripts/test_notifications.sh uat
+./scripts/test_notifications.sh prod
+```
+
+Each run:
+
+1. Confirms backend, celery, celery-beat, and nginx containers are up
+2. Runs the full notification pytest suite inside the backend container
+3. Checks nginx WebSocket proxy config and Redis subscriber logs
+4. Smoke-triggers the advisory Celery task and hits `/api/v1/health`
+
+Quick WebSocket / Celery smoke only (override containers for uat/prod):
+
+```bash
+BACKEND_CONTAINER=laminar_backend_uat CELERY_CONTAINER=laminar_celery_uat \
+  sh backend/scripts/verify_notification_ws.sh
 ```
 
 ## Security
