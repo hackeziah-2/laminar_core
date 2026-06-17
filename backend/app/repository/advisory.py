@@ -8,7 +8,7 @@ REMAINING VALIDITY: expiry_date - today (positive = days left). Only rows with i
 
 Display: if REMAINING VALIDITY <= 0 → "Expired"; elif <= 30 → int. Only items with REMAINING VALIDITY <= 30 are returned.
 """
-from datetime import date
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from fastapi import Request
@@ -26,7 +26,7 @@ from app.constants.audit import (
     PERSONNEL_COMPLIANCE_MODULE_NAME,
     PERSONNEL_COMPLIANCE_TABLE_NAME,
 )
-from app.database import set_audit_fields
+from app.database import PH_TZ, set_audit_fields
 from app.models.audit_log import AuditAction
 from app.services.audit_trail_service import create_audit_log, serialize_audit_data
 from app.models.account import AccountInformation
@@ -127,7 +127,7 @@ async def list_advisory_items(
     type_filter: Optional[str] = None,
     item_filter: Optional[str] = None,
 ) -> Tuple[List[AdvisoryItem], int]:
-    today = date.today()
+    today = datetime.now(PH_TZ).date()
     rows: List[AdvisoryItem] = []
 
     stmt_certificates = (
@@ -288,6 +288,26 @@ async def list_advisory_items(
     if limit is None:
         return rows, total
     return rows[offset : offset + limit], total
+
+
+async def list_advisory_items_by_remaining_validity(
+    session: AsyncSession,
+    *,
+    remaining_validity: int,
+) -> List[AdvisoryItem]:
+    """Return all advisory items matching an exact remaining validity."""
+    items, _ = await list_advisory_items(
+        session=session,
+        limit=None,
+        offset=0,
+        sort_remaining_validity="desc",
+    )
+    return [
+        item
+        for item in items
+        if item.REMAINING_VALIDITY is not None
+        and item.REMAINING_VALIDITY == remaining_validity
+    ]
 
 
 def _normalize_advisory_web_link(web_link: str) -> Optional[str]:

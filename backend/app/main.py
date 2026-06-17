@@ -46,6 +46,7 @@ from app.api.v1 import (
     atl_excel_import as atl_excel_import_router,
     report_generator as report_generator_router,
     audit_log as audit_log_router,
+    notification as notification_router,
 )
 from app.database import engine, Base, PH_TZ
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
@@ -270,6 +271,7 @@ async def upload_file(
 
 app.include_router(flights_router.router)
 app.include_router(auth_router.router)
+app.include_router(notification_router.router)
 app.include_router(audit_log_router.router)
 # Aircraft-scoped sub-routes first (longer paths) so /api/v1/aircraft/{id}/.../ is matched correctly
 app.include_router(aircraft_statutory_certificate_router.router_aircraft_scoped)

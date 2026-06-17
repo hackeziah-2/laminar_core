@@ -1,12 +1,40 @@
 import os
+import uuid as uuid_lib
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base, declared_attr, relationship
-from sqlalchemy import Boolean, Column, DateTime, Integer, ForeignKey, select
+from sqlalchemy import Boolean, Column, DateTime, Integer, ForeignKey, String, select, TypeDecorator
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.sql import func
+
+
+class GUID(TypeDecorator):
+    """Store UUIDs as native PostgreSQL UUID; as 36-char strings on SQLite (tests)."""
+
+    impl = String(36)
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(PGUUID(as_uuid=True))
+        return dialect.type_descriptor(String(36))
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        if dialect.name == "postgresql":
+            return value if isinstance(value, uuid_lib.UUID) else uuid_lib.UUID(str(value))
+        return str(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        if isinstance(value, uuid_lib.UUID):
+            return value
+        return uuid_lib.UUID(str(value))
 
 # Philippine timezone – use ph_now() for all app-generated timestamps
 PH_TZ = ZoneInfo("Asia/Manila")
@@ -56,6 +84,18 @@ class TimestampMixin:
         onupdate=ph_now,
         server_default=func.now(),
     )
+
+class PublicUuidMixin:
+    """Public UUID identifier alongside Integer primary keys (opt-in per model)."""
+
+    uuid = Column(
+        GUID(),
+        unique=True,
+        nullable=False,
+        default=uuid_lib.uuid4,
+        index=True,
+    )
+
 
 # Mixin for soft deletes
 class SoftDeleteMixin:
