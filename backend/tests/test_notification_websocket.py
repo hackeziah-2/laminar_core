@@ -47,7 +47,7 @@ async def test_service_realtime_push_reaches_connected_socket(
             recipient_account_id=auth_account_id,
             sender_initials="TU",
             title="Realtime test",
-            message="Push via broker fallback",
+            message="Push via local delivery",
             module_name="advisory",
             type=NotificationType.REMINDER,
             severity=NotificationSeverity.WARNING,
