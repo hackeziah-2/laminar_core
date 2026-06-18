@@ -22,7 +22,12 @@ _subscriber_task: Optional[asyncio.Task] = None
 
 async def publish_notification_realtime(account_id: int, payload: Dict[str, Any]) -> None:
     """Publish a realtime notification event to all API worker processes."""
-    message = json.dumps({"account_id": account_id, "payload": payload})
+    origin_pid = os.getpid()
+    message = json.dumps(
+        {"account_id": account_id, "payload": payload, "origin_pid": origin_pid}
+    )
+    manager = get_notification_manager()
+    await manager.send_to_user(account_id, payload)
     try:
         client = aioredis.from_url(REDIS_URL, decode_responses=True)
         try:
@@ -32,23 +37,15 @@ async def publish_notification_realtime(account_id: int, payload: Dict[str, Any]
                 payload.get("event"),
                 account_id,
                 receivers,
-                os.getpid(),
+                origin_pid,
             )
-            if receivers == 0:
-                logger.warning(
-                    "[notifications-ws] no redis subscribers; falling back to local push "
-                    "account_id=%s",
-                    account_id,
-                )
-                await get_notification_manager().send_to_user(account_id, payload)
         finally:
             await client.aclose()
     except Exception:
         logger.warning(
-            "Redis notification publish failed; falling back to local WebSocket push",
+            "Redis notification publish failed; local WebSocket push already attempted",
             exc_info=True,
         )
-        await get_notification_manager().send_to_user(account_id, payload)
 
 
 async def _subscriber_loop(manager: NotificationConnectionManager) -> None:
@@ -66,6 +63,9 @@ async def _subscriber_loop(manager: NotificationConnectionManager) -> None:
                 if message.get("type") != "message":
                     continue
                 data = json.loads(message["data"])
+                message_origin_pid = data.get("origin_pid")
+                if message_origin_pid is not None and int(message_origin_pid) == os.getpid():
+                    continue
                 account_id = int(data["account_id"])
                 payload = data["payload"]
                 await manager.send_to_user(account_id, payload)

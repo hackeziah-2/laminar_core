@@ -1,7 +1,8 @@
-"""Tests for Redis notification broker and local fallback."""
+"""Tests for Redis notification broker and local delivery."""
 
 from __future__ import annotations
 
+import os
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -11,7 +12,7 @@ from app.websocket.notification_manager import get_notification_manager
 
 
 @pytest.mark.asyncio
-async def test_publish_uses_local_fallback_when_redis_unavailable(monkeypatch):
+async def test_publish_delivers_locally_when_redis_unavailable(monkeypatch):
     manager = get_notification_manager()
 
     class _FakeWebSocket:
@@ -42,7 +43,7 @@ async def test_publish_uses_local_fallback_when_redis_unavailable(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_publish_falls_back_when_no_subscribers(monkeypatch):
+async def test_publish_delivers_locally_even_when_redis_has_subscribers(monkeypatch):
     manager = get_notification_manager()
 
     class _FakeWebSocket:
@@ -57,7 +58,7 @@ async def test_publish_falls_back_when_no_subscribers(monkeypatch):
     manager._connections[account_id].add(socket)
 
     mock_client = MagicMock()
-    mock_client.publish = AsyncMock(return_value=0)
+    mock_client.publish = AsyncMock(return_value=2)
     mock_client.aclose = AsyncMock()
 
     monkeypatch.setattr(
@@ -71,3 +72,28 @@ async def test_publish_falls_back_when_no_subscribers(monkeypatch):
     assert len(socket.messages) == 1
     assert socket.messages[0]["data"]["unread_count"] == 2
     manager._connections[account_id].discard(socket)
+
+
+@pytest.mark.asyncio
+async def test_publish_includes_origin_pid_for_subscriber_dedup(monkeypatch):
+    published_messages: list[str] = []
+
+    mock_client = MagicMock()
+
+    async def _capture_publish(channel, message):
+        published_messages.append(message)
+        return 1
+
+    mock_client.publish = _capture_publish
+    mock_client.aclose = AsyncMock()
+
+    monkeypatch.setattr(
+        "app.websocket.notification_broker.aioredis.from_url",
+        lambda *_args, **_kwargs: mock_client,
+    )
+
+    payload = {"event": "new_notification", "data": {"id": 99}}
+    await publish_notification_realtime(1001, payload)
+
+    assert len(published_messages) == 1
+    assert f'"origin_pid": {os.getpid()}' in published_messages[0]
