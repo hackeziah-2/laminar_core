@@ -1,4 +1,5 @@
 import os
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -49,6 +50,7 @@ from app.api.v1 import (
     notification as notification_router,
 )
 from app.database import engine, Base, PH_TZ
+from app.core.logging import setup_logging
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 from app.websocket.notification_broker import start_notification_subscriber
 from app.services.file_upload_service import (
@@ -69,6 +71,9 @@ def _isoformat_ph(dt: datetime) -> str:
 
 # Global JSON encoder override (Pydantic v1 / FastAPI jsonable_encoder)
 ENCODERS_BY_TYPE[datetime] = _isoformat_ph
+
+setup_logging()
+logger = logging.getLogger("laminar.api")
 
 OPENAPI_TAGS = [
     {"name": "ad-monitoring", "description": "**Aircraft-scoped AD monitoring** – `api/v1/aircraft/{aircraft_fk}/ad_monitoring/` (CRUD). **Work-order AD monitoring** – `api/v1/aircraft/{aircraft_fk}/ad_monitoring/{ad_monitoring_fk}/work-order-ad-monitoring/` (CRUD). See README **AD Monitoring** section."},
@@ -167,6 +172,42 @@ async def api_v1_health():
         "uploads_dir": str(UPLOAD_DIR),
         "uploads_exists": uploads_ok,
         "uploads_writable": uploads_writable,
+    }
+
+
+@app.get("/api/v1/health/live", tags=["health"])
+async def liveness():
+    return {"status": "ok", "check": "live"}
+
+
+@app.get("/api/v1/health/ready", tags=["health"])
+async def readiness():
+    db_ok = True
+    redis_ok = True
+
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT 1"))
+    except Exception:
+        db_ok = False
+
+    redis_url = os.getenv("REDIS_URL", "").strip()
+    if redis_url:
+        try:
+            import redis.asyncio as redis_async
+
+            client = redis_async.from_url(redis_url)
+            await client.ping()
+            await client.close()
+        except Exception:
+            redis_ok = False
+
+    status = "ok" if db_ok and redis_ok else "degraded"
+    return {
+        "status": status,
+        "check": "ready",
+        "database": db_ok,
+        "redis": redis_ok,
     }
 
 
@@ -330,6 +371,7 @@ async def startup():
         async with engine.begin() as conn:
             await conn.execute(text("SELECT 1"))
     except Exception as e:
-        print(f"Database connection warning: {e}")
+        logger.warning("Database connection warning during startup", exc_info=e)
         # Don't fail startup - migrations should handle table creation
+    logger.info("Starting websocket notification subscriber")
     start_notification_subscriber()
