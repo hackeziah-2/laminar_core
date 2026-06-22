@@ -27,7 +27,8 @@ Ensure each environment uses:
 - **Frontend API URLs:** In the **laminaraviationapp** repo, set env so the frontend calls the correct API:
   - **Dev (local):** `VITE_APP_URL=http://localhost:3000`, `VITE_API_URL=http://localhost:8000/api/v1/` (or via NGINX: `http://localhost:8080/api/v1/`). See `docs/frontend-env-dev.example` → `.env.development` or `.env.local`.
   - **UAT:** `VITE_APP_URL=http://120.89.33.51:3011`, `VITE_API_URL=http://120.89.33.51:8081/api/v1/`. Use the nginx UAT endpoint as the canonical API base, not the bare host or backend port. See `docs/frontend-env-uat.example` → `.env.uat`.
-  - **Prod:** `VITE_APP_URL=http://120.89.33.51:3002`, `VITE_API_URL=http://120.89.33.51:8200/api/v1/` (or use NGINX: `http://120.89.33.51:8082/api/v1/`). See `docs/frontend-env-prod.example` → `.env.prod`.
+  - **Prod (HTTPS):** `VITE_APP_URL=https://fleet.laminaraviationapps.com`, `VITE_API_URL=/api/v1/`, `VITE_WS_URL=wss://api-fleet.laminaraviationapps.com/api/v1`. See `docs/frontend-env-prod.example` → `.env.prod`. If `VITE_WS_URL` is omitted, add `nginx/openresty-fleet-ws.example.conf` to the fleet OpenResty vhost so same-origin WebSocket upgrades work.
+  - **Prod (legacy IP):** `VITE_APP_URL=http://120.89.33.51:3002`, `VITE_API_URL=http://120.89.33.51:8200/api/v1/` (or NGINX: `http://120.89.33.51:8082/api/v1/`).
 - **Reference files:** `docs/frontend-env-dev.example`, `docs/frontend-env-uat.example`, `docs/frontend-env-prod.example`; copy to laminaraviationapp as `.env.development`/`.env.local`, `.env.uat`, `.env.prod`.
 - **NGINX:** Dev uses `NGINX_PORT` (e.g. 8080); UAT and prod proxy `/api/v1/` with `NGINX_PORT` from `.env.uat` (8081) and `.env.prod` (8082).
 
@@ -404,6 +405,23 @@ docker-compose -f docker-compose.prod.yml exec backend alembic upgrade head
 ## Troubleshooting
 
 Use the same compose file as the stack you're debugging (e.g. `-f docker-compose.dev.yml`).
+
+### Notifications / WebSocket not working (prod)
+
+```bash
+./scripts/verify_prod_notification_ws.sh
+./scripts/test_notifications.sh prod
+```
+
+If `fleet.laminaraviationapps.com` WebSocket returns **404** but REST `/api/v1/health` returns **200**, OpenResty on the fleet vhost is not upgrading WebSocket. Add `nginx/openresty-fleet-ws.example.conf` to the fleet OpenResty server block (upstream port **8082** per `.env.prod`), reload OpenResty, and re-run the smoke test. Both fleet and api-fleet should then return **403** (not 404) for a test token.
+
+Alternatively, set `VITE_WS_URL=wss://api-fleet.laminaraviationapps.com/api/v1` in laminaraviationapp `.env.prod` and rebuild the frontend.
+
+After backend changes, redeploy with correct ports from `.env.prod`:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.prod up --build -d
+```
 
 ### Check Service Status
 ```bash

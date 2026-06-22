@@ -208,6 +208,52 @@ BACKEND_CONTAINER=laminar_backend_uat CELERY_CONTAINER=laminar_celery_uat \
 - Queries are always scoped to `recipient_account_id = current_account.id`.
 - Cross-user access returns `404 Not Found` (no information leakage).
 
+## Production WebSocket (HTTPS domains)
+
+Realtime notifications require a working WebSocket upgrade path end-to-end:
+
+```text
+Browser  →  OpenResty (fleet / api-fleet)  →  docker nginx (:8082)  →  gunicorn workers
+```
+
+### Symptom
+
+- REST works (`GET /api/v1/notifications/unread-count` returns 401/200).
+- WebSocket on `wss://fleet.laminaraviationapps.com/api/v1/notifications/ws` returns **HTTP 404**.
+- WebSocket on `wss://api-fleet.laminaraviationapps.com/api/v1/notifications/ws` returns **HTTP 403** with an invalid token (route exists).
+
+The prod frontend is served from `fleet.laminaraviationapps.com` and builds the WebSocket URL from the same origin unless `VITE_WS_URL` is set.
+
+### Fix (choose one)
+
+**Option A — OpenResty on fleet (no frontend rebuild)**
+
+Add the block in `nginx/openresty-fleet-ws.example.conf` to the OpenResty vhost for `fleet.laminaraviationapps.com`, then reload OpenResty. Upstream port must match `NGINX_PORT` in `.env.prod` (default **8082**).
+
+**Option B — Frontend `VITE_WS_URL`**
+
+In **laminaraviationapp** `.env.prod`:
+
+```env
+VITE_APP_URL=https://fleet.laminaraviationapps.com
+VITE_API_URL=/api/v1/
+VITE_WS_URL=wss://api-fleet.laminaraviationapps.com/api/v1
+```
+
+Rebuild and redeploy the frontend. See `docs/frontend-env-prod.example`.
+
+### Verify
+
+```bash
+chmod +x scripts/verify_prod_notification_ws.sh
+./scripts/verify_prod_notification_ws.sh
+
+# Docker stack (on the server)
+./scripts/test_notifications.sh prod
+```
+
+After a successful fix, `fleet` and `api-fleet` WebSocket smoke tests should return **403** (not 404) when called without a valid JWT.
+
 ## Future Channels
 
 The service layer is the integration point for email/SMS/push. Add a strategy interface under `services/` without changing repository contracts or API shapes.
