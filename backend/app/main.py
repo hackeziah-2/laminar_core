@@ -46,9 +46,11 @@ from app.api.v1 import (
     atl_excel_import as atl_excel_import_router,
     report_generator as report_generator_router,
     audit_log as audit_log_router,
+    notification as notification_router,
 )
 from app.database import engine, Base, PH_TZ
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
+from app.websocket.notification_broker import start_notification_subscriber
 from app.services.file_upload_service import (
     is_safe_module_folder,
     save_module_upload,
@@ -270,6 +272,7 @@ async def upload_file(
 
 app.include_router(flights_router.router)
 app.include_router(auth_router.router)
+app.include_router(notification_router.router)
 app.include_router(audit_log_router.router)
 # Aircraft-scoped sub-routes first (longer paths) so /api/v1/aircraft/{id}/.../ is matched correctly
 app.include_router(aircraft_statutory_certificate_router.router_aircraft_scoped)
@@ -329,3 +332,4 @@ async def startup():
     except Exception as e:
         print(f"Database connection warning: {e}")
         # Don't fail startup - migrations should handle table creation
+    start_notification_subscriber()

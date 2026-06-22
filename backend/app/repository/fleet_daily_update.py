@@ -1,3 +1,4 @@
+import logging
 from typing import Optional, List, Tuple, Dict
 
 from fastapi import HTTPException, Request
@@ -12,12 +13,17 @@ from app.models.audit_log import AuditAction
 from app.models.fleet_daily_update import FleetDailyUpdate, FleetDailyUpdateStatusEnum
 from app.services.audit_trail_service import create_audit_log, serialize_audit_data
 from app.repository.aircraft import get_aircraft_raw
+from app.events.fleet_daily_update_notification_events import (
+    publish_fleet_daily_update_bulk_notification,
+)
 from app.schemas.fleet_daily_update_schema import (
     FleetDailyUpdateCreate,
     FleetDailyUpdateUpdate,
     FleetDailyUpdateBulkUpdateItem,
     FleetDailyUpdateBulkUpdateResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _status_from_str(value: Optional[str]) -> Optional[str]:
@@ -414,6 +420,18 @@ async def bulk_update_fleet_daily_updates(
                 request=audit_request,
             )
 
+    if updated_objects:
+        try:
+            await publish_fleet_daily_update_bulk_notification(
+                session,
+                updated_objects=updated_objects,
+                changed_by_account=audit_user,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to publish Fleet Daily Update bulk update notification"
+            )
+        
     return FleetDailyUpdateBulkUpdateResponse(
         message="Fleet Daily Update records updated successfully",
         updated_count=len(updated_ids),

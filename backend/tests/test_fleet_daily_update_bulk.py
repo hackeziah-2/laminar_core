@@ -228,6 +228,66 @@ def test_bulk_update_fleet_daily_updates_writes_audit_logs(
         assert "remarks" in (update_log["changed_fields"] or [])
 
 
+def test_bulk_update_fleet_daily_updates_calls_notification_once(
+    client_with_daily_update_auth: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    client = client_with_daily_update_auth
+    ac1 = _create_aircraft(client, "FDU-NOTIF-001")
+    ac2 = _create_aircraft(client, "FDU-NOTIF-002")
+    update_id_1 = _fleet_update_id_for_aircraft(client, ac1)
+    update_id_2 = _fleet_update_id_for_aircraft(client, ac2)
+
+    calls = []
+
+    async def _fake_bulk_notification(*args, **kwargs):
+        calls.append(kwargs)
+        return []
+
+    monkeypatch.setattr(
+        "app.repository.fleet_daily_update.publish_fleet_daily_update_bulk_notification",
+        _fake_bulk_notification,
+    )
+
+    response = client.patch(
+        "/api/v1/fleet-daily-update/bulk/",
+        json={
+            "updates": [
+                {"id": update_id_1, "remarks": "Notif bulk update 1"},
+                {"id": update_id_2, "remarks": "Notif bulk update 2"},
+            ]
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert len(calls) == 1
+    assert len(calls[0]["updated_objects"]) == 2
+
+
+def test_bulk_update_fleet_daily_updates_notification_failure_does_not_fail_response(
+    client_with_daily_update_auth: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    client = client_with_daily_update_auth
+    ac1 = _create_aircraft(client, "FDU-NOTIF-ERR-001")
+    update_id_1 = _fleet_update_id_for_aircraft(client, ac1)
+
+    async def _fake_bulk_notification(*args, **kwargs):
+        raise RuntimeError("notification failure")
+
+    monkeypatch.setattr(
+        "app.repository.fleet_daily_update.publish_fleet_daily_update_bulk_notification",
+        _fake_bulk_notification,
+    )
+
+    response = client.patch(
+        "/api/v1/fleet-daily-update/bulk/",
+        json={"updates": [{"id": update_id_1, "remarks": "Notif error test"}]},
+    )
+    assert response.status_code == 200, response.text
+    assert "Failed to publish Fleet Daily Update bulk update notification" in caplog.text
+
+
 def test_fleet_daily_update_delete_writes_audit_log(
     client_with_daily_update_auth: TestClient,
 ):

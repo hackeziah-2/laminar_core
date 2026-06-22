@@ -169,6 +169,18 @@ async def api_list_fleet_daily_updates_paged(
     }
 
 
+@router.put(
+    "/bulk/",
+    response_model=fleet_daily_update_schema.FleetDailyUpdateBulkUpdateResponse,
+    summary="Bulk partial update Fleet Daily Update records",
+    description=(
+        "Apply partial updates to multiple Fleet Daily Update records in one atomic request. "
+        "Each item in `updates` must include `id`; optional fields are `aircraft_id`, `status`, "
+        "`tach_time_eod`, and `remarks`. Only provided fields are updated. "
+        "All record IDs are validated before any write; the entire batch rolls back if any update fails. "
+        "Requires `can_update` permission on the Daily Update module."
+    ),
+)
 @router.patch(
     "/bulk/",
     response_model=fleet_daily_update_schema.FleetDailyUpdateBulkUpdateResponse,

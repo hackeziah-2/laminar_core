@@ -51,6 +51,25 @@ services:
     networks:
       - laminar_network_prod
 
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: laminar_celery_beat_prod
+    command: celery -A app.worker.celery_app beat --loglevel=info
+    depends_on:
+      redis:
+        condition: service_healthy
+      celery:
+        condition: service_started
+    env_file:
+      - .env.prod
+    volumes:
+      - ./backend/uploads:/app/uploads
+    restart: unless-stopped
+    networks:
+      - laminar_network_prod
+
   nginx:
     image: nginx:alpine
     container_name: laminar_nginx_prod

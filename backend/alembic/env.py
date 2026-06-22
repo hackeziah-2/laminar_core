@@ -28,6 +28,8 @@ from app.models.logbooks import EngineLogbook, AirframeLogbook, AvionicsLogbook,
 from app.models.document_on_board import DocumentOnBoard
 from app.models.ad_monitoring import ADMonitoring, WorkOrderADMonitoring
 from app.models.audit_log import AuditLog
+from app.models.notification import Notification
+from app.models.advisory_notification_log import AdvisoryNotificationLog
 
 target_metadata = Base.metadata
 
