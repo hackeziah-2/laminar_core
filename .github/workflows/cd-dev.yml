@@ -1,0 +1,30 @@
+name: CD Dev
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+jobs:
+  deploy-dev:
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to dev via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEV_SSH_HOST }}
+          username: ${{ secrets.DEV_SSH_USER }}
+          key: ${{ secrets.DEV_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.DEV_SSH_PORT || 22 }}
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.DEV_DEPLOY_PATH }}"
+            git fetch --all --prune
+            git checkout develop
+            git pull --ff-only origin develop
+            export APP_IMAGE="ghcr.io/${{ github.repository_owner }}/laminar-core-backend:sha-${{ github.sha }}"
+            ./scripts/deploy/deploy.sh dev "$APP_IMAGE"

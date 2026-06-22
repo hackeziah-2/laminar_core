@@ -1,0 +1,37 @@
+name: CD Prod
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy (default: latest)"
+        required: false
+        default: "latest"
+
+jobs:
+  deploy-prod:
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to prod via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_SSH_HOST }}
+          username: ${{ secrets.PROD_SSH_USER }}
+          key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.PROD_SSH_PORT || 22 }}
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.PROD_DEPLOY_PATH }}"
+            git fetch --all --prune
+            git checkout main
+            git pull --ff-only origin main
+            IMAGE_TAG="${{ github.event.inputs.image_tag }}"
+            if [ -z "$IMAGE_TAG" ]; then IMAGE_TAG="latest"; fi
+            export APP_IMAGE="ghcr.io/${{ github.repository_owner }}/laminar-core-backend:${IMAGE_TAG}"
+            ./scripts/deploy/deploy.sh prod "$APP_IMAGE"

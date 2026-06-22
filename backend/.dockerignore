@@ -1,69 +1,22 @@
-# Python
+.git
+.gitignore
+.DS_Store
 __pycache__/
 *.py[cod]
-*$py.class
 *.so
-.Python
-env/
-venv/
-ENV/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual environments
+.venv/
 venv/
 env/
-ENV/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-
-# Testing
+.mypy_cache/
 .pytest_cache/
+.ruff_cache/
 .coverage
-htmlcov/
 .tox/
-.hypothesis/
-
-# Alembic
-alembic/versions/__pycache__/
-
-# Logs
+htmlcov/
 *.log
-logs/
-
-# Environment files
-.env
-.env.local
-.env.*.local
-
-# Git
-.git/
-.gitignore
-
-# Temporary files
 *.tmp
 *.bak
-*.swp
-.cache/
-
-# Uploads (if you want to exclude from image)
-# uploads/
+.idea/
+.vscode/
+tests/
+docs/

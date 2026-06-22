@@ -1,55 +1,57 @@
-# Single Dockerfile for dev, uat, and prod.
-# - Dev: docker-compose.dev.yml overrides CMD with uvicorn --reload
-# - UAT/Prod: docker-compose.uat.yml / .prod.yml override CMD with gunicorn
-FROM python:3.11-slim
+FROM python:3.11-slim AS builder
 
-WORKDIR /app
+WORKDIR /build
 
-# Set environment variables (TZ pins container clock to Philippine Standard Time)
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    TZ=Asia/Manila
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
 
-# Install system dependencies (shared across dev/uat/prod)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
     libcairo2-dev \
     pkg-config \
     python3-dev \
-    gosu \
-    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Upgrade pip
-RUN pip install --upgrade pip setuptools wheel
-
-# Copy requirements first for caching
 COPY requirements.txt .
+RUN python -m pip install --upgrade pip setuptools wheel \
+    && python -m pip wheel --wheel-dir /wheels -r requirements.txt
 
-# Install Python dependencies (uvicorn + gunicorn for all envs)
-RUN pip install --no-cache-dir -r requirements.txt
+FROM python:3.11-slim AS runtime
 
-# Copy app code
+WORKDIR /app
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    TZ=UTC
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    libcairo2 \
+    gosu \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /wheels /wheels
+COPY requirements.txt .
+RUN python -m pip install --upgrade pip \
+    && python -m pip install --no-index --find-links=/wheels -r requirements.txt \
+    && rm -rf /wheels
+
 COPY . .
 
-# Create non-root user
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+RUN useradd -m -u 10001 appuser \
+    && mkdir -p /app/uploads \
+    && chown -R appuser:appuser /app
 
-# Entrypoint: migrations then exec CMD (handles permissions & user)
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
-# Expose FastAPI port
 EXPOSE 8000
 
-# Healthcheck (exec form for reliable behavior)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/docs')"]
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/ready', timeout=5)"]
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
-
-# Production-safe default (no --reload). Dev uses compose override with --reload; UAT/Prod use gunicorn override.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "app.main:app", "-w", "4", "-b", "0.0.0.0:8000"]
