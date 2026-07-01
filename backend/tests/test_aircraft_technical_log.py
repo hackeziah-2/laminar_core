@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_account
 from app.models.aircraft_techinical_log import AircraftTechnicalLog, WorkStatus
@@ -584,6 +585,150 @@ def test_latest_with_sequence_no_returns_previous_atl(
         "/api/v1/aircraft-technical-log/latest?sequence_no=1006"
     )
     assert no_aircraft.status_code == 422
+
+
+def test_previous_atl_lookup_skips_soft_deleted_predecessor(
+    client_with_atl_auth: TestClient,
+    test_aircraft_technical_log_data: dict,
+):
+    """Previous ATL lookup must skip soft-deleted rows in the same batch/aircraft stream."""
+    from app.models.atl_batch import AtlBatch
+
+    aircraft_fk = test_aircraft_technical_log_data["aircraft_fk"]
+
+    async def seed_batch() -> int:
+        async with TestSessionLocal() as session:
+            batch = AtlBatch(name="Batch soft-delete prev test", description="pytest")
+            session.add(batch)
+            await session.commit()
+            await session.refresh(batch)
+            return batch.id
+
+    batch_id = asyncio.run(seed_batch())
+    base = {**test_aircraft_technical_log_data, "aircraft_fk": aircraft_fk, "atl_batch_fk": batch_id}
+
+    created_ids = {}
+    for seq in ["1004", "1005", "1006"]:
+        response = client_with_atl_auth.post(
+            "/api/v1/aircraft-technical-log/",
+            json={**base, "sequence_no": f"ATL-{seq}"},
+        )
+        assert response.status_code == 201, response.text
+        created_ids[seq] = response.json()["id"]
+
+    delete_response = client_with_atl_auth.delete(
+        f"/api/v1/aircraft-technical-log/{created_ids['1005']}"
+    )
+    assert delete_response.status_code == 204
+
+    previous = client_with_atl_auth.get(
+        f"/api/v1/aircraft-technical-log/latest"
+        f"?aircraft_fk={aircraft_fk}&batch_id={batch_id}&sequence_no=1006"
+    )
+    assert previous.status_code == 200
+    assert previous.json()["sequence_no"] == "1004"
+
+
+def test_create_uses_nearest_active_previous_atl_for_meter_starts(
+    client_with_atl_auth: TestClient,
+    test_aircraft_technical_log_data: dict,
+):
+    """Create should chain hobbs/tach starts from the nearest non-deleted predecessor."""
+    from app.models.atl_batch import AtlBatch
+
+    aircraft_fk = test_aircraft_technical_log_data["aircraft_fk"]
+
+    async def seed_batch() -> int:
+        async with TestSessionLocal() as session:
+            batch = AtlBatch(name="Batch meter prev test", description="pytest")
+            session.add(batch)
+            await session.commit()
+            await session.refresh(batch)
+            return batch.id
+
+    batch_id = asyncio.run(seed_batch())
+    base = {**test_aircraft_technical_log_data, "aircraft_fk": aircraft_fk, "atl_batch_fk": batch_id}
+
+    first = client_with_atl_auth.post(
+        "/api/v1/aircraft-technical-log/",
+        json={
+            **base,
+            "sequence_no": "ATL-1004",
+            "hobbs_meter_start": 10.0,
+            "hobbs_meter_end": 11.0,
+            "tachometer_start": 20.0,
+            "tachometer_end": 21.0,
+        },
+    )
+    assert first.status_code == 201, first.text
+
+    middle = client_with_atl_auth.post(
+        "/api/v1/aircraft-technical-log/",
+        json={
+            **base,
+            "sequence_no": "ATL-1005",
+            "hobbs_meter_start": 11.0,
+            "hobbs_meter_end": 12.0,
+            "tachometer_start": 21.0,
+            "tachometer_end": 22.0,
+        },
+    )
+    assert middle.status_code == 201, middle.text
+    client_with_atl_auth.delete(f"/api/v1/aircraft-technical-log/{middle.json()['id']}")
+
+    last = client_with_atl_auth.post(
+        "/api/v1/aircraft-technical-log/",
+        json={
+            **base,
+            "sequence_no": "ATL-1006",
+            "hobbs_meter_start": None,
+            "hobbs_meter_end": 13.0,
+            "tachometer_start": None,
+            "tachometer_end": 23.0,
+        },
+    )
+    assert last.status_code == 201, last.text
+    body = last.json()
+    assert body["hobbs_meter_start"] == 11.0
+    assert body["tachometer_start"] == 21.0
+
+
+@pytest.mark.asyncio
+async def test_get_previous_atl_honors_exclude_atl_id(db_session: AsyncSession):
+    """exclude_atl_id skips a row that would otherwise be the immediate predecessor."""
+    from app.models.aircraft import Aircraft
+    from app.repository.aircraft_technical_log import get_previous_atl
+
+    aircraft = Aircraft(
+        registration="TEST-PREV-EXCL",
+        model="172",
+        msn="MSN-PREV-EXCL",
+        base="Base",
+        ownership="Owner",
+        status="Active",
+    )
+    db_session.add(aircraft)
+    await db_session.flush()
+
+    rows = [
+        AircraftTechnicalLog(aircraft_fk=aircraft.id, sequence_no="1004"),
+        AircraftTechnicalLog(aircraft_fk=aircraft.id, sequence_no="1005"),
+    ]
+    db_session.add_all(rows)
+    await db_session.flush()
+
+    nearest = await get_previous_atl(db_session, aircraft.id, "1006")
+    assert nearest is not None
+    assert nearest.id == rows[1].id
+
+    skipped = await get_previous_atl(
+        db_session,
+        aircraft.id,
+        "1006",
+        exclude_atl_id=rows[1].id,
+    )
+    assert skipped is not None
+    assert skipped.id == rows[0].id
 
 
 def test_atl_create_writes_audit_log(

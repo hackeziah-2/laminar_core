@@ -55,6 +55,48 @@ def current_airframe_run_time(atl) -> float:
     return abs(tach_end - tach_start)
 
 
+def current_engine_run_time(atl) -> float:
+    """Engine leg run time: explicit engine_run_time when set, else tach delta."""
+    manual = float_or_zero(getattr(atl, "engine_run_time", None))
+    if manual != 0.0:
+        return manual
+    return current_airframe_run_time(atl)
+
+
+def current_propeller_run_time(atl) -> float:
+    """Propeller leg run time: explicit propeller_run_time when set, else tach delta."""
+    manual = float_or_zero(getattr(atl, "propeller_run_time", None))
+    if manual != 0.0:
+        return manual
+    return current_airframe_run_time(atl)
+
+
+def aircraft_engine_tbo_baseline(aircraft, atl) -> float:
+    """Initial engine TBO remaining from aircraft life limit minus baseline TSO."""
+    life = (
+        float_or_zero(getattr(aircraft, "engine_life_time_limit", None))
+        if aircraft
+        else float_or_zero(getattr(atl, "life_time_limit_engine", None))
+    )
+    if not life:
+        return 0.0
+    tso = float_or_zero(getattr(aircraft, "engine_tso", None)) if aircraft else 0.0
+    return life - tso
+
+
+def aircraft_propeller_tbo_baseline(aircraft, atl) -> float:
+    """Initial propeller TBO remaining from aircraft life limit minus baseline TSO."""
+    life = (
+        float_or_zero(getattr(aircraft, "propeller_life_time_limit", None))
+        if aircraft
+        else float_or_zero(getattr(atl, "life_time_limit_propeller", None))
+    )
+    if not life:
+        return 0.0
+    tso = float_or_zero(getattr(aircraft, "propeller_tso", None)) if aircraft else 0.0
+    return life - tso
+
+
 def previous_value_or_aircraft(
     prev_atl,
     prev_attr: str,
@@ -68,12 +110,10 @@ def previous_value_or_aircraft(
     return float_or_zero(getattr(aircraft, aircraft_attr, None)) if aircraft else 0.0
 
 
-# Manual ATL field -> persisted auto_* column used when the manual field is zero.
+# Manual ATL field -> persisted auto_* column used when the manual field is zero (TSN only).
 _PREV_ATTR_TO_AUTO_COL: Dict[str, str] = {
     "engine_tsn": "auto_engine_tsn",
-    "engine_tso": "auto_engine_tso",
     "propeller_tsn": "auto_propeller_tsn",
-    "propeller_tso": "auto_propeller_tso",
 }
 
 
@@ -85,19 +125,38 @@ def previous_computed_or_aircraft(
     aircraft,
     aircraft_attr: str,
 ) -> float:
-    """Previous cumulative total: persisted auto_* on prev row, else in-memory chain, else aircraft."""
+    """Previous cumulative total for TSN: manual value when set, else auto_* chain, else aircraft."""
     prev_raw = float_or_zero(getattr(prev_atl, prev_attr, None)) if prev_atl else 0.0
     if prev_raw != 0.0:
         return prev_raw
 
-    # Raw zero: use persisted cumulative on the previous row when backfilled; otherwise aircraft
-    # baseline (do not use in-memory prev_auto_fields so a SQL-seeded prior leg does not skew the next).
     auto_col = _PREV_ATTR_TO_AUTO_COL.get(prev_attr)
     if prev_atl and auto_col:
         persisted = float_or_zero(getattr(prev_atl, auto_col, None))
         if persisted != 0.0:
             return persisted
 
+    return float_or_zero(getattr(aircraft, aircraft_attr, None)) if aircraft else 0.0
+
+
+def previous_auto_baseline(
+    prev_auto_fields: Optional[Dict[str, float]],
+    auto_key: str,
+    prev_atl,
+    aircraft,
+    aircraft_attr: str,
+    *,
+    aircraft_fallback: Optional[float] = None,
+) -> float:
+    """Previous computed auto_* baseline; ignores manually edited ATL time columns."""
+    if prev_auto_fields is not None and auto_key in prev_auto_fields:
+        return float_or_zero(prev_auto_fields[auto_key])
+    if prev_atl is not None:
+        persisted = getattr(prev_atl, auto_key, None)
+        if persisted is not None:
+            return float_or_zero(persisted)
+    if aircraft_fallback is not None:
+        return float_or_zero(aircraft_fallback)
     return float_or_zero(getattr(aircraft, aircraft_attr, None)) if aircraft else 0.0
 
 
@@ -144,7 +203,7 @@ def compute_auto_fields(
         pass
 
     try:
-        leg_rt = out["auto_airframe_run_time"]
+        leg_rt = current_engine_run_time(atl)
         out["auto_engine_run_time"] = leg_rt
         out["auto_run_time"] = leg_rt
     except Exception:
@@ -170,33 +229,32 @@ def compute_auto_fields(
         pass
 
     try:
-        if prev_atl is None:
-            base_tso = float_or_zero(
-                getattr(aircraft, "engine_tso", None)
-            ) if aircraft else 0.0
-            out["auto_engine_tso"] = base_tso + out["auto_engine_run_time"]
-        else:
-            base_tso = previous_computed_or_aircraft(
-                prev_auto_fields,
-                "auto_engine_tso",
-                prev_atl,
-                "engine_tso",
-                aircraft,
-                "engine_tso",
-            )
-            out["auto_engine_tso"] = base_tso + out["auto_engine_run_time"]
+        base_tso = previous_auto_baseline(
+            prev_auto_fields,
+            "auto_engine_tso",
+            prev_atl,
+            aircraft,
+            "engine_tso",
+        )
+        out["auto_engine_tso"] = base_tso + out["auto_engine_run_time"]
     except Exception:
         pass
 
     try:
-        life_engine = float_or_zero(getattr(aircraft, "engine_life_time_limit", None)) if aircraft else float_or_zero(getattr(atl, "life_time_limit_engine", None))
-        curr_tso = out["auto_engine_tso"]
-        out["auto_engine_tbo"] = life_engine - curr_tso if life_engine else 0.0
+        base_tbo = previous_auto_baseline(
+            prev_auto_fields,
+            "auto_engine_tbo",
+            prev_atl,
+            aircraft,
+            "engine_tbo",
+            aircraft_fallback=aircraft_engine_tbo_baseline(aircraft, atl),
+        )
+        out["auto_engine_tbo"] = base_tbo - out["auto_engine_run_time"]
     except Exception:
         pass
 
     try:
-        out["auto_propeller_run_time"] = out["auto_airframe_run_time"]
+        out["auto_propeller_run_time"] = current_propeller_run_time(atl)
     except Exception:
         pass
 
@@ -220,28 +278,27 @@ def compute_auto_fields(
         pass
 
     try:
-        if prev_atl is None:
-            base_ptso = float_or_zero(
-                getattr(aircraft, "propeller_tso", None)
-            ) if aircraft else 0.0
-            out["auto_propeller_tso"] = base_ptso + out["auto_propeller_run_time"]
-        else:
-            base_ptso = previous_computed_or_aircraft(
-                prev_auto_fields,
-                "auto_propeller_tso",
-                prev_atl,
-                "propeller_tso",
-                aircraft,
-                "propeller_tso",
-            )
-            out["auto_propeller_tso"] = base_ptso + out["auto_propeller_run_time"]
+        base_ptso = previous_auto_baseline(
+            prev_auto_fields,
+            "auto_propeller_tso",
+            prev_atl,
+            aircraft,
+            "propeller_tso",
+        )
+        out["auto_propeller_tso"] = base_ptso + out["auto_propeller_run_time"]
     except Exception:
         pass
 
     try:
-        life_prop = float_or_zero(getattr(aircraft, "propeller_life_time_limit", None)) if aircraft else float_or_zero(getattr(atl, "life_time_limit_propeller", None))
-        curr_tso = out["auto_propeller_tso"]
-        out["auto_propeller_tbo"] = life_prop - curr_tso if life_prop else 0.0
+        base_ptbo = previous_auto_baseline(
+            prev_auto_fields,
+            "auto_propeller_tbo",
+            prev_atl,
+            aircraft,
+            "propeller_tbo",
+            aircraft_fallback=aircraft_propeller_tbo_baseline(aircraft, atl),
+        )
+        out["auto_propeller_tbo"] = base_ptbo - out["auto_propeller_run_time"]
     except Exception:
         pass
 
@@ -262,6 +319,31 @@ ATL_AUTO_FIELD_KEYS: tuple[str, ...] = (
     "auto_propeller_tso",
     "auto_propeller_tbo",
 )
+
+# Server-owned ATL columns derived from auto_* (never accept client/import overrides).
+ATL_SERVER_COMPUTED_CANONICAL_KEYS: tuple[str, ...] = (
+    "airframe_run_time",
+    "engine_run_time",
+    "propeller_run_time",
+    "engine_tso",
+    "engine_tbo",
+    "propeller_tso",
+    "propeller_tbo",
+)
+
+
+def apply_computed_auto_fields_to_row(
+    entry: AircraftTechnicalLog,
+    auto_fields: Dict[str, float],
+) -> None:
+    """Persist rounded auto_* and canonical engine/propeller time columns on an ATL row."""
+    rounded = {k: round(auto_fields[k], 2) for k in ATL_AUTO_FIELD_KEYS}
+    for key in ATL_AUTO_FIELD_KEYS:
+        setattr(entry, key, rounded[key])
+    canonical = canonical_time_fields_from_auto(rounded)
+    for key in ATL_SERVER_COMPUTED_CANONICAL_KEYS:
+        if key in canonical:
+            setattr(entry, key, canonical[key])
 
 
 def _atl_has_persisted_auto_fields(entry: AircraftTechnicalLog) -> bool:
@@ -409,6 +491,7 @@ async def resolve_auto_fields(
 
     batch_fk = getattr(item, "atl_batch_fk", None)
     aircraft_fk = int(item.aircraft_fk)
+    exclude_atl_id = getattr(item, "id", None)
 
     if not force_recompute:
         prev_atl = await get_previous_atl(
@@ -416,6 +499,7 @@ async def resolve_auto_fields(
             aircraft_fk,
             item.sequence_no,
             atl_batch_fk=batch_fk,
+            exclude_atl_id=exclude_atl_id,
         )
         if prev_atl is None:
             return compute_auto_fields(item, None, aircraft_obj, prev_auto_fields=None)
@@ -427,6 +511,7 @@ async def resolve_auto_fields(
         aircraft_fk,
         item.sequence_no,
         atl_batch_fk=batch_fk,
+        exclude_atl_id=exclude_atl_id,
     )
     chain = predecessors + [item]
     return _compute_chain_in_memory(chain, item, aircraft_obj, memo)
@@ -457,8 +542,7 @@ async def backfill_atl_auto_fields_for_scope(
             aircraft_obj,
             prev_auto_fields=prev_auto_fields,
         )
-        for k in ATL_AUTO_FIELD_KEYS:
-            setattr(row, k, round(auto_fields[k], 2))
+        apply_computed_auto_fields_to_row(row, auto_fields)
         prev_atl = row
         prev_auto_fields = auto_fields
     if rows:
@@ -483,6 +567,7 @@ async def persist_atl_auto_fields_to_row(
         entry.aircraft_fk,
         entry.sequence_no,
         atl_batch_fk=getattr(entry, "atl_batch_fk", None),
+        exclude_atl_id=getattr(entry, "id", None),
     )
     prev_auto_fields = None
     if prev_atl is not None and _atl_has_persisted_auto_fields(prev_atl):
@@ -492,5 +577,4 @@ async def persist_atl_auto_fields_to_row(
     auto_fields = compute_auto_fields(
         entry, prev_atl, aircraft_obj, prev_auto_fields=prev_auto_fields
     )
-    for k in ATL_AUTO_FIELD_KEYS:
-        setattr(entry, k, round(auto_fields[k], 2))
+    apply_computed_auto_fields_to_row(entry, auto_fields)

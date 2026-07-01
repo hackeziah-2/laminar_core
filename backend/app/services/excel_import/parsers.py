@@ -109,6 +109,8 @@ def parse_import_date(v: Any) -> Any:
             except ValueError:
                 pass
         for fmt in (
+            "%d/%m/%Y",
+            "%d/%m/%y",
             "%d-%b-%y",
             "%d-%b-%Y",
             "%m/%d/%Y",
@@ -138,29 +140,50 @@ def normalize_import_nature_of_flight(v: Any) -> Any:
     cleaned = re.sub(r"[\./-]+", " ", raw.upper())
     cleaned = " ".join(cleaned.split())
 
-    if cleaned in {"MISSING", "NO ENTRY"}:
+    if cleaned in {"MISSING", "NO ENTRY", "BLANK"}:
         return None
+
+    if re.search(r"\bEGR\b", cleaned):
+        return "EGR"
 
     alias_map = {
         "TR W PIREM": "TR_WITH_PIREM",
+        "TR/ PIREM": "TR_WITH_PIREM",
+        "TR/PIREM": "TR_WITH_PIREM",
+        "TR W/PIRM": "TR_WITH_PIREM",
         "ATL REPLENISHMENT": "ATL_REPL",
         "ATL REPLENISHNMENT": "ATL_REPL",
         "ATL REPLENISHMENTL": "ATL_REPL",
         "ATL REPLENISHMENTLENISHNMENT": "ATL_REPL",
+        "ATL REPELENISHMENT": "ATL_REPL",
+        "ATL REPLENSHMENT": "ATL_REPL",
         "ATL REP": "ATL_REPL",
         "ATP REP": "ATL_REPL",
         "MAINT ENTRY": "ME",
         "MAINTENANCE ENTRY": "ME",
-        "PRF EGR": "PRF",
-        "PSF EGR": "PSF",
+        "MAINT ENTRY.": "ME",
+        "MAINT. ENTRY": "ME",
+        "MAINT ENRTY.": "ME",
+        "M.E":"ME",
         "ME": "ME",
         "PST": "PSF",
         "PRE": "PRF",
+        "CANCELLED FLT": "CANCELLED_FLT",
     }
     if cleaned in alias_map:
         return alias_map[cleaned]
 
     canonical = cleaned.replace(" ", "_")
-    if canonical in {"TR", "PSF", "PRF", "EGR", "ME", "TR_WITH_PIREM", "VOID", "ATL_REPL"}:
+    if canonical in {
+        "TR",
+        "PSF",
+        "PRF",
+        "EGR",
+        "ME",
+        "TR_WITH_PIREM",
+        "VOID",
+        "ATL_REPL",
+        "CANCELLED_FLT",
+    }:
         return canonical
     return v

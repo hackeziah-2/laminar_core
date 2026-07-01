@@ -627,12 +627,12 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
         pre=True,
     )
     def excel_int_to_none_or_int(cls, v: Any) -> Any:
-        """Coerce Excel NaN to None; allow float that is whole number (e.g. 1.0) as int."""
+        """Coerce Excel NaN to None; reject non-numeric values when a cell is provided."""
         v = _excel_empty_to_none(v)
         if v is None:
             return None
         if isinstance(v, bool):
-            return None
+            raise ValueError("Must be a numeric value.")
         if isinstance(v, int):
             return v
         if isinstance(v, float):
@@ -640,10 +640,13 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
                 return None
             if v == int(v):
                 return int(v)
-            return None
-        if isinstance(v, str) and v.strip().isdigit():
-            return int(v.strip())
-        return None
+            raise ValueError("Must be a whole number.")
+        if isinstance(v, str):
+            s = v.strip()
+            if s.isdigit():
+                return int(s)
+            raise ValueError("Must be a numeric value.")
+        raise ValueError("Must be a numeric value.")
 
     class Config:
         orm_mode = True

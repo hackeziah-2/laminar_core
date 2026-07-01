@@ -293,12 +293,12 @@ def test_atl_paged_computes_runtime_and_component_totals_from_tach_and_aircraft_
     assert row["auto_engine_run_time"] == 2.5
     assert row["auto_run_time"] == 2.5
     assert row["auto_engine_tsn"] == 2502.5
-    assert row["auto_engine_tso"] == 502.5
-    assert row["auto_engine_tbo"] == 497.5
+    assert row["auto_engine_tso"] == 503.5
+    assert row["auto_engine_tbo"] == 496.5
     assert row["auto_propeller_run_time"] == 2.5
     assert row["auto_propeller_tsn"] == 1202.5
-    assert row["auto_propeller_tso"] == 302.5
-    assert row["auto_propeller_tbo"] == 1197.5
+    assert row["auto_propeller_tso"] == 303.5
+    assert row["auto_propeller_tbo"] == 1196.5
 
 
 def test_atl_paged_uses_aircraft_airframe_aftt_when_previous_aftt_is_missing(
@@ -482,8 +482,8 @@ def test_atl_paged_uses_aircraft_engine_and_propeller_tso_when_previous_tso_is_z
 
     assert row["auto_engine_run_time"] == 2.5
     assert row["auto_propeller_run_time"] == 2.5
-    assert row["auto_engine_tso"] == 502.5
-    assert row["auto_propeller_tso"] == 302.5
+    assert row["auto_engine_tso"] == 503.5
+    assert row["auto_propeller_tso"] == 303.5
 
 
 def test_atl_paged_keeps_tso_cumulative_from_previous_computed_values_for_later_sequences(
@@ -551,6 +551,151 @@ def test_atl_paged_keeps_tso_cumulative_from_previous_computed_values_for_later_
     assert items["002"]["auto_propeller_tso"] == 303.0
     assert items["003"]["auto_engine_tso"] == 504.5
     assert items["003"]["auto_propeller_tso"] == 304.5
+
+
+def test_atl_engine_propeller_tbo_chains_from_previous_remaining(
+    client_with_atl_auth: TestClient,
+    test_aircraft_data: dict,
+):
+    """TBO remaining = previous TBO remaining - current run time (not life_limit - TSO)."""
+    aircraft_payload = {
+        **test_aircraft_data,
+        "msn": "TEST-MSN-ATL-TBO-CHAIN",
+        "registration": "TEST-ATL-TBO-CHAIN",
+        "engine_life_time_limit": 1000.0,
+        "engine_tso": 500.0,
+        "propeller_life_time_limit": 800.0,
+        "propeller_tso": 200.0,
+    }
+    aircraft_response = client_with_atl_auth.post(
+        "/api/v1/aircraft/",
+        data={"json_data": json.dumps(aircraft_payload)},
+        files={},
+    )
+    assert aircraft_response.status_code == 200, aircraft_response.text
+    aircraft_id = aircraft_response.json()["id"]
+
+    base_payload = {
+        "aircraft_fk": aircraft_id,
+        "nature_of_flight": "TR",
+        "origin_station": "ORG",
+        "origin_date": "2025-01-20",
+        "origin_time": "10:00:00",
+        "destination_station": "DST",
+        "destination_date": "2025-01-20",
+        "destination_time": "12:00:00",
+        "number_of_landings": 1,
+        "component_parts": [],
+    }
+
+    first = client_with_atl_auth.post(
+        "/api/v1/aircraft-technical-log/",
+        json={
+            **base_payload,
+            "sequence_no": "ATL-001",
+            "tachometer_start": 100.0,
+            "tachometer_end": 101.0,
+        },
+    )
+    assert first.status_code == 201, first.text
+    first_body = first.json()
+    assert first_body["engine_tso"] == 501.0
+    assert first_body["engine_tbo"] == 499.0
+    assert first_body["propeller_tso"] == 201.0
+    assert first_body["propeller_tbo"] == 599.0
+
+    second = client_with_atl_auth.post(
+        "/api/v1/aircraft-technical-log/",
+        json={
+            **base_payload,
+            "sequence_no": "ATL-002",
+            "tachometer_start": 101.0,
+            "tachometer_end": 103.5,
+        },
+    )
+    assert second.status_code == 201, second.text
+    second_body = second.json()
+    assert second_body["engine_tso"] == 503.5
+    assert second_body["engine_tbo"] == 496.5
+    assert second_body["propeller_tso"] == 203.5
+    assert second_body["propeller_tbo"] == 596.5
+
+
+def test_atl_tso_tbo_ignore_manual_previous_values_when_computed_chain_exists(
+    client_with_atl_auth: TestClient,
+    test_aircraft_data: dict,
+):
+    """Manual engine/propeller TSO/TBO on a prior row must not skew the next computed leg."""
+    aircraft_payload = {
+        **test_aircraft_data,
+        "msn": "TEST-MSN-ATL-MANUAL-IGNORE",
+        "registration": "TEST-ATL-MANUAL-IGNORE",
+        "engine_life_time_limit": 1000.0,
+        "engine_tso": 100.0,
+        "propeller_life_time_limit": 600.0,
+        "propeller_tso": 50.0,
+    }
+    aircraft_response = client_with_atl_auth.post(
+        "/api/v1/aircraft/",
+        data={"json_data": json.dumps(aircraft_payload)},
+        files={},
+    )
+    assert aircraft_response.status_code == 200, aircraft_response.text
+    aircraft_id = aircraft_response.json()["id"]
+
+    async def seed_misleading_previous() -> None:
+        async with TestSessionLocal() as session:
+            session.add(
+                AircraftTechnicalLog(
+                    aircraft_fk=aircraft_id,
+                    sequence_no="001",
+                    engine_tso=999.0,
+                    engine_tbo=1.0,
+                    propeller_tso=888.0,
+                    propeller_tbo=2.0,
+                    tachometer_start=1.0,
+                    tachometer_end=2.0,
+                    auto_engine_tso=101.0,
+                    auto_engine_tbo=899.0,
+                    auto_propeller_tso=51.0,
+                    auto_propeller_tbo=549.0,
+                    auto_engine_run_time=1.0,
+                    auto_propeller_run_time=1.0,
+                    auto_airframe_run_time=1.0,
+                    auto_airframe_aftt=1.0,
+                    auto_run_time=1.0,
+                    auto_engine_tsn=1.0,
+                    auto_propeller_tsn=1.0,
+                )
+            )
+            await session.commit()
+
+    asyncio.run(seed_misleading_previous())
+
+    create_response = client_with_atl_auth.post(
+        "/api/v1/aircraft-technical-log/",
+        json={
+            "aircraft_fk": aircraft_id,
+            "sequence_no": "ATL-002",
+            "nature_of_flight": "TR",
+            "origin_station": "ORG",
+            "origin_date": "2025-01-21",
+            "origin_time": "10:00:00",
+            "destination_station": "DST",
+            "destination_date": "2025-01-21",
+            "destination_time": "12:00:00",
+            "number_of_landings": 1,
+            "tachometer_start": 2.0,
+            "tachometer_end": 4.5,
+            "component_parts": [],
+        },
+    )
+    assert create_response.status_code == 201, create_response.text
+    body = create_response.json()
+    assert body["engine_tso"] == 103.5
+    assert body["engine_tbo"] == 896.5
+    assert body["propeller_tso"] == 53.5
+    assert body["propeller_tbo"] == 546.5
 
 
 def test_atl_paged_defaults_to_sequence_number_descending(
@@ -761,9 +906,9 @@ def test_atl_paged_uses_previous_sequence_in_numeric_ascending_order_for_auto_co
     assert row["auto_comp_airframe_run_time"] == 1.5
     assert row["auto_comp_airframe_aftt"] == 91.5
     assert row["auto_comp_engine_tsn"] == 110.5
-    assert row["auto_comp_engine_tso"] == 30.5
+    assert row["auto_comp_engine_tso"] == 24.5
     assert row["auto_comp_propeller_tsn"] == 60.5
-    assert row["auto_comp_propeller_tso"] == 20.5
+    assert row["auto_comp_propeller_tso"] == 14.5
 
 
 def test_aircraft_technical_log_paged_sequence_sort_does_not_change_auto_computation(
