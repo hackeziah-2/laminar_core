@@ -157,13 +157,12 @@ def test_atl_import_aircraft_not_found(
     assert "Aircraft" in response.json()["detail"]
 
 
-def test_atl_import_backfills_persisted_auto_columns(
+def test_atl_import_recomputes_engine_and_propeller_times_after_import(
     client_with_maintenance_import_auth: TestClient,
 ):
-    """Successful ATL import should persist auto_* via after_commit backfill."""
+    """ATL import backfills auto_* and canonical engine/propeller TSO/TBO from the ATL chain."""
     import asyncio
 
-    from app.core.atl_derived_times import ATL_AUTO_FIELD_KEYS
     from app.models.aircraft import Aircraft
     from app.models.aircraft_techinical_log import AircraftTechnicalLog
     from app.models.atl_batch import AtlBatch
@@ -179,6 +178,10 @@ def test_atl_import_backfills_persisted_auto_columns(
                 ownership="Owner",
                 status="Active",
                 airframe_aftt=10.0,
+                engine_life_time_limit=1000.0,
+                engine_tso=100.0,
+                propeller_life_time_limit=600.0,
+                propeller_tso=50.0,
             )
             session.add(ac)
             await session.flush()
@@ -203,23 +206,38 @@ def test_atl_import_backfills_persisted_auto_columns(
     assert response.status_code == 200, response.text
     assert response.json()["status"] == "success"
 
-    async def _check_row() -> None:
+    async def _check_rows() -> None:
         from sqlalchemy import Numeric, cast
 
         async with TestSessionLocal() as session:
-            row = (
+            rows = (
                 await session.execute(
                     select(AircraftTechnicalLog)
                     .where(AircraftTechnicalLog.aircraft_fk == aircraft_id)
                     .where(AircraftTechnicalLog.atl_batch_fk == batch_id)
-                    .order_by(cast(AircraftTechnicalLog.sequence_no, Numeric).desc())
-                    .limit(1)
+                    .order_by(cast(AircraftTechnicalLog.sequence_no, Numeric).asc())
                 )
-            ).scalar_one()
-            for key in ATL_AUTO_FIELD_KEYS:
-                assert getattr(row, key) is not None, key
+            ).scalars().all()
+            assert len(rows) == 2
 
-    asyncio.run(_check_row())
+            first, second = rows
+            assert first.tachometer_start == 1.0
+            assert first.tachometer_end == 2.0
+            assert first.auto_airframe_run_time == 1.0
+            assert first.engine_tso == 101.0
+            assert first.engine_tbo == 899.0
+            assert first.propeller_tso == 51.0
+            assert first.propeller_tbo == 549.0
+
+            assert second.tachometer_start == 2.0
+            assert second.tachometer_end == 3.5
+            assert second.auto_airframe_run_time == 1.5
+            assert second.engine_tso == 102.5
+            assert second.engine_tbo == 897.5
+            assert second.propeller_tso == 52.5
+            assert second.propeller_tbo == 547.5
+
+    asyncio.run(_check_rows())
 
 
 def test_atl_import_batch_not_found(

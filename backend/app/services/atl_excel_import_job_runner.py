@@ -1,41 +1,33 @@
 from __future__ import annotations
 
-"""Background ATL Excel import: row-wise upsert with persisted progress."""
+"""Background ATL Excel import: validate all rows, then bulk upsert in one transaction."""
 import os
+import time
 from io import BytesIO
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import pandas as pd
-from pydantic import ValidationError
 from sqlalchemy import update
 
 from app.constants.atl_excel_import import ATL_EXCEL_COLUMN_MAPPING
 from app.database import AsyncSessionLocal
-from app.models.aircraft_techinical_log import AircraftTechnicalLog
 from app.models.atl_excel_import_job import AtlExcelImportJob
-from app.repository.excel_import import normalize_unique_fields, upsert_validated_row, validated_to_dict
-from app.schemas.aircraft_technical_log_schema import AircraftTechnicalLogImportSchema
-from app.services.excel_import.hooks.atl import AtlImportHook
-from app.services.excel_import.parsers import make_hashable
+from app.services.atl_import_service import run_atl_import
 from app.services.excel_import.reader import normalize_column_mapping
-from app.services.excel_import.row_builder import (
-    build_row_for_schema,
-    format_row_error,
-    schema_field_names,
-)
 
-MODEL = AircraftTechnicalLog
-SCHEMA = AircraftTechnicalLogImportSchema
-UNIQUE_FIELDS = ["aircraft_fk", "sequence_no", "atl_batch_fk"]
-_HOOK = AtlImportHook()
+from app.services.atl_excel_import_summary_codec import encode_message_with_summary
 
-
-def _row_signature(validated: AircraftTechnicalLogImportSchema) -> tuple:
-    data = validated_to_dict(validated)
-    return tuple(sorted((k, make_hashable(v)) for k, v in data.items()))
+# Background job recommended for large files (see LARGE_IMPORT_ROW_THRESHOLD).
+LARGE_IMPORT_ROW_THRESHOLD = 500
 
 
 async def _commit_job(job_id: str, **values: Any) -> None:
+    summary = values.pop("import_summary", None)
+    if isinstance(summary, dict):
+        values["message"] = encode_message_with_summary(
+            str(values.get("message") or ""),
+            summary,
+        )
     async with AsyncSessionLocal() as s:
         await s.execute(
             update(AtlExcelImportJob)
@@ -45,8 +37,24 @@ async def _commit_job(job_id: str, **values: Any) -> None:
         await s.commit()
 
 
+def _read_atl_spreadsheet(path: str) -> tuple[list[dict], int, bool]:
+    """Read Excel file into record dicts; return (records, source_row_count, has_sequence_no)."""
+    with open(path, "rb") as fh:
+        raw = fh.read()
+    df = pd.read_excel(BytesIO(raw))
+    df.columns = df.columns.str.strip().str.lower()
+    mapping = normalize_column_mapping(ATL_EXCEL_COLUMN_MAPPING)
+    df = df.rename(columns={k: v for k, v in mapping.items() if k in df.columns})
+    df = df.where(pd.notnull(df), None)
+    has_sequence_no = "sequence_no" in df.columns
+    source_row_count = len(df)
+    records = df.to_dict(orient="records")
+    return records, source_row_count, has_sequence_no
+
+
 async def process_atl_excel_import_job(job_id: str) -> None:
     temp_path: Optional[str] = None
+    started = time.perf_counter()
     try:
         async with AsyncSessionLocal() as meta:
             job = await meta.get(AtlExcelImportJob, job_id)
@@ -65,15 +73,11 @@ async def process_atl_excel_import_job(job_id: str) -> None:
             )
             return
 
-        with open(temp_path, "rb") as fh:
-            raw = fh.read()
-        df = pd.read_excel(BytesIO(raw))
-        df.columns = df.columns.str.strip().str.lower()
-        mapping = normalize_column_mapping(ATL_EXCEL_COLUMN_MAPPING)
-        df = df.rename(columns={k: v for k, v in mapping.items() if k in df.columns})
-        df = df.where(pd.notnull(df), None)
+        records, source_row_count, has_sequence_no = _read_atl_spreadsheet(temp_path)
+        total = len(records)
+        inject_fields = {"aircraft_fk": aircraft_fk, "atl_batch_fk": atl_batch_fk}
 
-        if "sequence_no" not in df.columns:
+        if not has_sequence_no:
             await _commit_job(
                 job_id,
                 status="FAILED",
@@ -83,104 +87,77 @@ async def process_atl_excel_import_job(job_id: str) -> None:
             )
             return
 
-        records = _HOOK.preprocess_records(df.to_dict(orient="records"))
-        total = len(records)
-        fields = normalize_unique_fields(UNIQUE_FIELDS)
-        schema_fields = schema_field_names(SCHEMA)
-        inject_fields = {"aircraft_fk": aircraft_fk, "atl_batch_fk": atl_batch_fk}
-
         await _commit_job(
             job_id,
             status="PROCESSING",
-            message="Import in progress",
+            message="Validating import file",
             total_rows=total,
             processed_rows=0,
             failed_rows=0,
             errors=[],
         )
 
-        seen_sigs: set = set()
-        errors: List[Dict[str, Any]] = []
-        failed = 0
-
         async with AsyncSessionLocal() as session:
-            with session.no_autoflush:
-                for idx, row in enumerate(records):
-                    excel_row = idx + 2
-                    try:
-                        row_data = build_row_for_schema(
-                            row,
-                            schema_fields=schema_fields,
-                            inject_fields=inject_fields,
-                            hook=_HOOK,
-                        )
-                        validated = SCHEMA(**row_data)
-                    except (ValidationError, Exception) as exc:
-                        failed += 1
-                        errors.append({"row": excel_row, "error": format_row_error(exc)})
-                        await _commit_job(
-                            job_id,
-                            processed_rows=idx + 1,
-                            failed_rows=failed,
-                            errors=list(errors),
-                            message=f"Row {excel_row}: validation error",
-                        )
-                        continue
+            result = await run_atl_import(
+                session,
+                records,
+                inject_fields=inject_fields,
+                audit_account_id=audit_account_id,
+                source_row_count=source_row_count,
+            )
 
-                    sig = _row_signature(validated)
-                    if sig in seen_sigs:
-                        await _commit_job(
-                            job_id,
-                            processed_rows=idx + 1,
-                            failed_rows=failed,
-                            errors=list(errors),
-                            message=f"Skipped duplicate row content at sheet row {excel_row}",
-                        )
-                        continue
-                    seen_sigs.add(sig)
+        elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+        summary = {
+            "total_rows": result.get("total_rows", total),
+            "imported_rows": result.get("imported_rows", 0),
+            "inserted": result.get("inserted", 0),
+            "updated": result.get("updated", 0),
+            "skipped_rows": result.get("skipped_rows", 0),
+            "processing_time_ms": result.get("processing_time_ms", elapsed_ms),
+        }
 
-                    try:
-                        await upsert_validated_row(
-                            session,
-                            MODEL,
-                            validated,
-                            fields,
-                            _HOOK,
-                            audit_account_id=audit_account_id,
-                        )
-                        await session.commit()
-                    except ValueError as exc:
-                        await session.rollback()
-                        failed += 1
-                        errors.append({"row": excel_row, "error": str(exc)})
-                        await _commit_job(
-                            job_id,
-                            processed_rows=idx + 1,
-                            failed_rows=failed,
-                            errors=list(errors),
-                            message=f"Row {excel_row}: duplicate",
-                        )
-                        continue
-                    except Exception as exc:
-                        await session.rollback()
-                        failed += 1
-                        errors.append({"row": excel_row, "error": str(exc)})
+        if result["status"] == "failed" and result.get("errors"):
+            failed_row_count = len({e["row"] for e in result["errors"] if e.get("row")})
+            await _commit_job(
+                job_id,
+                status="VALIDATION_FAILED",
+                message=result.get(
+                    "message",
+                    "The file contains validation errors. No records were imported.",
+                ),
+                total_rows=summary["total_rows"],
+                processed_rows=0,
+                failed_rows=failed_row_count,
+                errors=result["errors"],
+                import_summary=summary,
+            )
+            return
 
-                    await _commit_job(
-                        job_id,
-                        processed_rows=idx + 1,
-                        failed_rows=failed,
-                        errors=list(errors),
-                        message=f"Processed {idx + 1} of {total}",
-                    )
+        if result["status"] != "success":
+            await _commit_job(
+                job_id,
+                status="FAILED",
+                message=result.get("message", "Import failed."),
+                total_rows=summary["total_rows"],
+                processed_rows=0,
+                failed_rows=summary["total_rows"],
+                errors=result.get("errors", []),
+                import_summary=summary,
+            )
+            return
 
         await _commit_job(
             job_id,
             status="COMPLETED",
-            message="Import completed",
-            processed_rows=total,
-            failed_rows=failed,
-            errors=list(errors),
+            message=(
+                f"Import completed: {summary['imported_rows']} row(s) "
+                f"({summary['inserted']} inserted, {summary['updated']} updated) "
+                f"in {summary['processing_time_ms']}ms."
+            ),
+            processed_rows=summary["imported_rows"],
+            failed_rows=0,
+            errors=[],
+            import_summary=summary,
         )
 
     except Exception as e:

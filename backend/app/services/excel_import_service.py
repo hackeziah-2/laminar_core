@@ -1,28 +1,33 @@
 """Orchestrate generic Excel/CSV import (validation, upsert, hooks)."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from fastapi import UploadFile
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError, ValidationError as AppValidationError
 from app.repository.excel_import import (
-    find_by_unique_fields,
     normalize_unique_fields,
     upsert_validated_row,
     validated_to_dict,
 )
+from app.services.atl_import_service import run_atl_import
 from app.services.excel_import.config import ExcelImportConfig
 from app.services.excel_import.hooks.registry import get_import_hook
 from app.services.excel_import.parsers import make_hashable
 from app.services.excel_import.reader import read_upload_records
 from app.services.excel_import.row_builder import (
     build_row_for_schema,
-    format_row_error,
     schema_field_names,
+)
+from app.services.excel_import.validation_errors import (
+    build_field_labels,
+    exception_to_structured_errors,
+    format_error_report_markdown,
+    merge_structured_errors,
 )
 
 
@@ -66,35 +71,53 @@ class ExcelImportService:
             file,
             column_mapping=config.column_mapping,
         )
-        records = hook.preprocess_records(records)
+        source_row_count = len(records)
+        if config.hook_key != "aircraft_technical_log":
+            records = hook.preprocess_records(records)
+
+        if config.hook_key == "aircraft_technical_log":
+            try:
+                return await run_atl_import(
+                    session,
+                    records,
+                    inject_fields=inject_fields,
+                    audit_account_id=config.audit_account_id,
+                    dry_run=config.dry_run,
+                    source_row_count=source_row_count,
+                )
+            except IntegrityError as exc:
+                await session.rollback()
+                detail = _map_integrity_error(exc, config.integrity_error_messages)
+                raise AppValidationError(detail) from exc
+
+        field_labels = build_field_labels(config.column_mapping or {})
+        validated_rows, errors = await ExcelImportService._validate_generic_records(
+            session,
+            records,
+            config=config,
+            hook=hook,
+            schema_fields=schema_fields,
+            inject_fields=inject_fields,
+            fields=fields,
+            insert_only=insert_only,
+            field_labels=field_labels,
+        )
 
         inserted = 0
         updated = 0
-        errors: List[Dict[str, Any]] = []
+        if not errors and not insert_only:
+            from app.repository.excel_import import find_by_unique_fields
 
-        # Pass 1: validate and count
-        for idx, row in enumerate(records):
-            excel_row = idx + 2
-            try:
-                row_data = build_row_for_schema(
-                    row,
-                    schema_fields=schema_fields,
-                    inject_fields=inject_fields,
-                    hook=hook,
+            for _excel_row, validated in validated_rows:
+                existing = await find_by_unique_fields(
+                    session, config.model, validated, fields
                 )
-                validated = config.schema(**row_data)
-                if insert_only:
-                    inserted += 1
+                if existing:
+                    updated += 1
                 else:
-                    existing = await find_by_unique_fields(
-                        session, config.model, validated, fields
-                    )
-                    if existing:
-                        updated += 1
-                    else:
-                        inserted += 1
-            except Exception as exc:
-                errors.append({"row": excel_row, "error": format_row_error(exc)})
+                    inserted += 1
+        elif not errors:
+            inserted = len(validated_rows)
 
         if config.dry_run:
             return {
@@ -102,6 +125,12 @@ class ExcelImportService:
                 "inserted": inserted,
                 "updated": updated,
                 "errors": errors,
+                "message": (
+                    "The file contains validation errors. No records were imported."
+                    if errors
+                    else None
+                ),
+                "error_report": format_error_report_markdown(errors) if errors else None,
             }
 
         if errors:
@@ -111,56 +140,21 @@ class ExcelImportService:
                 "inserted": inserted,
                 "updated": updated,
                 "errors": errors,
+                "message": "The file contains validation errors. No records were imported.",
+                "error_report": format_error_report_markdown(errors) if errors else None,
             }
-
-        # Pass 2: write
-        seen_signatures: set[tuple] = set()
-        write_errors: List[Dict[str, Any]] = []
 
         try:
             with session.no_autoflush:
-                for idx, row in enumerate(records):
-                    excel_row = idx + 2
-                    try:
-                        row_data = build_row_for_schema(
-                            row,
-                            schema_fields=schema_fields,
-                            inject_fields=inject_fields,
-                            hook=hook,
-                        )
-                        validated = config.schema(**row_data)
-                    except ValidationError as exc:
-                        write_errors.append(
-                            {"row": excel_row, "error": format_row_error(exc)}
-                        )
-                        continue
-
-                    sig = _row_signature(validated)
-                    if sig in seen_signatures:
-                        continue
-                    seen_signatures.add(sig)
-
-                    try:
-                        _, created = await upsert_validated_row(
-                            session,
-                            config.model,
-                            validated,
-                            fields,
-                            hook,
-                            audit_account_id=config.audit_account_id,
-                        )
-                    except ValueError as exc:
-                        write_errors.append({"row": excel_row, "error": str(exc)})
-                        continue
-
-            if write_errors:
-                await session.rollback()
-                return {
-                    "status": "failed",
-                    "inserted": inserted,
-                    "updated": updated,
-                    "errors": write_errors,
-                }
+                for _excel_row, validated in validated_rows:
+                    await upsert_validated_row(
+                        session,
+                        config.model,
+                        validated,
+                        fields,
+                        hook,
+                        audit_account_id=config.audit_account_id,
+                    )
 
             await session.commit()
             await hook.after_commit(
@@ -180,6 +174,81 @@ class ExcelImportService:
             await session.rollback()
             detail = _map_integrity_error(exc, config.integrity_error_messages)
             raise AppValidationError(detail) from exc
+        except Exception as exc:
+            await session.rollback()
+            return {
+                "status": "failed",
+                "inserted": 0,
+                "updated": 0,
+                "errors": [
+                    {
+                        "row": 0,
+                        "column": "Import",
+                        "value": "",
+                        "error": f"Import failed and was rolled back: {exc}",
+                    }
+                ],
+                "message": f"Import failed and was rolled back: {exc}",
+            }
+
+    @staticmethod
+    async def _validate_generic_records(
+        session: AsyncSession,
+        records: List[Dict[str, Any]],
+        *,
+        config: ExcelImportConfig,
+        hook,
+        schema_fields,
+        inject_fields: Dict[str, Any],
+        fields: List[str],
+        insert_only: bool,
+        field_labels: Dict[str, str],
+    ) -> Tuple[List[Tuple[int, BaseModel]], List[Dict[str, Any]]]:
+        del session, fields, insert_only
+        errors: List[Dict[str, Any]] = []
+        validated_rows: List[Tuple[int, BaseModel]] = []
+        seen_signatures: set[tuple] = set()
+
+        for idx, row in enumerate(records):
+            excel_row = idx + 2
+            trimmed = {
+                k: v.strip() if isinstance(v, str) else v
+                for k, v in row.items()
+            }
+            try:
+                row_data = build_row_for_schema(
+                    trimmed,
+                    schema_fields=schema_fields,
+                    inject_fields=inject_fields,
+                    hook=hook,
+                )
+                validated = config.schema(**row_data)
+            except Exception as exc:
+                errors.extend(
+                    exception_to_structured_errors(
+                        exc,
+                        excel_row=excel_row,
+                        raw_row=trimmed,
+                        field_labels=field_labels,
+                    )
+                )
+                continue
+
+            sig = _row_signature(validated)
+            if sig in seen_signatures:
+                errors.append(
+                    {
+                        "row": excel_row,
+                        "column": "Row",
+                        "value": "(duplicate)",
+                        "error": "Duplicate row content in file.",
+                    }
+                )
+                continue
+            seen_signatures.add(sig)
+            validated_rows.append((excel_row, validated))
+
+        return validated_rows, merge_structured_errors(errors)
 
 
 async def import_excel_generic(

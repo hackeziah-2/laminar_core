@@ -7,7 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 
 from app.database import set_audit_fields
-from app.core.atl_derived_times import ATL_AUTO_FIELD_KEYS, persist_atl_auto_fields_to_row
+from app.core.atl_derived_times import (
+    ATL_AUTO_FIELD_KEYS,
+    ATL_SERVER_COMPUTED_CANONICAL_KEYS,
+    persist_atl_auto_fields_to_row,
+)
 from app.core.atl_paged_rbac import atl_rbac_filter
 from app.models.aircraft_techinical_log import (
     AircraftTechnicalLog,
@@ -47,6 +51,46 @@ def _sequence_no_digits_only(sequence_no: str) -> str:
 def _sequence_no_as_numeric():
     """SQL: sequence_no as Numeric for ORDER BY / comparisons. Handles '10001.0' (PostgreSQL INTEGER cast rejects it)."""
     return cast(AircraftTechnicalLog.sequence_no, Numeric)
+
+
+def _active_atl_rows_clause():
+    """Non-soft-deleted ATL rows only (is_deleted false or null)."""
+    return or_(
+        AircraftTechnicalLog.is_deleted.is_(False),
+        AircraftTechnicalLog.is_deleted.is_(None),
+    )
+
+
+def _parse_sequence_no_int(sequence_no: str) -> Optional[int]:
+    normalized = _sequence_no_digits_only(sequence_no)
+    try:
+        return int(normalized)
+    except (TypeError, ValueError):
+        return None
+
+
+def _apply_atl_predecessor_scope(
+    stmt,
+    *,
+    aircraft_fk: int,
+    sequence_no_int: int,
+    atl_batch_fk: Optional[int],
+    null_batch_only_when_batch_unset: bool = True,
+    exclude_atl_id: Optional[int] = None,
+):
+    """Scope predecessor lookup: same aircraft + batch stream, lower sequence, active rows only."""
+    stmt = (
+        stmt.where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
+        .where(_sequence_no_as_numeric() < sequence_no_int)
+        .where(_active_atl_rows_clause())
+    )
+    if exclude_atl_id is not None:
+        stmt = stmt.where(AircraftTechnicalLog.id != exclude_atl_id)
+    if atl_batch_fk is not None:
+        stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk == atl_batch_fk)
+    elif null_batch_only_when_batch_unset:
+        stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk.is_(None))
+    return stmt
 
 
 _ATL_SORT_FIELD_ALIASES = {
@@ -249,10 +293,16 @@ async def _get_previous_meter_starts(
     aircraft_fk: int,
     sequence_no: str,
     atl_batch_fk: Optional[int] = None,
+    *,
+    exclude_atl_id: Optional[int] = None,
 ) -> tuple[float, float]:
     """Return hobbs/tach start defaults from the previous ATL in the same aircraft + batch stream."""
     prev_atl = await get_previous_atl(
-        session, aircraft_fk, sequence_no, atl_batch_fk=atl_batch_fk
+        session,
+        aircraft_fk,
+        sequence_no,
+        atl_batch_fk=atl_batch_fk,
+        exclude_atl_id=exclude_atl_id,
     )
     if not prev_atl:
         return 0.0, 0.0
@@ -334,6 +384,8 @@ def _clean_atl_update_data(update_data: Dict[str, Any]) -> Dict[str, Any]:
         # None or already WorkStatus: keep
 
     for field in ATL_AUTO_FIELD_KEYS:
+        update_data.pop(field, None)
+    for field in ATL_SERVER_COMPUTED_CANONICAL_KEYS:
         update_data.pop(field, None)
 
     return update_data
@@ -426,6 +478,7 @@ async def _apply_meter_start_defaults_if_needed(
         target_aircraft_fk,
         str(target_sequence_no) if target_sequence_no is not None else "",
         atl_batch_fk=target_atl_batch_fk,
+        exclude_atl_id=obj.id,
     )
     if need_hobbs:
         update_data["hobbs_meter_start"] = prev_hobbs_start
@@ -481,6 +534,8 @@ async def create_aircraft_technical_log(
     # Prepare log data dictionary (server owns auto_*; always recomputed in persist)
     log_data = data.dict(exclude={'component_parts'})
     for k in ATL_AUTO_FIELD_KEYS:
+        log_data.pop(k, None)
+    for k in ATL_SERVER_COMPUTED_CANONICAL_KEYS:
         log_data.pop(k, None)
     # nature_of_flight: empty string or "" -> NULL in DB; otherwise preserve from payload
     nf = log_data.get('nature_of_flight')
@@ -911,23 +966,20 @@ async def get_previous_atl(
     *,
     atl_batch_fk: Optional[int] = None,
     null_batch_only_when_batch_unset: bool = True,
+    exclude_atl_id: Optional[int] = None,
 ) -> Optional[AircraftTechnicalLog]:
     """Immediate predecessor (highest sequence_no strictly less than given) for aircraft (+ batch scope)."""
-    sequence_no = _sequence_no_digits_only(sequence_no)
-    try:
-        sequence_no_int = int(sequence_no)
-    except (TypeError, ValueError):
+    sequence_no_int = _parse_sequence_no_int(sequence_no)
+    if sequence_no_int is None:
         return None
-    stmt = (
-        select(AircraftTechnicalLog)
-        .where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
-        .where(_sequence_no_as_numeric() < sequence_no_int)
-        .where(AircraftTechnicalLog.is_deleted.is_(False))
+    stmt = _apply_atl_predecessor_scope(
+        select(AircraftTechnicalLog),
+        aircraft_fk=aircraft_fk,
+        sequence_no_int=sequence_no_int,
+        atl_batch_fk=atl_batch_fk,
+        null_batch_only_when_batch_unset=null_batch_only_when_batch_unset,
+        exclude_atl_id=exclude_atl_id,
     )
-    if atl_batch_fk is not None:
-        stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk == atl_batch_fk)
-    elif null_batch_only_when_batch_unset:
-        stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk.is_(None))
     stmt = stmt.order_by(_sequence_no_as_numeric().desc()).limit(1)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
@@ -939,23 +991,20 @@ async def fetch_predecessors_for_atl(
     sequence_no: str,
     *,
     atl_batch_fk: Optional[int] = None,
+    exclude_atl_id: Optional[int] = None,
 ) -> List[AircraftTechnicalLog]:
     """All predecessors for one ATL stream in ascending numeric sequence (single query)."""
-    sequence_no = _sequence_no_digits_only(sequence_no)
-    try:
-        sequence_no_int = int(sequence_no)
-    except (TypeError, ValueError):
+    sequence_no_int = _parse_sequence_no_int(sequence_no)
+    if sequence_no_int is None:
         return []
-    stmt = (
-        select(AircraftTechnicalLog)
-        .where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
-        .where(_sequence_no_as_numeric() < sequence_no_int)
-        .where(AircraftTechnicalLog.is_deleted.is_(False))
+    stmt = _apply_atl_predecessor_scope(
+        select(AircraftTechnicalLog),
+        aircraft_fk=aircraft_fk,
+        sequence_no_int=sequence_no_int,
+        atl_batch_fk=atl_batch_fk,
+        null_batch_only_when_batch_unset=True,
+        exclude_atl_id=exclude_atl_id,
     )
-    if atl_batch_fk is None:
-        stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk.is_(None))
-    else:
-        stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk == atl_batch_fk)
     stmt = stmt.order_by(_sequence_no_as_numeric().asc())
     result = await session.execute(stmt)
     return list(result.scalars().all())
@@ -971,7 +1020,7 @@ async def list_atls_for_scope_ordered(
     stmt = (
         select(AircraftTechnicalLog)
         .where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
-        .where(AircraftTechnicalLog.is_deleted.is_(False))
+        .where(_active_atl_rows_clause())
     )
     if atl_batch_fk is None:
         stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk.is_(None))

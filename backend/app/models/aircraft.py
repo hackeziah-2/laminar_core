@@ -1,6 +1,6 @@
 import enum
 
-from sqlalchemy import Column, Integer, String, Text, Float, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, Text, Float, Enum as SQLEnum, Index, text
 from sqlalchemy.dialects.postgresql import ENUM as PGEnum
 from sqlalchemy.orm import relationship
 
@@ -14,13 +14,29 @@ class StatusEnum(str, enum.Enum):
 
 class Aircraft(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     __tablename__ = "aircrafts"
-    
+    __table_args__ = (
+        Index(
+            "uq_aircrafts_registration_active",
+            "registration",
+            unique=True,
+            postgresql_where=text("is_deleted IS FALSE"),
+            sqlite_where=text("is_deleted = 0"),
+        ),
+        Index(
+            "uq_aircrafts_msn_active",
+            "msn",
+            unique=True,
+            postgresql_where=text("is_deleted IS FALSE"),
+            sqlite_where=text("is_deleted = 0"),
+        ),
+    )
+
     id = Column(Integer, primary_key=True, index=True)
-    registration = Column(String(89), nullable=False, unique=True, index=True)
+    registration = Column(String(89), nullable=False, index=True)
     report_description = Column(Text, nullable=True)
     model = Column(String, nullable=False, index=True)
     model_year = Column(Integer, nullable=True)
-    msn = Column(String, nullable=False, unique=True, index=True)
+    msn = Column(String, nullable=False, index=True)
     base = Column(String, nullable=False, index=True)
     ownership = Column(String, nullable=False)
     status = Column(
