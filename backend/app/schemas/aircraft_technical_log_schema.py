@@ -925,6 +925,28 @@ class ATLAircraftScopedSearchItem(BaseModel):
     origin_date: Optional[date] = None
 
 
+# Canonical time fields on GET /paged and GET /{id}: one decimal place in JSON (response only).
+_ATL_RESPONSE_DECIMAL_FIELDS = (
+    "airframe_aftt",
+    "engine_tsn",
+    "engine_tso",
+    "engine_tbo",
+    "propeller_tsn",
+    "propeller_tso",
+    "propeller_tbo",
+)
+
+
+def round_optional_float_1(value: Any) -> Optional[float]:
+    """Format nullable numeric ATL time fields to one decimal place for API responses."""
+    if value is None:
+        return None
+    try:
+        return round(float(value), 1)
+    except (TypeError, ValueError):
+        return None
+
+
 # ---------- Aircraft Technical Log Read Schema ----------
 class AircraftTechnicalLogRead(AircraftTechnicalLogBase):
     id: int
@@ -943,6 +965,26 @@ class AircraftTechnicalLogRead(AircraftTechnicalLogBase):
     def set_nature_of_flight_display(cls, v: Any, values: dict) -> str:
         nof = values.get("nature_of_flight")
         return nof.value if nof is not None else "-"
+
+    class Config:
+        orm_mode = True
+
+
+class AircraftTechnicalLogApiRead(AircraftTechnicalLogRead):
+    """GET /paged and GET /{id}: canonical time fields rounded to 1 decimal in JSON."""
+
+    engine_tsn: Optional[float] = Field(
+        default=None,
+        description="Engine TSN; read responses use 1 decimal place.",
+    )
+
+    @root_validator(pre=False)
+    def format_response_decimal_fields(cls, values: Any) -> Any:
+        if not isinstance(values, dict):
+            return values
+        for key in _ATL_RESPONSE_DECIMAL_FIELDS:
+            values[key] = round_optional_float_1(values.get(key))
+        return values
 
     class Config:
         orm_mode = True
@@ -970,6 +1012,13 @@ class ATLPagedItem(AircraftTechnicalLogRead):
 # ---------- ATL Paged response for /aircraft-technical-log/paged (Read + persisted auto_* columns) ----------
 class ATLPagedItemWithAuto(AircraftTechnicalLogRead):
     """ATL read including auto_* from AircraftTechnicalLog persisted columns (same shape as list paged API)."""
+
+    class Config:
+        orm_mode = True
+
+
+class ATLPagedItemWithAutoApiRead(AircraftTechnicalLogApiRead):
+    """ATL paged list item with 1-decimal canonical time fields for GET /paged."""
 
     class Config:
         orm_mode = True
