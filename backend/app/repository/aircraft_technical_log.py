@@ -358,7 +358,7 @@ async def _atl_exists_same_aircraft_sequence_batch(
 
 
 def _clean_atl_update_data(update_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Normalize sequence, enums, strip client auto_*, coerce work_status / nature_of_flight."""
+    """Normalize sequence, enums, coerce work_status / nature_of_flight (persist client time fields as sent)."""
     if "sequence_no" in update_data and update_data["sequence_no"]:
         update_data["sequence_no"] = _sequence_no_digits_only(str(update_data["sequence_no"]))
 
@@ -382,11 +382,6 @@ def _clean_atl_update_data(update_data: Dict[str, Any]) -> Dict[str, Any]:
         if ws is not None and isinstance(ws, str):
             update_data["work_status"] = WorkStatus(ws)
         # None or already WorkStatus: keep
-
-    for field in ATL_AUTO_FIELD_KEYS:
-        update_data.pop(field, None)
-    for field in ATL_SERVER_COMPUTED_CANONICAL_KEYS:
-        update_data.pop(field, None)
 
     return update_data
 
@@ -733,7 +728,7 @@ async def update_aircraft_technical_log(
     audit_user: Optional[AccountInformation] = None,
     audit_request: Optional[Request] = None,
 ) -> Optional[AircraftTechnicalLog]:
-    """Update an Aircraft Technical Log entry. Re-persists auto_* via compute_auto_fields after field updates."""
+    """Update an Aircraft Technical Log entry. Persists request fields as sent (no auto_* recomputation)."""
     obj = await session.get(AircraftTechnicalLog, log_id)
     if not obj or obj.is_deleted:
         return None
@@ -765,11 +760,6 @@ async def update_aircraft_technical_log(
 
     for field, value in update_data.items():
         setattr(obj, field, value)
-
-    aircraft_row = (
-        await session.get(Aircraft, obj.aircraft_fk) if obj.aircraft_fk is not None else None
-    )
-    # await persist_atl_auto_fields_to_row(session, obj, aircraft_row)
 
     if log_in.component_parts is not None:
         await _replace_atl_component_parts(

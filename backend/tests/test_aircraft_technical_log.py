@@ -10,7 +10,36 @@ from app.api.deps import get_current_active_account
 from app.models.aircraft_techinical_log import AircraftTechnicalLog, WorkStatus
 from app.main import app
 from app.models.role import Role
+from app.schemas.aircraft_technical_log_schema import (
+    AircraftTechnicalLogApiRead,
+    ATLPagedItemWithAutoApiRead,
+)
 from tests.conftest import TestSessionLocal
+
+
+def test_atl_api_read_formats_canonical_time_fields_to_one_decimal():
+    """GET /paged and GET /{id} schemas round canonical time fields to 1 decimal."""
+    payload = {
+        "id": 1,
+        "aircraft_fk": 1,
+        "sequence_no": "001",
+        "airframe_aftt": 10490.54,
+        "engine_tsn": "5003.84",
+        "engine_tso": 323.74,
+        "engine_tbo": -1.54,
+        "propeller_tsn": 2432.14,
+        "propeller_tso": 323.74,
+        "propeller_tbo": 1999.34,
+    }
+    for schema in (AircraftTechnicalLogApiRead, ATLPagedItemWithAutoApiRead):
+        formatted = schema.parse_obj(payload).dict()
+        assert formatted["airframe_aftt"] == 10490.5
+        assert formatted["engine_tsn"] == 5003.8
+        assert formatted["engine_tso"] == 323.7
+        assert formatted["engine_tbo"] == -1.5
+        assert formatted["propeller_tsn"] == 2432.1
+        assert formatted["propeller_tso"] == 323.7
+        assert formatted["propeller_tbo"] == 1999.3
 
 
 @pytest.mark.no_auth
@@ -301,6 +330,63 @@ def test_update_aircraft_technical_log_allows_meter_start_changes(
     assert response.status_code == 200
     assert response.json()["hobbs_meter_start"] == 123.4
     assert response.json()["tachometer_start"] == 234.5
+
+
+def test_update_aircraft_technical_log_persists_client_time_fields(
+    client_with_atl_auth: TestClient,
+    test_aircraft_technical_log_data: dict,
+):
+    """PUT must save and return client-supplied time fields without server recomputation."""
+    create_response = client_with_atl_auth.post(
+        "/api/v1/aircraft-technical-log/",
+        json=test_aircraft_technical_log_data,
+    )
+    assert create_response.status_code == 201
+    log_id = create_response.json()["id"]
+
+    update_payload = {
+        "tachometer_start": 6198,
+        "tachometer_end": 61981,
+        "tachometer_total": 55783,
+        "airframe_run_time": 1,
+        "airframe_aftt": 1,
+        "engine_run_time": 1,
+        "engine_tsn": "1",
+        "engine_tso": 1,
+        "engine_tbo": -1,
+        "propeller_run_time": 1,
+        "propeller_tsn": 1,
+        "propeller_tso": 1,
+        "propeller_tbo": 1,
+    }
+    update_response = client_with_atl_auth.put(
+        f"/api/v1/aircraft-technical-log/{log_id}",
+        json=update_payload,
+    )
+    assert update_response.status_code == 200, update_response.text
+    body = update_response.json()
+    for key, value in update_payload.items():
+        assert body[key] == value, f"{key}: expected {value}, got {body[key]}"
+
+    get_response = client_with_atl_auth.get(f"/api/v1/aircraft-technical-log/{log_id}")
+    assert get_response.status_code == 200
+    fetched = get_response.json()
+    decimal_fields = {
+        "airframe_aftt",
+        "engine_tsn",
+        "engine_tso",
+        "engine_tbo",
+        "propeller_tsn",
+        "propeller_tso",
+        "propeller_tbo",
+    }
+    for key, value in update_payload.items():
+        if key in decimal_fields:
+            assert fetched[key] == round(float(value), 1), (
+                f"GET {key}: expected {round(float(value), 1)}, got {fetched[key]}"
+            )
+        else:
+            assert fetched[key] == value, f"GET {key}: expected {value}, got {fetched[key]}"
 
 
 def test_delete_aircraft_technical_log(

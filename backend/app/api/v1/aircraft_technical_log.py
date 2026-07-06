@@ -173,7 +173,7 @@ async def api_list_paged(
     pages = ceil(total / limit) if total else 0
 
     result_items = [
-        aircraft_technical_log_schema.ATLPagedItemWithAuto.from_orm(item).dict()
+        aircraft_technical_log_schema.ATLPagedItemWithAutoApiRead.from_orm(item).dict()
         for item in items
     ]
 
@@ -397,7 +397,7 @@ async def api_atl_list_paged(
 
 @router.get(
     "/{log_id}",
-    response_model=aircraft_technical_log_schema.AircraftTechnicalLogRead,
+    response_model=aircraft_technical_log_schema.AircraftTechnicalLogApiRead,
     response_model_by_alias=False,
 )
 async def api_get(
@@ -424,10 +424,12 @@ async def api_get(
             detail="Aircraft Technical Log not found"
         )
     if recompute:
-        return await aircraft_technical_log_read_with_computed(
+        read = await aircraft_technical_log_read_with_computed(
             session, obj, recompute=True
         )
-    return await aircraft_technical_log_read_persisted(session, obj)
+    else:
+        read = await aircraft_technical_log_read_persisted(session, obj)
+    return aircraft_technical_log_schema.AircraftTechnicalLogApiRead.parse_obj(read.dict())
 
 
 @router.post(
@@ -534,7 +536,7 @@ async def api_update(
             detail="Aircraft Technical Log not found"
         )
 
-    return await aircraft_technical_log_read_with_computed(session, updated)
+    return await aircraft_technical_log_read_persisted(session, updated)
 
 
 @router.put(
