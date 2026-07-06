@@ -87,7 +87,11 @@ async def run_atl_import(
     """
     Validate every row, then bulk upsert in a single transaction when valid.
 
-    Reference data (existing ATL rows, account FKs) is loaded once — never per row.
+    Import is a direct data loader: values from the file are persisted as provided
+    with no derived-field computation or post-import recalculation.
+
+    Reference data (existing ATL rows for upsert, account FK validation) is loaded
+    once — never per row.
     """
     started = time.perf_counter()
     records = preprocess_atl_records(records)
@@ -154,13 +158,6 @@ async def run_atl_import(
                 validated_rows,
                 references=references,
                 audit_account_id=audit_account_id,
-            )
-            from app.core.atl_derived_times import backfill_atl_auto_fields_for_scope
-
-            await backfill_atl_auto_fields_for_scope(
-                session,
-                aircraft_fk,
-                atl_batch_fk=atl_batch_fk,
             )
         await session.commit()
         summary.inserted = persisted_inserted

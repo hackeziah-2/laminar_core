@@ -489,7 +489,7 @@ def test_latest_filters_by_batch_id_and_sequence_no(
     client_with_atl_auth: TestClient,
     test_aircraft_technical_log_data: dict,
 ):
-    """GET /latest returns highest sequence_no (limit 1) within aircraft + batch_id."""
+    """GET /latest/batch/{batch_id} returns highest numeric sequence_no within aircraft + batch."""
     from app.models.atl_batch import AtlBatch
 
     aircraft_fk = test_aircraft_technical_log_data["aircraft_fk"]
@@ -515,23 +515,62 @@ def test_latest_filters_by_batch_id_and_sequence_no(
         assert response.status_code == 201, response.text
 
     latest_a = client_with_atl_auth.get(
-        f"/api/v1/aircraft-technical-log/latest?aircraft_fk={aircraft_fk}&batch_id={batch_a_id}"
+        f"/api/v1/aircraft-technical-log/latest/batch/{batch_a_id}?aircraft_id={aircraft_fk}"
     )
     assert latest_a.status_code == 200
     assert latest_a.json()["sequence_no"] == "003"
     assert latest_a.json()["atl_batch_fk"] == batch_a_id
 
     latest_b = client_with_atl_auth.get(
-        f"/api/v1/aircraft-technical-log/latest?aircraft_fk={aircraft_fk}&batch_id={batch_b_id}"
+        f"/api/v1/aircraft-technical-log/latest/batch/{batch_b_id}?aircraft_id={aircraft_fk}"
     )
     assert latest_b.status_code == 200
     assert latest_b.json()["sequence_no"] == "999"
 
     latest_all = client_with_atl_auth.get(
-        f"/api/v1/aircraft-technical-log/latest?aircraft_fk={aircraft_fk}"
+        f"/api/v1/aircraft-technical-log/latest?aircraft_id={aircraft_fk}"
     )
     assert latest_all.status_code == 200
     assert latest_all.json()["sequence_no"] == "999"
+
+    empty_batch_response = client_with_atl_auth.get(
+        "/api/v1/aircraft-technical-log/latest/batch/999999?aircraft_id=1"
+    )
+    assert empty_batch_response.status_code == 404
+    assert empty_batch_response.json()["detail"] == "No ATL record found for the specified batch."
+
+
+def test_latest_orders_sequence_no_numerically(
+    client_with_atl_auth: TestClient,
+    test_aircraft_technical_log_data: dict,
+):
+    """GET /latest picks highest numeric sequence_no, not lexicographic order."""
+    aircraft_fk = test_aircraft_technical_log_data["aircraft_fk"]
+    base = {**test_aircraft_technical_log_data, "aircraft_fk": aircraft_fk}
+
+    for seq in ["0001", "0002", "0010", "0100", "9"]:
+        response = client_with_atl_auth.post(
+            "/api/v1/aircraft-technical-log/",
+            json={**base, "sequence_no": seq},
+        )
+        assert response.status_code == 201, response.text
+
+    latest = client_with_atl_auth.get(
+        f"/api/v1/aircraft-technical-log/latest?aircraft_id={aircraft_fk}"
+    )
+    assert latest.status_code == 200
+    assert latest.json()["sequence_no"] == "0100"
+
+
+def test_latest_not_found_returns_specified_detail(
+    client_with_atl_auth: TestClient,
+):
+    """GET /latest returns 404 with spec detail when no ATL exists for the filter."""
+    response = client_with_atl_auth.get(
+        "/api/v1/aircraft-technical-log/latest?aircraft_id=999999"
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "No ATL record found."
 
 
 def test_latest_with_sequence_no_returns_previous_atl(
@@ -585,6 +624,7 @@ def test_latest_with_sequence_no_returns_previous_atl(
         "/api/v1/aircraft-technical-log/latest?sequence_no=1006"
     )
     assert no_aircraft.status_code == 422
+    assert "aircraft_id is required" in no_aircraft.json()["detail"]
 
 
 def test_previous_atl_lookup_skips_soft_deleted_predecessor(

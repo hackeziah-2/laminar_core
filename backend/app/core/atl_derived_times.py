@@ -447,6 +447,16 @@ async def _atl_eager_for_read(
     return (await session.execute(stmt)).scalar_one()
 
 
+async def aircraft_technical_log_read_persisted(
+    session: AsyncSession,
+    entry: AircraftTechnicalLog,
+) -> AircraftTechnicalLogRead:
+    """Build AircraftTechnicalLogRead from persisted DB columns (no recomputation)."""
+    if not _atl_relationships_loaded(entry):
+        entry = await _atl_eager_for_read(session, entry)
+    return AircraftTechnicalLogRead.from_orm(entry)
+
+
 async def aircraft_technical_log_read_with_computed(
     session: AsyncSession,
     entry: AircraftTechnicalLog,
@@ -454,6 +464,8 @@ async def aircraft_technical_log_read_with_computed(
     recompute: bool = False,
 ) -> AircraftTechnicalLogRead:
     """Build AircraftTechnicalLogRead with standard time fields replaced by computed values."""
+    if not recompute and _atl_has_persisted_auto_fields(entry):
+        return await aircraft_technical_log_read_persisted(session, entry)
     if not _atl_relationships_loaded(entry):
         entry = await _atl_eager_for_read(session, entry)
     aircraft_obj = entry.aircraft

@@ -74,7 +74,7 @@ def test_resolve_auto_fields_handles_deep_predecessor_chain_without_recursion(
     assert last_atl_id is not None
 
     response = client_with_atl_auth.get(
-        f"/api/v1/aircraft-technical-log/{last_atl_id}"
+        f"/api/v1/aircraft-technical-log/{last_atl_id}?recompute=true"
     )
     assert response.status_code == 200, response.text
     body = response.json()

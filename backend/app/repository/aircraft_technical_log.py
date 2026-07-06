@@ -769,7 +769,7 @@ async def update_aircraft_technical_log(
     aircraft_row = (
         await session.get(Aircraft, obj.aircraft_fk) if obj.aircraft_fk is not None else None
     )
-    await persist_atl_auto_fields_to_row(session, obj, aircraft_row)
+    # await persist_atl_auto_fields_to_row(session, obj, aircraft_row)
 
     if log_in.component_parts is not None:
         await _replace_atl_component_parts(
@@ -1246,7 +1246,7 @@ async def get_latest_aircraft_technical_log(
             selectinload(AircraftTechnicalLog.atl_batch),
             selectinload(AircraftTechnicalLog.component_parts)
         )
-        .where(AircraftTechnicalLog.is_deleted == False)
+        .where(_active_atl_rows_clause())
     )
 
     if aircraft_fk is not None:
