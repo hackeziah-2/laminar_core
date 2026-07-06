@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 from app.schemas import aircraft_technical_log_schema
 from app.core.atl_derived_times import (
+    aircraft_technical_log_read_persisted,
     aircraft_technical_log_read_with_computed,
     resolve_auto_fields,
 )
@@ -217,48 +218,100 @@ async def api_search_by_sequence(
     return out
 
 
+def _resolve_aircraft_id_filter(
+    aircraft_id: Optional[int],
+    aircraft_fk: Optional[int],
+) -> Optional[int]:
+    """Prefer aircraft_id; accept aircraft_fk as backward-compatible alias."""
+    return aircraft_id if aircraft_id is not None else aircraft_fk
+
+
+def _resolve_atl_batch_filter(
+    atl_batch_fk: Optional[int],
+    atl_batch: Optional[int],
+    batch_id: Optional[int],
+) -> Optional[int]:
+    if atl_batch_fk is not None:
+        return atl_batch_fk
+    if atl_batch is not None:
+        return atl_batch
+    return batch_id
+
+
+@router.get(
+    "/latest/batch/{batch_id}",
+    response_model=aircraft_technical_log_schema.AircraftTechnicalLogRead,
+    response_model_by_alias=False,
+)
+async def api_get_latest_in_batch(
+    batch_id: int,
+    aircraft_id: Optional[int] = Query(None, description="Filter by aircraft ID"),
+    aircraft_fk: Optional[int] = Query(
+        None,
+        description="Alias for aircraft_id.",
+    ),
+    session: AsyncSession = Depends(get_session),
+):
+    """Latest ATL in the given batch by highest numeric sequence_no."""
+    filter_aircraft = _resolve_aircraft_id_filter(aircraft_id, aircraft_fk)
+    obj = await get_latest_aircraft_technical_log(
+        session,
+        aircraft_fk=filter_aircraft,
+        atl_batch_fk=batch_id,
+    )
+    if not obj:
+        raise HTTPException(
+            status_code=404,
+            detail="No ATL record found for the specified batch.",
+        )
+    return await aircraft_technical_log_read_persisted(session, obj)
+
+
 @router.get(
     "/latest",
-    response_model=aircraft_technical_log_schema.AircraftTechnicalLogRead
+    response_model=aircraft_technical_log_schema.AircraftTechnicalLogRead,
+    response_model_by_alias=False,
 )
 async def api_get_latest(
-    aircraft_fk: Optional[int] = Query(None, description="Filter by aircraft ID"),
-    batch_id: Optional[int] = Query(
+    aircraft_id: Optional[int] = Query(None, description="Filter by aircraft ID"),
+    aircraft_fk: Optional[int] = Query(
         None,
-        description="Filter by ATL batch id (atl_batch.id / atl_batch_fk).",
-    ),
-    atl_batch: Optional[int] = Query(
-        None,
-        description="Filter by ATL batch id (same as batch_id).",
-    ),
-    atl_batch_fk: Optional[int] = Query(
-        None,
-        description="Filter by ATL batch id.",
+        description="Alias for aircraft_id.",
     ),
     sequence_no: Optional[str] = Query(
         None,
         description=(
             "When set, return the nearest previous ATL (highest sequence_no strictly less than this value) "
-            "for the same aircraft_fk and optional batch. Accepts 'ATL-1006' or '1006'."
+            "for the same aircraft and optional batch. Accepts 'ATL-1006' or '1006'. "
+            "Use GET /latest/batch/{batch_id} for latest-in-batch without this parameter."
         ),
+    ),
+    batch_id: Optional[int] = Query(
+        None,
+        description="Batch filter for previous-ATL lookup when sequence_no is set.",
+    ),
+    atl_batch: Optional[int] = Query(
+        None,
+        description="Alias for batch_id (previous-ATL lookup only).",
+    ),
+    atl_batch_fk: Optional[int] = Query(
+        None,
+        description="Alias for batch_id (previous-ATL lookup only).",
     ),
     session: AsyncSession = Depends(get_session),
 ):
-    """Latest ATL by highest sequence_no, or previous ATL when sequence_no is provided."""
-    batch_filter = (
-        atl_batch_fk
-        if atl_batch_fk is not None
-        else (atl_batch if atl_batch is not None else batch_id)
-    )
+    """Latest ATL by highest numeric sequence_no, or previous ATL when sequence_no is provided."""
+    filter_aircraft = _resolve_aircraft_id_filter(aircraft_id, aircraft_fk)
     if sequence_no is not None:
-        if aircraft_fk is None:
+        if filter_aircraft is None:
             raise HTTPException(
                 status_code=422,
-                detail="aircraft_fk is required when sequence_no is provided",
+                detail="aircraft_id is required when sequence_no is provided",
             )
+        batch_filter = _resolve_atl_batch_filter(atl_batch_fk, atl_batch, batch_id)
         obj = await get_previous_atl(
             session,
-            aircraft_fk,
+            filter_aircraft,
             sequence_no,
             atl_batch_fk=batch_filter,
             null_batch_only_when_batch_unset=False,
@@ -271,15 +324,14 @@ async def api_get_latest(
     else:
         obj = await get_latest_aircraft_technical_log(
             session,
-            aircraft_fk=aircraft_fk,
-            atl_batch_fk=batch_filter,
+            aircraft_fk=filter_aircraft,
         )
         if not obj:
             raise HTTPException(
                 status_code=404,
-                detail="No Aircraft Technical Log entries found",
+                detail="No ATL record found.",
             )
-    return await aircraft_technical_log_read_with_computed(session, obj)
+    return await aircraft_technical_log_read_persisted(session, obj)
 
 
 @router.get("/manage/paged")
@@ -345,7 +397,8 @@ async def api_atl_list_paged(
 
 @router.get(
     "/{log_id}",
-    response_model=aircraft_technical_log_schema.AircraftTechnicalLogRead
+    response_model=aircraft_technical_log_schema.AircraftTechnicalLogRead,
+    response_model_by_alias=False,
 )
 async def api_get(
     log_id: int,
@@ -358,16 +411,23 @@ async def api_get(
     ),
     session: AsyncSession = Depends(get_session),
 ):
-    """Get a single Aircraft Technical Log entry by ID."""
+    """Get a single Aircraft Technical Log entry by ID.
+
+    When recompute is false (default), returns persisted column values — same source as
+    GET /paged. Pass recompute=true to derive auto_* and canonical time fields from the
+    predecessor chain.
+    """
     obj = await get_aircraft_technical_log(session, log_id)
     if not obj:
         raise HTTPException(
             status_code=404,
             detail="Aircraft Technical Log not found"
         )
-    return await aircraft_technical_log_read_with_computed(
-        session, obj, recompute=recompute
-    )
+    if recompute:
+        return await aircraft_technical_log_read_with_computed(
+            session, obj, recompute=True
+        )
+    return await aircraft_technical_log_read_persisted(session, obj)
 
 
 @router.post(

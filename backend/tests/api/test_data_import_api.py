@@ -157,10 +157,10 @@ def test_atl_import_aircraft_not_found(
     assert "Aircraft" in response.json()["detail"]
 
 
-def test_atl_import_recomputes_engine_and_propeller_times_after_import(
+def test_atl_import_persists_values_without_recomputation(
     client_with_maintenance_import_auth: TestClient,
 ):
-    """ATL import backfills auto_* and canonical engine/propeller TSO/TBO from the ATL chain."""
+    """ATL import saves file values only; no auto_* or TSO/TBO backfill from prior rows."""
     import asyncio
 
     from app.models.aircraft import Aircraft
@@ -194,9 +194,9 @@ def test_atl_import_recomputes_engine_and_propeller_times_after_import(
 
     aircraft_id, batch_id = asyncio.run(_seed())
     csv_body = (
-        b"SEQ NO.,TACH START,TACH END\n"
-        b"001,1,2\n"
-        b"002,2,3.5\n"
+        b"SEQ NO.,TACH START,TACH END,ENGINE TSO,ENGINE TBO\n"
+        b"001,1,2,111,888\n"
+        b"002,2,3.5,222,777\n"
     )
     response = client_with_maintenance_import_auth.post(
         "/api/v1/excel-data/aircraft-technical-log/import",
@@ -223,21 +223,102 @@ def test_atl_import_recomputes_engine_and_propeller_times_after_import(
             first, second = rows
             assert first.tachometer_start == 1.0
             assert first.tachometer_end == 2.0
-            assert first.auto_airframe_run_time == 1.0
-            assert first.engine_tso == 101.0
-            assert first.engine_tbo == 899.0
-            assert first.propeller_tso == 51.0
-            assert first.propeller_tbo == 549.0
+            assert first.engine_tso == 111.0
+            assert first.engine_tbo == 888.0
+            assert first.auto_airframe_run_time is None
+            assert first.auto_engine_tso is None
 
             assert second.tachometer_start == 2.0
             assert second.tachometer_end == 3.5
-            assert second.auto_airframe_run_time == 1.5
-            assert second.engine_tso == 102.5
-            assert second.engine_tbo == 897.5
-            assert second.propeller_tso == 52.5
-            assert second.propeller_tbo == 547.5
+            assert second.engine_tso == 222.0
+            assert second.engine_tbo == 777.0
+            assert second.auto_airframe_run_time is None
+            assert second.auto_engine_tso is None
 
     asyncio.run(_check_rows())
+
+
+ATL_LIST_DETAIL_TIME_FIELDS = (
+    "airframe_aftt",
+    "airframe_run_time",
+    "engine_run_time",
+    "engine_tsn",
+    "engine_tso",
+    "engine_tbo",
+    "propeller_run_time",
+    "propeller_tsn",
+    "propeller_tso",
+    "propeller_tbo",
+)
+
+
+def test_atl_import_list_and_detail_return_identical_time_fields(
+    client_with_maintenance_import_auth: TestClient,
+):
+    """After import, paged list and detail GET must return the same persisted time columns."""
+    import asyncio
+
+    from app.models.aircraft import Aircraft
+    from app.models.atl_batch import AtlBatch
+    from tests.conftest import TestSessionLocal
+
+    async def _seed() -> tuple[int, int]:
+        async with TestSessionLocal() as session:
+            ac = Aircraft(
+                registration="ATL-IMP-LD",
+                model="172",
+                msn="ATL-MSN-LD",
+                base="Base",
+                ownership="Owner",
+                status="Active",
+            )
+            session.add(ac)
+            await session.flush()
+            batch = AtlBatch(name="Import list/detail", description="pytest")
+            session.add(batch)
+            await session.commit()
+            await session.refresh(ac)
+            await session.refresh(batch)
+            return ac.id, batch.id
+
+    aircraft_id, batch_id = asyncio.run(_seed())
+    csv_body = (
+        b"SEQ NO.,TACH START,TACH END,AIRFRAME RUN TIME,AFTT,"
+        b"ENGINE RUN TIME,ENGINE TSN,ENGINE TSO,ENGINE TBO,"
+        b"PROPELLER RUN TIME,PROPELLER TSN,PROPELLER TSO,PROPELLER TBO\n"
+        b"001,10,12.5,2.5,502.5,2.5,1200.50,300.25,699.75,2.5,800,150.5,449.5\n"
+    )
+    import_response = client_with_maintenance_import_auth.post(
+        "/api/v1/excel-data/aircraft-technical-log/import",
+        data={"aircraft_id": str(aircraft_id), "batch_id": str(batch_id)},
+        files={"file": ("atl.csv", csv_body, "text/csv")},
+    )
+    assert import_response.status_code == 200, import_response.text
+    assert import_response.json()["status"] == "success"
+
+    paged_response = client_with_maintenance_import_auth.get(
+        f"/api/v1/aircraft-technical-log/paged"
+        f"?aircraft_fk={aircraft_id}&atl_batch_fk={batch_id}&limit=10&page=1"
+    )
+    assert paged_response.status_code == 200, paged_response.text
+    items = paged_response.json()["items"]
+    assert len(items) == 1, items
+    list_row = items[0]
+
+    detail_response = client_with_maintenance_import_auth.get(
+        f"/api/v1/aircraft-technical-log/{list_row['id']}"
+    )
+    assert detail_response.status_code == 200, detail_response.text
+    detail_row = detail_response.json()
+
+    for field in ATL_LIST_DETAIL_TIME_FIELDS:
+        assert list_row[field] == detail_row[field], field
+
+    recompute_response = client_with_maintenance_import_auth.get(
+        f"/api/v1/aircraft-technical-log/{list_row['id']}?recompute=true"
+    )
+    assert recompute_response.status_code == 200, recompute_response.text
+    assert recompute_response.json()["auto_airframe_run_time"] == 2.5
 
 
 def test_atl_import_batch_not_found(
