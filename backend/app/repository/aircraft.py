@@ -27,7 +27,7 @@ from app.models.tcc_maintenance import TCCMaintenance
 from app.models.document_on_board import DocumentOnBoard
 from app.models.cpcp_monitoring import CPCPMonitoring
 from app.schemas.aircraft_schema import AircraftCreate, AircraftOut, AircraftUpdate
-from app.database import set_audit_fields
+from app.database import active_query, set_audit_fields
 from app.models.account import AccountInformation
 from app.models.audit_log import AuditAction
 from app.services.audit_trail_service import create_audit_log, serialize_audit_data
@@ -60,6 +60,21 @@ async def _sync_fleet_daily_update_when_aircraft_maintenance(
         if audit_account_id is not None:
             await set_audit_fields(fd, audit_account_id, is_create=False)
         session.add(fd)
+
+
+async def _find_active_aircraft_by_field(
+    session: AsyncSession,
+    field_name: str,
+    value: str,
+    *,
+    exclude_id: Optional[int] = None,
+) -> Optional[Aircraft]:
+    """Return an active (non-soft-deleted) aircraft matching a unique field."""
+    stmt = active_query(Aircraft).where(getattr(Aircraft, field_name) == value)
+    if exclude_id is not None:
+        stmt = stmt.where(Aircraft.id != exclude_id)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
 
 
 async def _persist_upload_file(upload_file: UploadFile) -> str:
@@ -258,23 +273,12 @@ async def create_aircraft_with_file(
     if propeller_path:
         aircraft_data["propeller_arc"] = propeller_path
 
-    result = await session.execute(
-        select(Aircraft)
-        .where(Aircraft.registration == aircraft_data["registration"])
-        .where(Aircraft.is_deleted == False)
-    )
-    registration_exist = result.scalar_one_or_none()
-    if registration_exist:
+    if await _find_active_aircraft_by_field(
+        session, "registration", aircraft_data["registration"]
+    ):
         raise HTTPException(status_code=400, detail="Aircraft with this registration already exists")
 
-    _result = await session.execute(
-        select(Aircraft)
-        .where(Aircraft.msn == aircraft_data["msn"])
-        .where(Aircraft.is_deleted == False)
-    )
-
-    msn_exist = _result.scalar_one_or_none()
-    if msn_exist:
+    if await _find_active_aircraft_by_field(session, "msn", aircraft_data["msn"]):
         raise HTTPException(status_code=400, detail="Aircraft with this msn already exists")
 
     
@@ -343,23 +347,21 @@ async def update_aircraft_with_file(
 
     # --- Uniqueness checks (exclude current aircraft) ---
     if "registration" in update_data:
-        result = await session.execute(
-            select(Aircraft).where(
-                Aircraft.registration == update_data["registration"],
-                Aircraft.id != aircraft_id
-            )
-        )
-        if result.scalar_one_or_none():
+        if await _find_active_aircraft_by_field(
+            session,
+            "registration",
+            update_data["registration"],
+            exclude_id=aircraft_id,
+        ):
             raise HTTPException(status_code=400, detail="Registration already exists")
 
     if "msn" in update_data:
-        result = await session.execute(
-            select(Aircraft).where(
-                Aircraft.msn == update_data["msn"],
-                Aircraft.id != aircraft_id
-            )
-        )
-        if result.scalar_one_or_none():
+        if await _find_active_aircraft_by_field(
+            session,
+            "msn",
+            update_data["msn"],
+            exclude_id=aircraft_id,
+        ):
             raise HTTPException(status_code=400, detail="MSN already exists")
 
     # --- Apply updates ---

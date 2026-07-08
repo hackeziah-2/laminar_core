@@ -148,3 +148,27 @@ def test_spreadsheet_empty_sentinels():
     assert parse_import_date(pd.NaT) is None
     assert parse_import_date(float("nan")) is None
     assert not math.isnan(coerce_import_float(12.0) or 0)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("PRE EGR", "EGR"),
+        ("PSF EGR", "EGR"),
+        ("POST EGR", "EGR"),
+        ("EGR", "EGR"),
+        (" pre egr ", "EGR"),
+        ("PSF-EGR", "EGR"),
+        ("TR", "TR"),
+        ("PRE", "PRF"),
+        ("PST", "PSF"),
+        ("BLANK", None),
+        ("CANCELLED FLT", "CANCELLED_FLT"),
+        ("cancelled flt", "CANCELLED_FLT"),
+        ("CANCELLED_FLT", "CANCELLED_FLT"),
+    ],
+)
+def test_normalize_import_nature_of_flight(raw, expected):
+    from app.services.excel_import.parsers import normalize_import_nature_of_flight
+
+    assert normalize_import_nature_of_flight(raw) == expected

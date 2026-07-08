@@ -10,9 +10,11 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     UploadFile,
     status,
 )
+from fastapi.responses import PlainTextResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_account, require_permission
@@ -27,6 +29,11 @@ from app.schemas.atl_excel_import_job_schema import (
     AtlExcelImportStartResponse,
 )
 from app.services.atl_excel_import_job_runner import process_atl_excel_import_job
+from app.services.atl_excel_import_progress import build_import_progress_payload
+from app.services.excel_import.validation_errors import (
+    format_error_report_csv,
+    format_error_report_markdown,
+)
 from app.upload_config import ATL_IMPORT_JOBS_DIR, ensure_atl_import_jobs_dir
 
 router = APIRouter(prefix="/api/v1", tags=["atl-excel-import"])
@@ -134,21 +141,41 @@ async def get_atl_excel_import_progress(
     if not job:
         raise HTTPException(status_code=404, detail="Import job not found")
 
-    total = job.total_rows or 0
-    if total > 0:
-        progress = round(100.0 * job.processed_rows / total, 2)
-    else:
-        progress = 100.0 if job.status == "COMPLETED" else 0.0
+    return AtlExcelImportProgressResponse(**build_import_progress_payload(job))
+
+
+@router.get(
+    "/import-progress/{job_id}/errors",
+    summary="Download ATL Excel import validation errors",
+)
+async def download_atl_excel_import_errors(
+    job_id: str,
+    format: str = Query("csv", pattern="^(csv|markdown|json)$"),
+    session: AsyncSession = Depends(get_session),
+    _: AccountInformation = Depends(require_permission(MAINTENANCE_MODULE, "can_read")),
+):
+    job = await get_import_job(session, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Import job not found")
 
     errors = job.errors if isinstance(job.errors, list) else []
+    if not errors:
+        raise HTTPException(status_code=404, detail="No validation errors for this import job")
 
-    return AtlExcelImportProgressResponse(
-        job_id=job.job_id,
-        progress=progress,
-        status=job.status,
-        message=job.message,
-        total_rows=job.total_rows,
-        processed_rows=job.processed_rows,
-        failed_rows=job.failed_rows,
-        errors=errors,
+    if format == "json":
+        return {"errors": errors, "message": job.message}
+
+    if format == "markdown":
+        body = format_error_report_markdown(errors)
+        return PlainTextResponse(
+            content=body,
+            media_type="text/markdown",
+            headers={"Content-Disposition": f'attachment; filename="atl-import-errors-{job_id}.md"'},
+        )
+
+    body = format_error_report_csv(errors)
+    return Response(
+        content=body,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="atl-import-errors-{job_id}.csv"'},
     )

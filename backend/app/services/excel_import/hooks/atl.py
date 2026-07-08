@@ -43,22 +43,3 @@ class AtlImportHook(ImportHook):
             component_parts=list(parts),
             audit_account_id=audit_account_id,
         )
-
-    async def after_commit(
-        self,
-        session,
-        *,
-        context: Dict[str, Any],
-        audit_account_id,
-    ) -> None:
-        aircraft_fk = context.get("aircraft_fk")
-        if aircraft_fk is None:
-            return
-        from app.core.atl_derived_times import backfill_atl_auto_fields_for_scope
-
-        await backfill_atl_auto_fields_for_scope(
-            session,
-            int(aircraft_fk),
-            atl_batch_fk=context.get("atl_batch_fk"),
-        )
-        await session.commit()

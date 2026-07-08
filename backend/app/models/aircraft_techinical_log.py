@@ -25,6 +25,7 @@ class TypeEnum(str, enum.Enum):
     TR_WITH_PIREM = "TR_WITH_PIREM"
     VOID = "VOID"
     ATL_REPL = "ATL_REPL"
+    CANCELLED_FLT = "CANCELLED_FLT"
 
 
 class WorkStatus(str, enum.Enum):

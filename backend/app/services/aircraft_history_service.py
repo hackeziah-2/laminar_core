@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.database import set_audit_fields
+from app.database import active_query, set_audit_fields
 from app.models.account import AccountInformation
 from app.models.aircraft import Aircraft
 from app.models.aircraft_history import AircraftHistory
@@ -108,7 +108,7 @@ async def _validate_unique_fields(
 ) -> None:
     if "registration" in update_data:
         result = await session.execute(
-            select(Aircraft).where(
+            active_query(Aircraft).where(
                 Aircraft.registration == update_data["registration"],
                 Aircraft.id != aircraft_id,
             )
@@ -118,7 +118,7 @@ async def _validate_unique_fields(
 
     if "msn" in update_data:
         result = await session.execute(
-            select(Aircraft).where(
+            active_query(Aircraft).where(
                 Aircraft.msn == update_data["msn"],
                 Aircraft.id != aircraft_id,
             )

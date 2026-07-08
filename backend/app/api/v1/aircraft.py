@@ -310,7 +310,9 @@ async def api_update_aircraft_with_file(
     current_account: AccountInformation = Depends(get_current_active_account),
 ):  
     parsed = json.loads(json_data)
+    # breakpoint()  # after parsed = json.loads(json_data)
     aircraft_data = aircraft_schema.AircraftUpdate(**parsed)
+    
     return await update_aircraft_and_log_history(
         session=session,
         aircraft_id=aircraft_id,

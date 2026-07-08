@@ -384,6 +384,35 @@ def test_get_aircraft_not_found(client: TestClient):
     assert "not found" in response.json()["detail"].lower()
 
 
+def test_create_aircraft_after_soft_delete(
+    client: TestClient,
+    test_aircraft_data: dict,
+):
+    """Soft-deleted aircraft must not block creating a new active record."""
+    import json
+    json_data = json.dumps(test_aircraft_data)
+
+    create1 = client.post(
+        "/api/v1/aircraft/",
+        data={"json_data": json_data},
+        files={},
+    )
+    assert create1.status_code == 200
+    aircraft_id = create1.json()["id"]
+
+    delete_resp = client.delete(f"/api/v1/aircraft/{aircraft_id}")
+    assert delete_resp.status_code == 204
+
+    create2 = client.post(
+        "/api/v1/aircraft/",
+        data={"json_data": json_data},
+        files={},
+    )
+    assert create2.status_code == 200, create2.text
+    assert create2.json()["registration"] == test_aircraft_data["registration"]
+    assert create2.json()["id"] != aircraft_id
+
+
 def test_create_aircraft_duplicate_registration(
     client: TestClient,
     test_aircraft_data: dict

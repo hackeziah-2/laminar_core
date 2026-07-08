@@ -627,12 +627,12 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
         pre=True,
     )
     def excel_int_to_none_or_int(cls, v: Any) -> Any:
-        """Coerce Excel NaN to None; allow float that is whole number (e.g. 1.0) as int."""
+        """Coerce Excel NaN to None; reject non-numeric values when a cell is provided."""
         v = _excel_empty_to_none(v)
         if v is None:
             return None
         if isinstance(v, bool):
-            return None
+            raise ValueError("Must be a numeric value.")
         if isinstance(v, int):
             return v
         if isinstance(v, float):
@@ -640,10 +640,13 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
                 return None
             if v == int(v):
                 return int(v)
-            return None
-        if isinstance(v, str) and v.strip().isdigit():
-            return int(v.strip())
-        return None
+            raise ValueError("Must be a whole number.")
+        if isinstance(v, str):
+            s = v.strip()
+            if s.isdigit():
+                return int(s)
+            raise ValueError("Must be a numeric value.")
+        raise ValueError("Must be a numeric value.")
 
     class Config:
         orm_mode = True
@@ -922,6 +925,28 @@ class ATLAircraftScopedSearchItem(BaseModel):
     origin_date: Optional[date] = None
 
 
+# Canonical time fields on GET /paged and GET /{id}: one decimal place in JSON (response only).
+_ATL_RESPONSE_DECIMAL_FIELDS = (
+    "airframe_aftt",
+    "engine_tsn",
+    "engine_tso",
+    "engine_tbo",
+    "propeller_tsn",
+    "propeller_tso",
+    "propeller_tbo",
+)
+
+
+def round_optional_float_1(value: Any) -> Optional[float]:
+    """Format nullable numeric ATL time fields to one decimal place for API responses."""
+    if value is None:
+        return None
+    try:
+        return round(float(value), 1)
+    except (TypeError, ValueError):
+        return None
+
+
 # ---------- Aircraft Technical Log Read Schema ----------
 class AircraftTechnicalLogRead(AircraftTechnicalLogBase):
     id: int
@@ -940,6 +965,26 @@ class AircraftTechnicalLogRead(AircraftTechnicalLogBase):
     def set_nature_of_flight_display(cls, v: Any, values: dict) -> str:
         nof = values.get("nature_of_flight")
         return nof.value if nof is not None else "-"
+
+    class Config:
+        orm_mode = True
+
+
+class AircraftTechnicalLogApiRead(AircraftTechnicalLogRead):
+    """GET /paged and GET /{id}: canonical time fields rounded to 1 decimal in JSON."""
+
+    engine_tsn: Optional[float] = Field(
+        default=None,
+        description="Engine TSN; read responses use 1 decimal place.",
+    )
+
+    @root_validator(pre=False)
+    def format_response_decimal_fields(cls, values: Any) -> Any:
+        if not isinstance(values, dict):
+            return values
+        for key in _ATL_RESPONSE_DECIMAL_FIELDS:
+            values[key] = round_optional_float_1(values.get(key))
+        return values
 
     class Config:
         orm_mode = True
@@ -967,6 +1012,13 @@ class ATLPagedItem(AircraftTechnicalLogRead):
 # ---------- ATL Paged response for /aircraft-technical-log/paged (Read + persisted auto_* columns) ----------
 class ATLPagedItemWithAuto(AircraftTechnicalLogRead):
     """ATL read including auto_* from AircraftTechnicalLog persisted columns (same shape as list paged API)."""
+
+    class Config:
+        orm_mode = True
+
+
+class ATLPagedItemWithAutoApiRead(AircraftTechnicalLogApiRead):
+    """ATL paged list item with 1-decimal canonical time fields for GET /paged."""
 
     class Config:
         orm_mode = True

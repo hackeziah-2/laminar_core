@@ -11,10 +11,14 @@ from app.services.excel_import.parsers import (
     normalize_import_nature_of_flight,
     parse_import_date,
 )
+from app.services.excel_import.validation_errors import format_row_error
 
 _IMPORT_DATE_FIELDS = frozenset(
     {
         "origin_date",
+        "destination_date",
+        "pilot_accept_date",
+        "rts_date",
         "performed_date_start",
         "performed_date_end",
         "compli_date",
@@ -27,16 +31,6 @@ def schema_field_names(schema: Type[BaseModel]) -> Set[str]:
     if hasattr(schema, "model_fields"):
         return set(schema.model_fields.keys())
     return set(getattr(schema, "__fields__", {}).keys())
-
-
-def format_row_error(exc: Exception) -> str:
-    if isinstance(exc, ValidationError):
-        if hasattr(exc, "errors"):
-            return "; ".join(
-                f"{'.'.join(str(x) for x in e.get('loc', []))}: {e.get('msg')}"
-                for e in exc.errors()
-            )
-    return str(exc)
 
 
 def build_row_for_schema(
