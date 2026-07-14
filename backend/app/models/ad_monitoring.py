@@ -44,11 +44,11 @@ class WorkOrderADMonitoring(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
         index=True,
     )
     work_order_number = Column(String(50), nullable=False, index=True)
-    last_done_actt = Column(Float, nullable=True)
+    last_done_aftt = Column(Float, nullable=True)
     last_done_tach = Column(Float, nullable=True)
     last_done_date = Column(Date, nullable=True)
-    next_done_actt = Column(Float, nullable=True)
-    tach = Column(Float, nullable=True)
+    next_due_aftt = Column(Float, nullable=True)
+    next_due_tach = Column(Float, nullable=True)
     atl_ref = Column(String(50), nullable=False, index=True)
 
     ad_monitoring = relationship(
