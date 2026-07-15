@@ -121,7 +121,8 @@ class WorkOrderADMonitoringSummary(BaseModel):
     atl_ref: str
     last_done_date: Optional[date] = None
     last_done_tach: Optional[float] = None
-    next_done_actt: Optional[float] = None
+    next_due_aftt: Optional[float] = None
+    next_due_tach: Optional[float] = None
 
     class Config:
         orm_mode = True
@@ -130,11 +131,11 @@ class WorkOrderADMonitoringSummary(BaseModel):
 class WorkOrderADMonitoringBase(BaseModel):
     ad_monitoring_fk: int
     work_order_number: str = Field(..., max_length=50)
-    last_done_actt: Optional[float] = None
+    last_done_aftt: Optional[float] = None
     last_done_tach: Optional[float] = None
     last_done_date: Optional[date] = None
-    next_done_actt: Optional[float] = None
-    tach: Optional[float] = None
+    next_due_aftt: Optional[float] = None
+    next_due_tach: Optional[float] = None
     atl_ref: str = Field(..., max_length=50)
 
     class Config:
@@ -166,11 +167,11 @@ class WorkOrderADMonitoringImportSchema(BaseModel):
 
     ad_monitoring_fk: int
     work_order_number: str = Field(..., max_length=50)
-    last_done_actt: Optional[float] = None
+    last_done_aftt: Optional[float] = None
     last_done_tach: Optional[float] = None
     last_done_date: Optional[date] = None
-    next_done_actt: Optional[float] = None
-    tach: Optional[float] = None
+    next_due_aftt: Optional[float] = None
+    next_due_tach: Optional[float] = None
     atl_ref: str = Field(..., max_length=50)
 
     @staticmethod
@@ -192,10 +193,10 @@ class WorkOrderADMonitoringImportSchema(BaseModel):
         return cls._coerce_required_str(v, "atl_ref")
 
     @validator(
-        "last_done_actt",
+        "last_done_aftt",
         "last_done_tach",
-        "next_done_actt",
-        "tach",
+        "next_due_aftt",
+        "next_due_tach",
         pre=True,
     )
     def coerce_optional_floats(cls, v: Any) -> Any:
@@ -218,11 +219,11 @@ class WorkOrderADMonitoringUpdate(BaseModel):
 
     ad_monitoring_fk: Optional[int] = None
     work_order_number: Optional[str] = Field(None, max_length=50)
-    last_done_actt: Optional[float] = None
+    last_done_aftt: Optional[float] = None
     last_done_tach: Optional[float] = None
     last_done_date: Optional[date] = None
-    next_done_actt: Optional[float] = None
-    tach: Optional[float] = None
+    next_due_aftt: Optional[float] = None
+    next_due_tach: Optional[float] = None
     atl_ref: Optional[str] = Field(None, max_length=50)
 
     class Config:

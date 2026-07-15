@@ -9,6 +9,8 @@ from sqlalchemy import select
 from tests.factories.import_files import (
     ad_csv_bytes,
     ad_work_order_csv_bytes,
+    ad_work_order_csv_bytes_with_headers,
+    ad_work_order_tsv_bytes,
     aircraft_csv_bytes,
     cpcp_csv_bytes,
     invalid_extension_bytes,
@@ -409,6 +411,81 @@ def test_ad_import_dry_run_success(
     assert body["errors"] == []
 
 
+@pytest.mark.parametrize(
+    "header_labels",
+    [
+        {
+            "AD NUMBER": "ad_number",
+            "SUBJECT": "subject",
+            "INSPECTION INTERVAL": "inspection_interval",
+            "DATE OF EFFECTIVITY": "compli_date",
+        },
+        {
+            "ad number": "ad_number",
+            "subject": "subject",
+            "inspection interval": "inspection_interval",
+            "date of effectivity or compliance date": "compli_date",
+        },
+        {
+            "ad_number": "ad_number",
+            "subject": "subject",
+            "inspection_interval": "inspection_interval",
+            "compli_date": "compli_date",
+        },
+    ],
+)
+def test_ad_import_accepts_header_casing(
+    client_with_maintenance_import_auth: TestClient,
+    header_labels: dict,
+):
+    """AD import accepts uppercase, lowercase, and snake_case headers."""
+    import asyncio
+    import csv
+    import io
+
+    from app.models.aircraft import Aircraft
+    from tests.conftest import TestSessionLocal
+
+    async def _seed_aircraft() -> int:
+        async with TestSessionLocal() as session:
+            ac = Aircraft(
+                registration="AD-CASE-AC",
+                model="172",
+                msn="AD-CASE-MSN",
+                base="Base",
+                ownership="Owner",
+                status="Active",
+            )
+            session.add(ac)
+            await session.commit()
+            await session.refresh(ac)
+            return ac.id
+
+    aircraft_pk = asyncio.run(_seed_aircraft())
+    default_values = {
+        "ad_number": "32236",
+        "subject": "TEST AD",
+        "inspection_interval": "Annual",
+        "compli_date": "6/5/2023",
+    }
+    row = {header: default_values[field] for header, field in header_labels.items()}
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=list(header_labels.keys()))
+    writer.writeheader()
+    writer.writerow(row)
+
+    response = client_with_maintenance_import_auth.post(
+        "/api/v1/excel-data/maintenance-ad/import?dry_run=true",
+        data={"aircraft_id": str(aircraft_pk)},
+        files={"file": ("ad.csv", buf.getvalue().encode("utf-8"), "text/csv")},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "dry-run"
+    assert body["inserted"] >= 1
+    assert body["errors"] == []
+
+
 def test_ad_import_dry_run_date_formats(
     client_with_maintenance_import_auth: TestClient,
 ):
@@ -576,6 +653,143 @@ def test_ad_work_order_import_dry_run_success(
     assert body["errors"] == []
 
 
+def test_ad_work_order_import_tab_separated_headers(
+    client_with_maintenance_import_auth: TestClient,
+):
+    """Tab-separated files with canonical headers import correctly."""
+    import asyncio
+
+    from app.models.ad_monitoring import ADMonitoring
+    from app.models.aircraft import Aircraft
+    from tests.conftest import TestSessionLocal
+
+    async def _seed_ad_monitoring() -> int:
+        async with TestSessionLocal() as session:
+            ac = Aircraft(
+                registration="AD-WO-TSV-AC",
+                model="172",
+                msn="AD-WO-TSV-MSN",
+                base="Base",
+                ownership="Owner",
+                status="Active",
+            )
+            session.add(ac)
+            await session.flush()
+            ad = ADMonitoring(
+                aircraft_fk=ac.id,
+                ad_number="32237",
+                subject="TEST AD",
+                inspection_interval="Annual",
+            )
+            session.add(ad)
+            await session.commit()
+            await session.refresh(ad)
+            return ad.id
+
+    ad_pk = asyncio.run(_seed_ad_monitoring())
+    response = client_with_maintenance_import_auth.post(
+        "/api/v1/excel-data/maintenance-ad-work-orders/import?dry_run=true",
+        data={"ad_monitoring_id": str(ad_pk)},
+        files={
+            "file": (
+                "ad-wo.csv",
+                ad_work_order_tsv_bytes(),
+                "text/csv",
+            )
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "dry-run"
+    assert body["inserted"] >= 1
+    assert body["errors"] == []
+
+
+@pytest.mark.parametrize(
+    "header_labels",
+    [
+        {
+            "WO NUMBER": "work_order_number",
+            "LAST DONE AFTT": "last_done_aftt",
+            "LAST DONE TACH": "last_done_tach",
+            "LAST DONE DATE": "last_done_date",
+            "NEXT DUE AFTT": "next_due_aftt",
+            "NEXT DUE TACH": "next_due_tach",
+            "ATL REF": "atl_ref",
+        },
+        {
+            "wo number": "work_order_number",
+            "last done aftt": "last_done_aftt",
+            "last done tach": "last_done_tach",
+            "last done date": "last_done_date",
+            "next due aftt": "next_due_aftt",
+            "next due tach": "next_due_tach",
+            "atl ref": "atl_ref",
+        },
+        {
+            "wo_number": "work_order_number",
+            "last_done_aftt": "last_done_aftt",
+            "last_done_tach": "last_done_tach",
+            "last_done_date": "last_done_date",
+            "next_due_aftt": "next_due_aftt",
+            "next_due_tach": "next_due_tach",
+            "atl_ref": "atl_ref",
+        },
+    ],
+)
+def test_ad_work_order_import_accepts_header_casing(
+    client_with_maintenance_import_auth: TestClient,
+    header_labels: dict,
+):
+    """AD work-order import accepts uppercase, lowercase, and snake_case headers."""
+    import asyncio
+
+    from app.models.ad_monitoring import ADMonitoring
+    from app.models.aircraft import Aircraft
+    from tests.conftest import TestSessionLocal
+
+    async def _seed_ad_monitoring() -> int:
+        async with TestSessionLocal() as session:
+            ac = Aircraft(
+                registration="AD-WO-CASE-AC",
+                model="172",
+                msn="AD-WO-CASE-MSN",
+                base="Base",
+                ownership="Owner",
+                status="Active",
+            )
+            session.add(ac)
+            await session.flush()
+            ad = ADMonitoring(
+                aircraft_fk=ac.id,
+                ad_number="32235",
+                subject="TEST AD",
+                inspection_interval="Annual",
+            )
+            session.add(ad)
+            await session.commit()
+            await session.refresh(ad)
+            return ad.id
+
+    ad_pk = asyncio.run(_seed_ad_monitoring())
+    response = client_with_maintenance_import_auth.post(
+        "/api/v1/excel-data/maintenance-ad-work-orders/import?dry_run=true",
+        data={"ad_monitoring_id": str(ad_pk)},
+        files={
+            "file": (
+                "ad-wo.csv",
+                ad_work_order_csv_bytes_with_headers(headers=header_labels),
+                "text/csv",
+            )
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "dry-run"
+    assert body["inserted"] >= 1
+    assert body["errors"] == []
+
+
 def test_ad_work_order_import_dry_run_date_formats(
     client_with_maintenance_import_auth: TestClient,
 ):
@@ -612,22 +826,22 @@ def test_ad_work_order_import_dry_run_date_formats(
     ad_pk = asyncio.run(_seed_ad_monitoring())
     rows = [
         {
-            "WO Number": "17212-A-000343",
-            "Last Done Actt": "6080.1",
-            "Last Done Tach": "6079.5",
-            "Last Done Date": "6/5/2023",
-            "Next Done Actt": "6180.1",
-            "Tach": "6179.5",
-            "Atl Ref": "ATL-0002225",
+            "WO NUMBER": "17212-A-000343",
+            "LAST DONE AFTT": "6080.1",
+            "LAST DONE TACH": "6079.5",
+            "LAST DONE DATE": "6/5/2023",
+            "NEXT DUE AFTT": "6180.1",
+            "NEXT DUE TACH": "6179.5",
+            "ATL REF": "ATL-0002225",
         },
         {
-            "WO Number": "17212-A-000351",
-            "Last Done Actt": "6179.3",
-            "Last Done Tach": "6178.7",
-            "Last Done Date": "23-Jul-23",
-            "Next Done Actt": "6279.3",
-            "Tach": "6278.7",
-            "Atl Ref": "ATL-0002412",
+            "WO NUMBER": "17212-A-000351",
+            "LAST DONE AFTT": "6179.3",
+            "LAST DONE TACH": "6178.7",
+            "LAST DONE DATE": "23-Jul-23",
+            "NEXT DUE AFTT": "6279.3",
+            "NEXT DUE TACH": "6278.7",
+            "ATL REF": "ATL-0002412",
         },
     ]
 
@@ -678,15 +892,15 @@ def test_ad_work_order_import_upserts_on_work_order_number(
 
     ad_pk = asyncio.run(_seed_ad_monitoring())
     row = {
-        "WO Number": "17212-A-000343",
-        "Last Done Actt": "6080.1",
-        "Last Done Tach": "6079.5",
-        "Last Done Date": "6/5/2023",
-        "Next Done Actt": "6180.1",
-        "Tach": "6179.5",
-        "Atl Ref": "ATL-0002225",
+        "WO NUMBER": "17212-A-000343",
+        "LAST DONE AFTT": "6080.1",
+        "LAST DONE TACH": "6079.5",
+        "LAST DONE DATE": "6/5/2023",
+        "NEXT DUE AFTT": "6180.1",
+        "NEXT DUE TACH": "6179.5",
+        "ATL REF": "ATL-0002225",
     }
-    updated_row = {**row, "Atl Ref": "ATL-UPDATED"}
+    updated_row = {**row, "ATL REF": "ATL-UPDATED"}
 
     first = client_with_maintenance_import_auth.post(
         "/api/v1/excel-data/maintenance-ad-work-orders/import",

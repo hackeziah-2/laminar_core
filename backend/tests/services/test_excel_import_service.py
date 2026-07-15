@@ -31,6 +31,34 @@ class _MockUploadFile:
 
 
 @pytest.mark.asyncio
+async def test_read_upload_records_parses_tab_separated_csv():
+    """Tab-separated CSV exports (common from Excel paste) parse into columns."""
+    from app.constants.ad_work_order_excel_import import AD_WORK_ORDER_EXCEL_COLUMN_MAPPING
+
+    tsv = (
+        "WO NUMBER\tLAST DONE AFTT\tLAST DONE TACH\tLAST DONE DATE\t"
+        "NEXT DUE AFTT\tNEXT DUE TACH\tATL REF\n"
+        "WO-1\t6080.1\t6079.5\t6/5/2023\t6180.1\t6179.5\tATL-1\n"
+    )
+    file = _MockUploadFile("ad-wo.csv", tsv.encode("utf-8"))
+    rows = await read_upload_records(
+        file,
+        column_mapping=AD_WORK_ORDER_EXCEL_COLUMN_MAPPING,
+    )
+    assert rows == [
+        {
+            "work_order_number": "WO-1",
+            "last_done_aftt": 6080.1,
+            "last_done_tach": 6079.5,
+            "last_done_date": "6/5/2023",
+            "next_due_aftt": 6180.1,
+            "next_due_tach": 6179.5,
+            "atl_ref": "ATL-1",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_read_upload_records_rejects_invalid_extension():
     """2. Validation — reader raises on bad extension."""
     file = _MockUploadFile("data.txt", b"x")

@@ -51,26 +51,79 @@ def ad_csv_bytes(rows: Optional[List[Dict[str, Any]]] = None) -> bytes:
 
 
 def ad_work_order_csv_bytes(rows: Optional[List[Dict[str, Any]]] = None) -> bytes:
-    """Minimal valid AD work-order import CSV (friendly headers as in production mapping)."""
-    default_row = {
-        "WO Number": "17212-A-000343",
-        "Last Done Actt": "6080.1",
-        "Last Done Tach": "6079.5",
-        "Last Done Date": "6/5/2023",
-        "Next Done Actt": "6180.1",
-        "Tach": "6179.5",
-        "Atl Ref": "ATL-0002225",
+    """Minimal valid AD work-order import CSV (canonical production headers)."""
+    return ad_work_order_csv_bytes_with_headers(
+        rows=rows,
+        headers={
+            "WO NUMBER": "work_order_number",
+            "LAST DONE AFTT": "last_done_aftt",
+            "LAST DONE TACH": "last_done_tach",
+            "LAST DONE DATE": "last_done_date",
+            "NEXT DUE AFTT": "next_due_aftt",
+            "NEXT DUE TACH": "next_due_tach",
+            "ATL REF": "atl_ref",
+        },
+    )
+
+
+def ad_work_order_csv_bytes_with_headers(
+    *,
+    rows: Optional[List[Dict[str, Any]]] = None,
+    headers: Dict[str, str],
+) -> bytes:
+    """Build AD work-order CSV using explicit column labels (any casing)."""
+    default_values = {
+        "work_order_number": "17212-A-000343",
+        "last_done_aftt": "6080.1",
+        "last_done_tach": "6079.5",
+        "last_done_date": "6/5/2023",
+        "next_due_aftt": "6180.1",
+        "next_due_tach": "6179.5",
+        "atl_ref": "ATL-0002225",
     }
-    data = rows if rows is not None else [default_row]
-    fieldnames: List[str] = []
-    for row in data:
-        for key in row:
-            if key not in fieldnames:
-                fieldnames.append(key)
+    if rows is None:
+        rows = [
+            {
+                header: default_values[field]
+                for header, field in headers.items()
+            }
+        ]
+    fieldnames = list(headers.keys())
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=fieldnames)
     writer.writeheader()
-    writer.writerows(data)
+    writer.writerows(rows)
+    return buf.getvalue().encode("utf-8")
+
+
+def ad_work_order_tsv_bytes(rows: Optional[List[Dict[str, Any]]] = None) -> bytes:
+    """AD work-order import TSV (tab-separated) with canonical production headers."""
+    headers = {
+        "WO NUMBER": "work_order_number",
+        "LAST DONE AFTT": "last_done_aftt",
+        "LAST DONE TACH": "last_done_tach",
+        "LAST DONE DATE": "last_done_date",
+        "NEXT DUE AFTT": "next_due_aftt",
+        "NEXT DUE TACH": "next_due_tach",
+        "ATL REF": "atl_ref",
+    }
+    default_values = {
+        "work_order_number": "17212-A-000343",
+        "last_done_aftt": "6080.1",
+        "last_done_tach": "6079.5",
+        "last_done_date": "6/5/2023",
+        "next_due_aftt": "6180.1",
+        "next_due_tach": "6179.5",
+        "atl_ref": "ATL-0002225",
+    }
+    if rows is None:
+        rows = [
+            {header: default_values[field] for header, field in headers.items()}
+        ]
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=list(headers.keys()), delimiter="\t")
+    writer.writeheader()
+    writer.writerows(rows)
     return buf.getvalue().encode("utf-8")
 
 
