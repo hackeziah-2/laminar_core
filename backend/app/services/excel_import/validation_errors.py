@@ -18,6 +18,7 @@ _FIELD_EXPECTED_HINTS: Dict[str, str] = {
     "pilot_accept_time": "HH:MM, HHMM, or Zulu time (e.g. 0440 Zulu).",
     "rts_time": "HH:MM, HHMM, or Zulu time (e.g. 0440 Zulu).",
     "date_time_reported": "DD-Mon-YY HHMMZ (e.g. 01-Mar-24 0738Z) or ISO datetime.",
+    "atl_date_time_reported": "DD-Mon-YY HHMMZ (e.g. 01-Mar-24 0738Z) or ISO datetime.",
     "date_time_released": "DD-Mon-YY HHMMZ (e.g. 01-Mar-24 0738Z) or ISO datetime.",
     "nature_of_flight": "TR, PSF, PRF, EGR, ME, TR_WITH_PIREM, VOID, ATL_REPL, CANCELLED_FLT, "
     "BLANK, MISSING, or NO ENTRY.",

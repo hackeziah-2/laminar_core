@@ -81,7 +81,7 @@ ATL_EXCEL_COLUMN_MAPPING = {
     "rts signed by": "rts_signed_by",
     "rts date": "rts_date",
     "rts time": "rts_time",
-    "date time reported": "date_time_reported",
+    "date time reported": "atl_date_time_reported",
     "date time released": "date_time_released",
     "white atl": "white_atl",
     "dfp": "dfp",

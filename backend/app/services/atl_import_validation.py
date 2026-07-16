@@ -1,12 +1,13 @@
 """ATL Excel import: validate all rows before any database write."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from pydantic import ValidationError
 
 from app.constants.atl_excel_import import ATL_EXCEL_COLUMN_MAPPING
 from app.schemas.aircraft_technical_log_schema import AircraftTechnicalLogImportSchema
+from app.services.atl_import_date_time_reported import try_parse_atl_date_time_reported
 from app.services.atl_import_references import AtlImportReferences
 from app.services.excel_import.hooks.atl import AtlImportHook
 from app.services.excel_import.row_builder import build_row_for_schema, schema_field_names
@@ -62,6 +63,17 @@ def validate_atl_row_schema(
             inject_fields=inject_fields,
             hook=_HOOK,
         )
+        provided = "atl_date_time_reported" in row or "atl_date_time_reported" in trimmed
+        raw_reported = trimmed.get("atl_date_time_reported") if provided else None
+        if provided:
+            parsed, issue = try_parse_atl_date_time_reported(raw_reported)
+            row_data["atl_date_time_reported"] = parsed
+            row_data["atl_date_time_reported_provided"] = True
+            row_data["atl_date_time_reported_issue"] = issue
+        else:
+            row_data.pop("atl_date_time_reported", None)
+            row_data["atl_date_time_reported_provided"] = False
+            row_data["atl_date_time_reported_issue"] = None
         validated = SCHEMA(**row_data)
         return validated, []
     except ValidationError as exc:
@@ -138,6 +150,60 @@ def validate_account_reference_fields(
     return errors
 
 
+def validate_date_time_reported_mapping(
+    validated_rows: Sequence[Tuple[int, AircraftTechnicalLogImportSchema]],
+    references: AtlImportReferences,
+    *,
+    raw_records: Optional[Sequence[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Per sequence_no: when Date Time Reported is empty/invalid and the existing ATL
+    has no origin_date, report a validation error.
+    """
+    errors: List[Dict[str, Any]] = []
+    column = "Date Time Reported"
+    expected = expected_hint_for_field("atl_date_time_reported")
+
+    for excel_row, validated in validated_rows:
+        if not getattr(validated, "atl_date_time_reported_provided", False):
+            continue
+        issue = getattr(validated, "atl_date_time_reported_issue", None)
+        if issue not in ("empty", "invalid"):
+            continue
+
+        existing = references.existing_by_sequence.get(validated.sequence_no)
+        if existing is not None and getattr(existing, "origin_date", None) is not None:
+            # Scenario 2: keep existing origin; ignore bad/empty import value.
+            continue
+
+        raw_value = None
+        if raw_records is not None:
+            idx = excel_row - 2
+            if 0 <= idx < len(raw_records):
+                raw_value = raw_records[idx].get("atl_date_time_reported")
+
+        if issue == "empty":
+            message = (
+                "Date Time Reported is empty and the ATL has no origin_date "
+                "to fall back to."
+            )
+        else:
+            message = (
+                "Date Time Reported is invalid and the ATL has no origin_date "
+                "to fall back to."
+            )
+        errors.append(
+            structured_error_dict(
+                row=excel_row,
+                column=column,
+                value=raw_value,
+                error=message,
+                expected=expected,
+            )
+        )
+    return errors
+
+
 def validate_atl_schema_and_duplicates(
     records: Sequence[Dict[str, Any]],
     *,
@@ -198,7 +264,14 @@ async def validate_atl_import_records(
         atl_batch_fk=atl_batch_fk,
         account_ids=account_ids,
     )
-    reference_errors = validate_account_reference_fields(validated_rows, references)
+    reference_errors = merge_structured_errors(
+        validate_account_reference_fields(validated_rows, references),
+        validate_date_time_reported_mapping(
+            validated_rows,
+            references,
+            raw_records=records,
+        ),
+    )
     if reference_errors:
         return [], reference_errors
     return validated_rows, []
