@@ -479,14 +479,17 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
         return out if out else None
 
     @validator("work_status", pre=True, always=True)
-    def default_work_status_on_import(cls, v: Any) -> Any:
-        """Default empty/null/dash import values to FOR_REVIEW."""
+    def normalize_work_status_on_import(cls, v: Any) -> Any:
+        """Normalize work_status; leave empty/null/dash as None for PATCH updates.
+
+        New rows still default to FOR_REVIEW in the import persist path when unset.
+        """
         if v is None:
-            return WorkStatus.FOR_REVIEW
+            return None
         if isinstance(v, str):
             s = v.strip()
             if not s or s == "-":
-                return WorkStatus.FOR_REVIEW
+                return None
             return s.upper().replace(" ", "_")
         return v
 
