@@ -5,7 +5,7 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repository.atl_import import bulk_upsert_atl_import_rows
@@ -18,11 +18,17 @@ from app.services.atl_import_validation import (
     preprocess_atl_records,
     validate_account_reference_fields,
     validate_atl_schema_and_duplicates,
+    validate_date_time_reported_mapping,
 )
 from app.services.excel_import.hooks.atl import AtlImportHook
-from app.services.excel_import.validation_errors import format_error_report_markdown
+from app.services.excel_import.validation_errors import (
+    format_error_report_markdown,
+    merge_structured_errors,
+    structured_error_dict,
+)
 
 _HOOK = AtlImportHook()
+_SYSTEM_ERROR_MESSAGE = "System Error"
 
 
 @dataclass
@@ -120,7 +126,14 @@ async def run_atl_import(
         atl_batch_fk=atl_batch_fk,
         account_ids=account_ids,
     )
-    reference_errors = validate_account_reference_fields(validated_rows, references)
+    reference_errors = merge_structured_errors(
+        validate_account_reference_fields(validated_rows, references),
+        validate_date_time_reported_mapping(
+            validated_rows,
+            references,
+            raw_records=records,
+        ),
+    )
     if reference_errors:
         await session.rollback()
         return _failure_result(
@@ -175,21 +188,41 @@ async def run_atl_import(
     except IntegrityError:
         await session.rollback()
         raise
-    except Exception as exc:
+    except SQLAlchemyError:
         await session.rollback()
         return {
             "status": "failed",
             "inserted": 0,
             "updated": 0,
             "errors": [
-                {
-                    "row": 0,
-                    "column": "Import",
-                    "value": "",
-                    "error": f"Import failed and was rolled back: {exc}",
-                }
+                structured_error_dict(
+                    row=0,
+                    column="Import",
+                    value=None,
+                    error=_SYSTEM_ERROR_MESSAGE,
+                )
             ],
-            "message": f"Import failed and was rolled back: {exc}",
+            "message": _SYSTEM_ERROR_MESSAGE,
+            "error_report": None,
+            **summary.to_dict(),
+            "imported_rows": 0,
+        }
+    except Exception:
+        await session.rollback()
+        return {
+            "status": "failed",
+            "inserted": 0,
+            "updated": 0,
+            "errors": [
+                structured_error_dict(
+                    row=0,
+                    column="Import",
+                    value=None,
+                    error=_SYSTEM_ERROR_MESSAGE,
+                )
+            ],
+            "message": _SYSTEM_ERROR_MESSAGE,
+            "error_report": None,
             **summary.to_dict(),
             "imported_rows": 0,
         }

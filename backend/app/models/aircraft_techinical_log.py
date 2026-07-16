@@ -145,6 +145,7 @@ class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     rts_time = Column(Time(timezone=False), nullable=True)
 
     date_time_reported = Column(DateTime(timezone=False), nullable=True)
+    atl_date_time_reported = Column(DateTime(timezone=False), nullable=True)
     date_time_released = Column(DateTime(timezone=False), nullable=True)
 
     white_atl = Column(Text)

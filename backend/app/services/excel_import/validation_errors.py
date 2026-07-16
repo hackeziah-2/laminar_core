@@ -5,7 +5,23 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
 
 from pydantic import ValidationError
 
-from app.services.excel_import.parsers import is_spreadsheet_empty
+from app.services.excel_import.parsers import (
+    INVALID_FLEXIBLE_DATETIME_MESSAGE,
+    is_spreadsheet_empty,
+)
+
+_FLEXIBLE_DATETIME_FIELDS = frozenset(
+    {
+        "date_time_reported",
+        "atl_date_time_reported",
+        "date_time_released",
+    }
+)
+
+_FLEXIBLE_DATETIME_EXPECTED = (
+    "D-Mon-YY HHMMZ, DD-Mon-YYYY HHMMZ, date-only values such as DD-Mon-YYYY, "
+    "or ISO 8601 datetime."
+)
 
 _FIELD_EXPECTED_HINTS: Dict[str, str] = {
     "sequence_no": "Non-empty text or number (e.g. 001).",
@@ -17,8 +33,9 @@ _FIELD_EXPECTED_HINTS: Dict[str, str] = {
     "destination_time": "HH:MM, HHMM, or Zulu time (e.g. 0440 Zulu).",
     "pilot_accept_time": "HH:MM, HHMM, or Zulu time (e.g. 0440 Zulu).",
     "rts_time": "HH:MM, HHMM, or Zulu time (e.g. 0440 Zulu).",
-    "date_time_reported": "DD-Mon-YY HHMMZ (e.g. 01-Mar-24 0738Z) or ISO datetime.",
-    "date_time_released": "DD-Mon-YY HHMMZ (e.g. 01-Mar-24 0738Z) or ISO datetime.",
+    "date_time_reported": _FLEXIBLE_DATETIME_EXPECTED,
+    "atl_date_time_reported": _FLEXIBLE_DATETIME_EXPECTED,
+    "date_time_released": _FLEXIBLE_DATETIME_EXPECTED,
     "nature_of_flight": "TR, PSF, PRF, EGR, ME, TR_WITH_PIREM, VOID, ATL_REPL, CANCELLED_FLT, "
     "BLANK, MISSING, or NO ENTRY.",
     "work_status": "FOR_REVIEW, AWAITING_ATTACHMENT, REJECTED_MAINTENANCE, APPROVED, "
@@ -143,6 +160,14 @@ def _message_for_pydantic_error(err: Dict[str, Any], field: str) -> str:
         return "Must be a numeric value."
     if err_type == "type_error.bool":
         return "Must be true or false."
+    if field in _FLEXIBLE_DATETIME_FIELDS and (
+        INVALID_FLEXIBLE_DATETIME_MESSAGE in msg
+        or "invalid date" in msg.lower()
+        or "invalid datetime" in msg.lower()
+        or err_type
+        in ("value_error.date", "value_error.datetime", "type_error.datetime", "value_error")
+    ):
+        return INVALID_FLEXIBLE_DATETIME_MESSAGE
     if "invalid date" in msg.lower() or err_type == "value_error.date":
         return "Invalid date."
     if err_type == "enum" or "value is not a valid enumeration" in msg.lower():
@@ -205,6 +230,9 @@ def pydantic_errors_to_structured(
         expected = expected_hint_for_field(top_field)
         if expected and message == "Invalid value.":
             message = "Invalid value."
+        # Full message already lists accepted formats; avoid "Expected: …" duplication.
+        if message == INVALID_FLEXIBLE_DATETIME_MESSAGE:
+            expected = None
         structured.append(
             structured_error_dict(
                 row=excel_row,

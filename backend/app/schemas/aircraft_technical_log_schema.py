@@ -68,7 +68,9 @@ def normalize_component_part_dict_for_import(raw: Dict[str, Any]) -> Dict[str, A
     if q is None:
         d["qty"] = 1.0
     elif isinstance(q, str):
-        s = q.strip().replace(",", "")
+        from app.services.excel_import.parsers import normalize_import_numeric_string
+
+        s = normalize_import_numeric_string(q)
         try:
             d["qty"] = float(s)
         except ValueError:
@@ -205,63 +207,16 @@ def parse_zulu_time_to_time(value: Any) -> Optional[time]:
 
 
 def parse_import_reported_released_datetime(value: Any) -> Any:
-    """Parse import strings for date_time_reported / date_time_released.
+    """Parse import strings for atl_date_time_reported / date_time_released.
 
-    Accepts: ``01-Mar-24 0738Z``, ``01-Mar-24 0738``, ``01-Mar-24`` (midnight),
-    plus Excel timestamps and existing datetime/date objects.
+    Delegates to the shared flexible parser and normalizes to naive Asia/Manila
+    for storage. Empty → ``None``; invalid → raises ``ValueError``.
     """
-    v = _excel_empty_to_none(value)
-    if v is None:
-        return None
-    try:
-        if pd.isna(v):
-            return None
-    except (TypeError, ValueError):
-        pass
-    if isinstance(v, datetime):
-        return v
-    if isinstance(v, date) and not isinstance(v, datetime):
-        return datetime.combine(v, time.min)
-    if hasattr(v, "to_pydatetime"):
-        try:
-            return v.to_pydatetime()
-        except Exception:
-            pass
-    if not isinstance(v, str):
-        return v
-    s = v.strip()
-    if not s:
-        return None
-
-    m = re.fullmatch(
-        r"(\d{2})-([A-Za-z]{3})-(\d{2})(?:\s+(\d{3,6})(Z)?)?",
-        s,
-        flags=re.IGNORECASE,
+    from app.services.atl_import_date_time_reported import (
+        parse_flexible_datetime_for_storage,
     )
-    if m:
-        day_s, mon_s, yr_s, hhmm_s, _z = m.groups()
-        date_s = f"{day_s}-{mon_s.capitalize()}-{yr_s}"
-        try:
-            d = datetime.strptime(date_s, "%d-%b-%y").date()
-        except ValueError:
-            return v
-        if not hhmm_s:
-            return datetime.combine(d, time.min)
-        t_digits = hhmm_s
-        if len(t_digits) == 3:
-            t_digits = "0" + t_digits
-        try:
-            if len(t_digits) == 4:
-                tm = datetime.strptime(t_digits, "%H%M").time()
-            elif len(t_digits) == 6:
-                tm = datetime.strptime(t_digits, "%H%M%S").time()
-            else:
-                return v
-        except ValueError:
-            return v
-        return datetime.combine(d, tm)
 
-    return v
+    return parse_flexible_datetime_for_storage(value)
 
 
 # ---------- Component Parts Record Schemas ----------
@@ -409,6 +364,7 @@ class AircraftTechnicalLogBase(BaseModel):
     rts_time: Optional[time] = None
 
     date_time_reported: Optional[datetime] = None
+    atl_date_time_reported: Optional[datetime] = None
     date_time_released: Optional[datetime] = None
 
     white_atl: Optional[str] = None
@@ -490,6 +446,10 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
     # None = row did not specify parts (import keeps existing DB children); list = replace parts for that ATL.
     component_parts: Optional[List[ComponentPartsRecordCreate]] = Field(default=None)
 
+    # Import-only: Date Time Reported column presence / parse status (not DB columns).
+    atl_date_time_reported_provided: bool = False
+    atl_date_time_reported_issue: Optional[str] = None  # "empty" | "invalid" | None
+
     @root_validator(pre=True)
     def excel_empty_and_dash_to_none(cls, values: Any) -> Any:
         """Coerce empty string and '-' to None for every field in import row."""
@@ -559,9 +519,21 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
             return None
         return parse_zulu_time_to_time(v)
 
-    @validator("date_time_reported", "date_time_released", pre=True)
-    def excel_reported_released_datetime(cls, v: Any) -> Any:
+    @validator("date_time_released", pre=True)
+    def excel_released_datetime(cls, v: Any) -> Any:
         return parse_import_reported_released_datetime(v)
+
+    @validator("atl_date_time_reported", pre=True)
+    def excel_atl_date_time_reported(cls, v: Any) -> Any:
+        """Lenient parse: invalid values become None; issue tracked via atl_date_time_reported_issue."""
+        if isinstance(v, datetime):
+            return v
+        if v is None:
+            return None
+        from app.services.atl_import_date_time_reported import try_parse_atl_date_time_reported
+
+        parsed, _issue = try_parse_atl_date_time_reported(v)
+        return parsed
 
     @validator("sequence_no", pre=True)
     def sequence_no_numeric_excel(cls, v: Any) -> Any:
@@ -585,6 +557,8 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
     @validator("engine_tsn", pre=True)
     def engine_tsn_numeric_excel_to_str(cls, v: Any) -> Any:
         """Fleet exports store Engine TSN as numbers; model column is string."""
+        from app.services.excel_import.parsers import normalize_import_numeric_string
+
         if v is None:
             return None
         try:
@@ -592,8 +566,18 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
                 return None
         except (TypeError, ValueError):
             pass
-        if isinstance(v, str) and str(v).strip().upper() == "UNK":
-            return None
+        if isinstance(v, str):
+            raw = str(v).strip()
+            if not raw or raw.upper() == "UNK":
+                return None
+            cleaned = normalize_import_numeric_string(raw)
+            try:
+                x = float(cleaned)
+            except ValueError:
+                return raw
+            if math.isfinite(x) and x == int(x):
+                return str(int(x))
+            return cleaned
         if isinstance(v, (int, float)) and not isinstance(v, bool):
             if isinstance(v, float) and (math.isnan(v) or not math.isfinite(v)):
                 return None
@@ -605,6 +589,8 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
     @validator("propeller_tsn", pre=True)
     def propeller_tsn_excel_unk_to_none(cls, v: Any) -> Any:
         """Treat Excel sentinel UNK as unknown (NULL); column is float."""
+        from app.services.excel_import.parsers import coerce_import_float
+
         if v is None:
             return None
         try:
@@ -614,6 +600,73 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
             pass
         if isinstance(v, str) and str(v).strip().upper() == "UNK":
             return None
+        if isinstance(v, str):
+            parsed = coerce_import_float(v)
+            if parsed is None:
+                return v
+            return parsed
+        return v
+
+    @validator(
+        "tach_time_due",
+        "hobbs_meter_start",
+        "hobbs_meter_end",
+        "hobbs_meter_total",
+        "tachometer_start",
+        "tachometer_end",
+        "tachometer_total",
+        "airframe_prev_time",
+        "airframe_flight_time",
+        "airframe_total_time",
+        "airframe_run_time",
+        "airframe_aftt",
+        "engine_prev_time",
+        "engine_flight_time",
+        "engine_total_time",
+        "engine_run_time",
+        "engine_tso",
+        "engine_tbo",
+        "propeller_prev_time",
+        "propeller_flight_time",
+        "propeller_total_time",
+        "propeller_run_time",
+        "propeller_tso",
+        "propeller_tbo",
+        "life_time_limit_engine",
+        "life_time_limit_propeller",
+        "fuel_qty_left_uplift_qty",
+        "fuel_qty_right_uplift_qty",
+        "fuel_qty_left_prior_departure",
+        "fuel_qty_right_prior_departure",
+        "fuel_qty_left_after_on_blks",
+        "fuel_qty_right_after_on_blks",
+        "oil_qty_uplift_qty",
+        "oil_qty_prior_departure",
+        "oil_qty_after_on_blks",
+        "auto_airframe_run_time",
+        "auto_airframe_aftt",
+        "auto_engine_run_time",
+        "auto_run_time",
+        "auto_engine_tsn",
+        "auto_engine_tso",
+        "auto_engine_tbo",
+        "auto_propeller_run_time",
+        "auto_propeller_tsn",
+        "auto_propeller_tso",
+        "auto_propeller_tbo",
+        pre=True,
+    )
+    def excel_float_normalize_spaces(cls, v: Any) -> Any:
+        """Accept spreadsheet numerics with internal spaces (e.g. ``17588. 11``)."""
+        from app.services.excel_import.parsers import coerce_import_float, is_spreadsheet_empty
+
+        if is_spreadsheet_empty(v):
+            return None
+        if isinstance(v, str):
+            parsed = coerce_import_float(v)
+            if parsed is None:
+                return v
+            return parsed
         return v
 
     @validator(
@@ -755,6 +808,7 @@ class AircraftTechnicalLogUpdate(BaseModel):
     rts_time: Optional[time] = None
 
     date_time_reported: Optional[datetime] = None
+    atl_date_time_reported: Optional[datetime] = None
     date_time_released: Optional[datetime] = None
 
     white_atl: Optional[str] = None
