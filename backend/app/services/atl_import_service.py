@@ -18,9 +18,13 @@ from app.services.atl_import_validation import (
     preprocess_atl_records,
     validate_account_reference_fields,
     validate_atl_schema_and_duplicates,
+    validate_date_time_reported_mapping,
 )
 from app.services.excel_import.hooks.atl import AtlImportHook
-from app.services.excel_import.validation_errors import format_error_report_markdown
+from app.services.excel_import.validation_errors import (
+    format_error_report_markdown,
+    merge_structured_errors,
+)
 
 _HOOK = AtlImportHook()
 
@@ -120,7 +124,14 @@ async def run_atl_import(
         atl_batch_fk=atl_batch_fk,
         account_ids=account_ids,
     )
-    reference_errors = validate_account_reference_fields(validated_rows, references)
+    reference_errors = merge_structured_errors(
+        validate_account_reference_fields(validated_rows, references),
+        validate_date_time_reported_mapping(
+            validated_rows,
+            references,
+            raw_records=records,
+        ),
+    )
     if reference_errors:
         await session.rollback()
         return _failure_result(

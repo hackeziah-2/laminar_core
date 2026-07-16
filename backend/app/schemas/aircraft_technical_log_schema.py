@@ -205,7 +205,7 @@ def parse_zulu_time_to_time(value: Any) -> Optional[time]:
 
 
 def parse_import_reported_released_datetime(value: Any) -> Any:
-    """Parse import strings for date_time_reported / date_time_released.
+    """Parse import strings for atl_date_time_reported / date_time_released.
 
     Accepts: ``01-Mar-24 0738Z``, ``01-Mar-24 0738``, ``01-Mar-24`` (midnight),
     plus Excel timestamps and existing datetime/date objects.
@@ -409,6 +409,7 @@ class AircraftTechnicalLogBase(BaseModel):
     rts_time: Optional[time] = None
 
     date_time_reported: Optional[datetime] = None
+    atl_date_time_reported: Optional[datetime] = None
     date_time_released: Optional[datetime] = None
 
     white_atl: Optional[str] = None
@@ -490,6 +491,10 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
     # None = row did not specify parts (import keeps existing DB children); list = replace parts for that ATL.
     component_parts: Optional[List[ComponentPartsRecordCreate]] = Field(default=None)
 
+    # Import-only: Date Time Reported column presence / parse status (not DB columns).
+    atl_date_time_reported_provided: bool = False
+    atl_date_time_reported_issue: Optional[str] = None  # "empty" | "invalid" | None
+
     @root_validator(pre=True)
     def excel_empty_and_dash_to_none(cls, values: Any) -> Any:
         """Coerce empty string and '-' to None for every field in import row."""
@@ -559,9 +564,21 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
             return None
         return parse_zulu_time_to_time(v)
 
-    @validator("date_time_reported", "date_time_released", pre=True)
-    def excel_reported_released_datetime(cls, v: Any) -> Any:
+    @validator("date_time_released", pre=True)
+    def excel_released_datetime(cls, v: Any) -> Any:
         return parse_import_reported_released_datetime(v)
+
+    @validator("atl_date_time_reported", pre=True)
+    def excel_atl_date_time_reported(cls, v: Any) -> Any:
+        """Lenient parse: invalid values become None; issue tracked via atl_date_time_reported_issue."""
+        if isinstance(v, datetime):
+            return v
+        if v is None:
+            return None
+        from app.services.atl_import_date_time_reported import try_parse_atl_date_time_reported
+
+        parsed, _issue = try_parse_atl_date_time_reported(v)
+        return parsed
 
     @validator("sequence_no", pre=True)
     def sequence_no_numeric_excel(cls, v: Any) -> Any:
@@ -755,6 +772,7 @@ class AircraftTechnicalLogUpdate(BaseModel):
     rts_time: Optional[time] = None
 
     date_time_reported: Optional[datetime] = None
+    atl_date_time_reported: Optional[datetime] = None
     date_time_released: Optional[datetime] = None
 
     white_atl: Optional[str] = None
