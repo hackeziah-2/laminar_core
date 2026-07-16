@@ -178,6 +178,27 @@ def test_spreadsheet_empty_sentinels():
     assert not math.isnan(coerce_import_float(12.0) or 0)
 
 
+def test_coerce_import_float_strips_internal_spaces():
+    assert coerce_import_float("17588. 11") == 17588.11
+    assert coerce_import_float(" 12,345. 6 ") == 12345.6
+    assert coerce_import_float("not-a-number") is None
+
+
+def test_import_schema_accepts_spaced_numeric_strings():
+    from app.schemas.aircraft_technical_log_schema import AircraftTechnicalLogImportSchema
+
+    row = AircraftTechnicalLogImportSchema(
+        aircraft_fk=1,
+        sequence_no="001",
+        propeller_tsn="17588. 11",
+        engine_tsn="17588. 11",
+        airframe_aftt="100. 5",
+    )
+    assert row.propeller_tsn == 17588.11
+    assert row.engine_tsn == "17588.11"
+    assert row.airframe_aftt == 100.5
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [

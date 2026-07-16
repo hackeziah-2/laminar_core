@@ -118,16 +118,20 @@ async def process_atl_excel_import_job(job_id: str) -> None:
 
         if result["status"] == "failed" and result.get("errors"):
             failed_row_count = len({e["row"] for e in result["errors"] if e.get("row")})
+            is_system_error = (
+                result.get("message") == "System Error"
+                or any(e.get("error") == "System Error" for e in result["errors"])
+            )
             await _commit_job(
                 job_id,
-                status="VALIDATION_FAILED",
+                status="FAILED" if is_system_error else "VALIDATION_FAILED",
                 message=result.get(
                     "message",
                     "The file contains validation errors. No records were imported.",
                 ),
                 total_rows=summary["total_rows"],
                 processed_rows=0,
-                failed_rows=failed_row_count,
+                failed_rows=failed_row_count if not is_system_error else summary["total_rows"],
                 errors=result["errors"],
                 import_summary=summary,
             )
@@ -161,10 +165,23 @@ async def process_atl_excel_import_job(job_id: str) -> None:
         )
 
     except Exception as e:
+        from sqlalchemy.exc import SQLAlchemyError
+
+        message = "System Error" if isinstance(e, SQLAlchemyError) else str(e)[:4000]
+        # asyncpg / DBAPI errors may not always be wrapped as SQLAlchemyError
+        exc_name = type(e).__name__
+        exc_module = type(e).__module__ or ""
+        if (
+            "asyncpg" in exc_module
+            or "sqlalchemy" in exc_module
+            or "InvalidTextRepresentation" in exc_name
+            or "DBAPI" in exc_name
+        ):
+            message = "System Error"
         await _commit_job(
             job_id,
             status="FAILED",
-            message=str(e)[:4000],
+            message=message,
         )
     finally:
         if temp_path:

@@ -6,15 +6,12 @@ as the source of truth once set.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time
 from typing import Any, Optional, Tuple
 
 from app.database import PH_TZ
 from app.models.aircraft_techinical_log import AircraftTechnicalLog
-from app.schemas.aircraft_technical_log_schema import (
-    _excel_empty_to_none,
-    parse_import_reported_released_datetime,
-)
+from app.services.excel_import.parsers import parse_flexible_datetime
 
 
 def as_naive_ph(dt: datetime) -> datetime:
@@ -46,34 +43,25 @@ def try_parse_atl_date_time_reported(
     Zulu (``Z``) times are treated as UTC and converted to Asia/Manila;
     other naive values are treated as Manila wall-clock.
     """
-    v = _excel_empty_to_none(value)
-    if v is None:
-        return None, "empty"
     try:
-        import pandas as pd
-
-        if pd.isna(v):
-            return None, "empty"
-    except (TypeError, ValueError):
-        pass
-
-    zulu = False
-    if isinstance(v, str):
-        s = v.strip()
-        if not s:
-            return None, "empty"
-        upper = s.upper()
-        zulu = upper.endswith("Z") or " ZULU" in upper or upper.endswith(" UTC")
-
-    parsed = parse_import_reported_released_datetime(v)
-    if parsed is None:
-        return None, "empty"
-    if not isinstance(parsed, datetime):
+        parsed = parse_flexible_datetime(value)
+    except ValueError:
         return None, "invalid"
 
-    if zulu and parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+    if parsed is None:
+        return None, "empty"
     return as_naive_ph(parsed), None
+
+
+def parse_flexible_datetime_for_storage(value: Any) -> Optional[datetime]:
+    """Parse flexible datetime and normalize to naive Asia/Manila for storage.
+
+    Empty → ``None``. Invalid → raises ``ValueError`` with the shared message.
+    """
+    parsed = parse_flexible_datetime(value)
+    if parsed is None:
+        return None
+    return as_naive_ph(parsed)
 
 
 @dataclass(frozen=True)
