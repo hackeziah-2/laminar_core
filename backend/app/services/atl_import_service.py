@@ -93,8 +93,10 @@ async def run_atl_import(
     """
     Validate every row, then bulk upsert in a single transaction when valid.
 
-    Import is a direct data loader: values from the file are persisted as provided
-    with no derived-field computation or post-import recalculation.
+    Existing ATLs are updated with PATCH semantics: only non-empty Excel cells
+    overwrite matching DB fields; empty/missing cells preserve existing values.
+    New rows are inserted with provided values (work_status defaults to FOR_REVIEW).
+    No derived-field computation or post-import recalculation.
 
     Reference data (existing ATL rows for upsert, account FK validation) is loaded
     once — never per row.

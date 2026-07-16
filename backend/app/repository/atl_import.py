@@ -1,12 +1,12 @@
 """Bulk persistence for ATL Excel import."""
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import set_audit_fields
-from app.models.aircraft_techinical_log import AircraftTechnicalLog
+from app.models.aircraft_techinical_log import AircraftTechnicalLog, WorkStatus
 from app.repository.aircraft_technical_log import _replace_atl_component_parts
 from app.repository.excel_import import model_column_names, validated_to_dict
 from app.schemas.aircraft_technical_log_schema import AircraftTechnicalLogImportSchema
@@ -27,6 +27,36 @@ _IMPORT_ONLY_KEYS = frozenset(
 )
 
 
+def _is_patchable_import_value(value: Any) -> bool:
+    """True when an imported cell should update an existing DB field (PATCH semantics)."""
+    return value not in (None, "")
+
+
+def _model_payload_from_validated(
+    validated: AircraftTechnicalLogImportSchema,
+    *,
+    patch: bool,
+) -> Dict[str, Any]:
+    """
+    Build a DB column payload from a validated import row.
+
+    When ``patch`` is True (existing ATL), only non-empty imported values are included
+    so empty/missing Excel cells do not clear existing database fields.
+    """
+    data = validated_to_dict(validated)
+    payload: Dict[str, Any] = {}
+    for key in _MODEL_COLUMNS:
+        if key not in data or key in _IMPORT_ONLY_KEYS:
+            continue
+        value = data[key]
+        if patch and not _is_patchable_import_value(value):
+            continue
+        payload[key] = value
+    # Date Time Reported is applied via scenario logic, never via blind setattr.
+    payload.pop("atl_date_time_reported", None)
+    return payload
+
+
 async def bulk_upsert_atl_import_rows(
     session: AsyncSession,
     validated_rows: List[Tuple[int, AircraftTechnicalLogImportSchema]],
@@ -37,6 +67,9 @@ async def bulk_upsert_atl_import_rows(
     """
     Insert or update all validated ATL rows without per-row SELECT queries.
 
+    Updates use PATCH semantics: only fields with valid non-empty imported values
+    are written; empty/NULL/blank Excel cells leave existing DB values unchanged.
+
     Returns (inserted_count, updated_count).
     """
     inserted = 0
@@ -44,15 +77,6 @@ async def bulk_upsert_atl_import_rows(
     parts_targets: List[Tuple[AircraftTechnicalLogImportSchema, AircraftTechnicalLog]] = []
 
     for _excel_row, validated in validated_rows:
-        data = validated_to_dict(validated)
-        payload = {
-            k: data[k]
-            for k in _MODEL_COLUMNS
-            if k in data and k not in _IMPORT_ONLY_KEYS
-        }
-        # Date Time Reported is applied via scenario logic, never via blind setattr.
-        payload.pop("atl_date_time_reported", None)
-
         seq = validated.sequence_no
         existing = references.existing_by_sequence.get(seq)
         reported_provided = bool(
@@ -61,6 +85,7 @@ async def bulk_upsert_atl_import_rows(
         resolution = None
 
         if existing is not None:
+            payload = _model_payload_from_validated(validated, patch=True)
             if reported_provided:
                 # Resolve against existing origin_* BEFORE payload mutates them.
                 resolution = resolve_date_time_reported(
@@ -84,9 +109,12 @@ async def bulk_upsert_atl_import_rows(
             updated += 1
             target = existing
         else:
+            payload = _model_payload_from_validated(validated, patch=False)
             if reported_provided:
                 payload.pop("origin_date", None)
                 payload.pop("origin_time", None)
+            if payload.get("work_status") is None:
+                payload["work_status"] = WorkStatus.FOR_REVIEW
             obj = MODEL(**payload)
             if reported_provided:
                 resolution = resolve_date_time_reported(
