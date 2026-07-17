@@ -229,7 +229,8 @@ def test_scenario_1_new_insert_with_import():
     assert res.origin_date == date(2024, 3, 1)
 
 
-def test_validate_empty_reported_without_origin_errors():
+def test_validate_empty_reported_without_origin_ok():
+    """Blank Date Time Reported is optional even when ATL has no origin_date."""
     validated = AircraftTechnicalLogImportSchema(
         aircraft_fk=1,
         sequence_no="001",
@@ -243,8 +244,7 @@ def test_validate_empty_reported_without_origin_errors():
         refs,
         raw_records=[{"sequence_no": "001", "atl_date_time_reported": None}],
     )
-    assert len(errors) == 1
-    assert errors[0]["column"] == "Date Time Reported"
+    assert errors == []
 
 
 def test_validate_empty_reported_with_existing_origin_ok():
@@ -274,3 +274,50 @@ def test_validate_skips_when_column_not_provided():
     refs = AtlImportReferences(existing_by_sequence={})
     errors = validate_date_time_reported_mapping([(2, validated)], refs)
     assert errors == []
+
+
+def test_validate_invalid_reported_without_origin_errors():
+    validated = AircraftTechnicalLogImportSchema(
+        aircraft_fk=1,
+        sequence_no="001",
+        atl_date_time_reported=None,
+        atl_date_time_reported_provided=True,
+        atl_date_time_reported_issue="invalid",
+    )
+    refs = AtlImportReferences(existing_by_sequence={})
+    errors = validate_date_time_reported_mapping(
+        [(2, validated)],
+        refs,
+        raw_records=[{"sequence_no": "001", "atl_date_time_reported": "not-a-date"}],
+    )
+    assert len(errors) == 1
+    assert errors[0]["column"] == "Date Time Reported"
+    assert "invalid" in errors[0]["error"]
+
+
+def test_date_time_released_blank_is_allowed():
+    """Blank Date Time Released is optional; only Sequence No. is required."""
+    inject = {"aircraft_fk": 1, "atl_batch_fk": 1}
+    validated, errors = validate_atl_row_schema(
+        {"sequence_no": "001", "date_time_released": ""},
+        excel_row=2,
+        inject_fields=inject,
+    )
+    assert errors == []
+    assert validated is not None
+    assert validated.date_time_released is None
+
+
+def test_date_time_reported_blank_row_schema_ok():
+    """Blank Date Time Reported passes row schema when Sequence No. is present."""
+    inject = {"aircraft_fk": 1, "atl_batch_fk": 1}
+    validated, errors = validate_atl_row_schema(
+        {"sequence_no": "001", "atl_date_time_reported": ""},
+        excel_row=2,
+        inject_fields=inject,
+    )
+    assert errors == []
+    assert validated is not None
+    assert validated.atl_date_time_reported is None
+    assert validated.atl_date_time_reported_provided is True
+    assert validated.atl_date_time_reported_issue == "empty"
