@@ -136,7 +136,7 @@ def normalize_component_part_dict_for_import(raw: Dict[str, Any]) -> Dict[str, A
 
 
 def normalize_sequence_no_digits_only(value: str) -> str:
-    """Normalize to number-only: strip optional leading 'ATL-', then whitespace. '001' or 'ATL-001' -> '001'. Stored value is digits only."""
+    """Strip optional leading 'ATL-' and whitespace. Accepts any string (e.g. '001', 'ATL-001' -> '001', 'QM-001')."""
     if not value or not str(value).strip():
         return value
     s = str(value).strip()
@@ -266,11 +266,15 @@ class ComponentPartsRecordRead(ComponentPartsRecordBase):
 class AircraftTechnicalLogBase(BaseModel):
     aircraft_fk: int = Field(..., description="Aircraft ID (required).")
     atl_batch_fk: Optional[int] = Field(None, description="Optional ATL batch grouping.")
-    sequence_no: str = Field(..., max_length=50, description="ATL sequence number (required). Stored as number only (e.g. 001).")
+    sequence_no: str = Field(
+        ...,
+        max_length=50,
+        description="ATL sequence number (required). Free-form string (e.g. 001, QM-001). Optional ATL- prefix is stripped.",
+    )
 
     @validator("sequence_no", pre=True)
     def normalize_sequence_no(cls, v: Any) -> str:
-        """Normalize sequence_no to number only for create/import (strip optional ATL- prefix)."""
+        """Normalize sequence_no for create/import: coerce to str and strip optional ATL- prefix."""
         if v is None or (isinstance(v, str) and not v.strip()):
             return v
         return normalize_sequence_no_digits_only(str(v).strip())
@@ -713,11 +717,15 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
 class AircraftTechnicalLogUpdate(BaseModel):
     aircraft_fk: Optional[int] = None
     atl_batch_fk: Optional[int] = None
-    sequence_no: Optional[str] = Field(None, max_length=50, description="ATL sequence number; stored as number only when set.")
+    sequence_no: Optional[str] = Field(
+        None,
+        max_length=50,
+        description="ATL sequence number; free-form string when set (optional ATL- prefix stripped).",
+    )
 
     @validator("sequence_no", pre=True)
     def normalize_sequence_no_update(cls, v: Any) -> Any:
-        """Normalize sequence_no to number only when provided (strip optional ATL- prefix)."""
+        """Normalize sequence_no when provided: coerce to str and strip optional ATL- prefix."""
         if v is None or (isinstance(v, str) and not v.strip()):
             return v
         return normalize_sequence_no_digits_only(str(v).strip())

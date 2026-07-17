@@ -153,3 +153,36 @@ def test_atl_sync_import_succeeds_when_all_rows_valid(
             return len(result.scalars().all())
 
     assert asyncio.run(_count_rows()) == 2
+
+
+def test_atl_sync_import_accepts_alphanumeric_sequence_no(
+    client_with_maintenance_import_auth,
+):
+    """sequence_no is a free-form string on import (not digits-only)."""
+    aircraft_id, batch_id = asyncio.run(_seed_aircraft_and_batch())
+    csv_body = (
+        b"sequence_no,tachometer_start,tachometer_end\n"
+        b"QM-001,1,2\n"
+        b"ATL-SEQ-A2,2,3\n"
+    )
+    response = client_with_maintenance_import_auth.post(
+        "/api/v1/excel-data/aircraft-technical-log/import",
+        data={"aircraft_id": str(aircraft_id), "batch_id": str(batch_id)},
+        files={"file": ("atl.csv", csv_body, "text/csv")},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "success", body
+    assert body["imported_rows"] == 2
+
+    async def _sequences() -> set[str]:
+        async with TestSessionLocal() as session:
+            result = await session.execute(
+                select(AircraftTechnicalLog.sequence_no).where(
+                    AircraftTechnicalLog.aircraft_fk == aircraft_id,
+                    AircraftTechnicalLog.atl_batch_fk == batch_id,
+                )
+            )
+            return {row[0] for row in result.all()}
+
+    assert asyncio.run(_sequences()) == {"QM-001", "SEQ-A2"}

@@ -202,6 +202,25 @@ def test_import_schema_accepts_spaced_numeric_strings():
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
+        ("001", "001"),
+        ("ATL-001", "001"),
+        ("QM-001", "QM-001"),
+        ("ATL-SEQ-A2", "SEQ-A2"),
+        ("SEQ-A2", "SEQ-A2"),
+        (10001.0, "10001"),
+        (42, "42"),
+    ],
+)
+def test_import_schema_accepts_string_sequence_no(raw, expected):
+    from app.schemas.aircraft_technical_log_schema import AircraftTechnicalLogImportSchema
+
+    row = AircraftTechnicalLogImportSchema(aircraft_fk=1, sequence_no=raw)
+    assert row.sequence_no == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
         ("PRE EGR", "EGR"),
         ("PSF EGR", "EGR"),
         ("POST EGR", "EGR"),

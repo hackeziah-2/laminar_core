@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from datetime import date, time
 
 from fastapi import HTTPException, Request
-from sqlalchemy import select, or_, cast, String, Numeric, func
+from sqlalchemy import select, or_, cast, case, String, Numeric, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 
@@ -39,7 +39,7 @@ from app.schemas.aircraft_technical_log_schema import (
 )
 
 def _sequence_no_digits_only(sequence_no: str) -> str:
-    """Normalize to number-only: strip optional leading 'ATL-', then whitespace. '001' or 'ATL-001' -> '001'. Stored value is digits only."""
+    """Strip optional leading 'ATL-' and whitespace. Keeps any remaining string (e.g. '001', 'QM-001')."""
     if not sequence_no or not str(sequence_no).strip():
         return sequence_no
     s = str(sequence_no).strip()
@@ -48,9 +48,16 @@ def _sequence_no_digits_only(sequence_no: str) -> str:
     return s
 
 
+_SEQUENCE_NO_NUMERIC_RE = r"^[0-9]+(\.[0-9]+)?$"
+
+
 def _sequence_no_as_numeric():
-    """SQL: sequence_no as Numeric for ORDER BY / comparisons. Handles '10001.0' (PostgreSQL INTEGER cast rejects it)."""
-    return cast(AircraftTechnicalLog.sequence_no, Numeric)
+    """SQL: numeric sequence_no for ORDER BY / comparisons; NULL when not a number (string values allowed)."""
+    seq = AircraftTechnicalLog.sequence_no
+    return case(
+        (seq.op("~")(_SEQUENCE_NO_NUMERIC_RE), cast(seq, Numeric)),
+        else_=None,
+    )
 
 
 def _active_atl_rows_clause():
@@ -513,7 +520,7 @@ async def create_aircraft_technical_log(
     audit_user: Optional[AccountInformation] = None,
     audit_request: Optional[Request] = None,
 ) -> AircraftTechnicalLog:
-    """Create a new Aircraft Technical Log entry with optional gap-fill (skipped when first ATL for aircraft/batch stream). Sequence numbers stored as number only (e.g. 001). Persists auto_* via compute_auto_fields before insert."""
+    """Create a new Aircraft Technical Log entry with optional gap-fill (skipped when first ATL for aircraft/batch stream). Sequence numbers are free-form strings (optional ATL- prefix stripped). Persists auto_* via compute_auto_fields before insert."""
     sequence_no = _sequence_no_digits_only(data.sequence_no)
     if await _atl_exists_same_aircraft_sequence_batch(
         session,
