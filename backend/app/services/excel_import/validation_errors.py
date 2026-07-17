@@ -24,7 +24,7 @@ _FLEXIBLE_DATETIME_EXPECTED = (
 )
 
 _FIELD_EXPECTED_HINTS: Dict[str, str] = {
-    "sequence_no": "Non-empty text or number (e.g. 001).",
+    "sequence_no": "Non-empty string (e.g. 001, QM-001, ATL-001).",
     "origin_date": "DD/MM/YYYY, MM/DD/YYYY, DD-Mon-YY, or YYYY-MM-DD.",
     "destination_date": "DD/MM/YYYY, MM/DD/YYYY, DD-Mon-YY, or YYYY-MM-DD.",
     "pilot_accept_date": "DD/MM/YYYY, MM/DD/YYYY, DD-Mon-YY, or YYYY-MM-DD.",
