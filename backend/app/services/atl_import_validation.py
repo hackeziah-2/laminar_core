@@ -157,8 +157,10 @@ def validate_date_time_reported_mapping(
     raw_records: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Per sequence_no: when Date Time Reported is empty/invalid and the existing ATL
-    has no origin_date, report a validation error.
+    Per sequence_no: Date Time Reported is optional (blank/missing is allowed).
+
+    When the value is present but invalid and the existing ATL has no origin_date
+    to fall back to, report a validation error.
     """
     errors: List[Dict[str, Any]] = []
     column = "Date Time Reported"
@@ -168,12 +170,13 @@ def validate_date_time_reported_mapping(
         if not getattr(validated, "atl_date_time_reported_provided", False):
             continue
         issue = getattr(validated, "atl_date_time_reported_issue", None)
-        if issue not in ("empty", "invalid"):
+        # Blank/empty is allowed — Date Time Reported is optional on import.
+        if issue != "invalid":
             continue
 
         existing = references.existing_by_sequence.get(validated.sequence_no)
         if existing is not None and getattr(existing, "origin_date", None) is not None:
-            # Scenario 2: keep existing origin; ignore bad/empty import value.
+            # Scenario 2: keep existing origin; ignore invalid import value.
             continue
 
         raw_value = None
@@ -182,22 +185,15 @@ def validate_date_time_reported_mapping(
             if 0 <= idx < len(raw_records):
                 raw_value = raw_records[idx].get("atl_date_time_reported")
 
-        if issue == "empty":
-            message = (
-                "Date Time Reported is empty and the ATL has no origin_date "
-                "to fall back to."
-            )
-        else:
-            message = (
-                "Date Time Reported is invalid and the ATL has no origin_date "
-                "to fall back to."
-            )
         errors.append(
             structured_error_dict(
                 row=excel_row,
                 column=column,
                 value=raw_value,
-                error=message,
+                error=(
+                    "Date Time Reported is invalid and the ATL has no origin_date "
+                    "to fall back to."
+                ),
                 expected=expected,
             )
         )
