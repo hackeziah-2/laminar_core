@@ -11,6 +11,7 @@ from app.repository.tcc_maintenance import (
     get_tcc_maintenance,
     get_tcc_maintenance_by_aircraft,
     list_tcc_maintenances,
+    reorder_tcc_maintenances,
     tcc_maintenance_to_read,
     update_tcc_maintenance,
     soft_delete_tcc_maintenance,
@@ -25,6 +26,12 @@ from app.services.tcc_computation import fetch_latest_atl_tach_aftt
 
 router = APIRouter(
     prefix="/api/v1/tcc-maintenance",
+    tags=["tcc-maintenance"],
+)
+
+# Alias matching Excel import key / product naming for reorder.
+router_maintenance_tcc = APIRouter(
+    prefix="/api/v1/maintenance-tcc",
     tags=["tcc-maintenance"],
 )
 
@@ -48,7 +55,10 @@ async def api_list_tcc_maintenances_paged(
     category: Optional[str] = Query(None, description="Filter by category: Powerplant, Airframe, Inspection Servicing"),
     sort: Optional[str] = Query(
         "",
-        description="Sort fields (comma-separated). Prefix with '-' for descending. Example: -created_at,part_number",
+        description=(
+            "Sort fields (comma-separated). Prefix with '-' for descending. "
+            "Example: -created_at,part_number. Default: display_order ascending."
+        ),
     ),
     session: AsyncSession = Depends(get_session),
 ):
@@ -73,6 +83,55 @@ async def api_list_tcc_maintenances_paged(
         total=total,
         page=page,
         pages=pages,
+    )
+
+
+async def _api_reorder_tcc_maintenances(
+    request: Request,
+    payload: tcc_maintenance_schema.TCCMaintenanceReorderRequest,
+    session: AsyncSession,
+    current_account: AccountInformation,
+):
+    return await reorder_tcc_maintenances(
+        session,
+        payload.items,
+        audit_account_id=current_account.id,
+        audit_module_name=TCC_MAINTENANCE_MODULE_NAME,
+        audit_table_name=TCC_MAINTENANCE_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
+
+
+@router.put(
+    "/reorder",
+    response_model=tcc_maintenance_schema.TCCMaintenanceReorderResponse,
+    summary="Reorder TCC Maintenance rows",
+    description=(
+        "Persist drag-and-drop row order for one aircraft. "
+        "`items` must list every active TCC record for that aircraft with "
+        "sequential display_order values starting at 1."
+    ),
+)
+@router_maintenance_tcc.put(
+    "/reorder",
+    response_model=tcc_maintenance_schema.TCCMaintenanceReorderResponse,
+    summary="Reorder TCC Maintenance rows",
+    description=(
+        "Persist drag-and-drop row order for one aircraft. "
+        "`items` must list every active TCC record for that aircraft with "
+        "sequential display_order values starting at 1."
+    ),
+)
+async def api_reorder_tcc_maintenances(
+    request: Request,
+    payload: tcc_maintenance_schema.TCCMaintenanceReorderRequest,
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
+):
+    """Persist TCC Maintenance display_order arrangement."""
+    return await _api_reorder_tcc_maintenances(
+        request, payload, session, current_account
     )
 
 

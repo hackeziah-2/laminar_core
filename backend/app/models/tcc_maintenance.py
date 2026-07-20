@@ -106,6 +106,9 @@ class TCCMaintenance(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     aircraft_fk = Column(Integer, ForeignKey("aircrafts.id"), nullable=False, index=True)
     atl_ref = Column(Integer, ForeignKey("aircraft_technical_log.id"), nullable=True, index=True)
 
+    # Persistent UI / Excel row order (1-based). List APIs sort by this ascending.
+    display_order = Column(Integer, nullable=False, index=True, default=1)
+
     aircraft = relationship("Aircraft", back_populates="tcc_maintenances")
     atl = relationship("AircraftTechnicalLog", back_populates="tcc_maintenances")
 

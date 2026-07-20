@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 import re
+from decimal import Decimal, InvalidOperation
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional, Tuple
 
@@ -65,21 +66,39 @@ def normalize_import_numeric_string(value: str) -> str:
 
 def coerce_import_float(value: Any) -> Optional[float]:
     """Parse optional numeric spreadsheet cells; NaN/NaT/blank → None."""
+    decimal_value = coerce_import_decimal(value)
+    if decimal_value is None:
+        return None
+    return float(decimal_value)
+
+
+def coerce_import_decimal(value: Any) -> Optional[Decimal]:
+    """
+    Parse spreadsheet numerics without rounding.
+
+    Prefer string/Decimal sources so Excel/CSV decimal digits are preserved.
+    """
     if is_spreadsheet_empty(value):
         return None
+    if isinstance(value, Decimal):
+        return value
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return Decimal(value)
+    if isinstance(value, float):
+        if math.isnan(value) or not math.isfinite(value):
+            return None
+        return Decimal(str(value))
     if isinstance(value, str):
         s = normalize_import_numeric_string(value)
         if not s or s.upper() in ("-", "NA", "N/A"):
             return None
         try:
-            x = float(s)
-        except ValueError:
+            return Decimal(s)
+        except InvalidOperation:
             return None
-    elif isinstance(value, (int, float)) and not isinstance(value, bool):
-        x = float(value)
-    else:
-        return None
-    return x if math.isfinite(x) else None
+    return None
 
 
 def make_hashable(obj: Any) -> Any:

@@ -1,6 +1,7 @@
 import math
 import re
 from datetime import date, time, datetime, timedelta
+from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -281,7 +282,7 @@ class AircraftTechnicalLogBase(BaseModel):
 
     nature_of_flight: Optional[TypeEnum] = None
     next_inspection_due: Optional[str] = Field(None, max_length=100)
-    tach_time_due: Optional[float] = None
+    tach_time_due: Optional[Decimal] = None
 
     origin_station: Optional[str] = Field(None, max_length=50)
     origin_date: Optional[date] = None
@@ -293,62 +294,62 @@ class AircraftTechnicalLogBase(BaseModel):
 
     number_of_landings: Optional[int] = None
 
-    hobbs_meter_start: Optional[float] = Field(None, description="Auto-populated from previous ATL entry if not provided")
-    hobbs_meter_end: Optional[float] = None
-    hobbs_meter_total: Optional[float] = None
+    hobbs_meter_start: Optional[Decimal] = Field(None, description="Auto-populated from previous ATL entry if not provided")
+    hobbs_meter_end: Optional[Decimal] = None
+    hobbs_meter_total: Optional[Decimal] = None
 
-    tachometer_start: Optional[float] = Field(None, description="Auto-populated from previous ATL entry if not provided")
-    tachometer_end: Optional[float] = None
-    tachometer_total: Optional[float] = None
+    tachometer_start: Optional[Decimal] = Field(None, description="Auto-populated from previous ATL entry if not provided")
+    tachometer_end: Optional[Decimal] = None
+    tachometer_total: Optional[Decimal] = None
 
     # Airframe time fields
-    airframe_prev_time: Optional[float] = None
-    airframe_flight_time: Optional[float] = None
-    airframe_total_time: Optional[float] = None
-    airframe_run_time: Optional[float] = None
-    airframe_aftt: Optional[float] = None
+    airframe_prev_time: Optional[Decimal] = None
+    airframe_flight_time: Optional[Decimal] = None
+    airframe_total_time: Optional[Decimal] = None
+    airframe_run_time: Optional[Decimal] = None
+    airframe_aftt: Optional[Decimal] = None
 
     # Engine time fields
-    engine_prev_time: Optional[float] = None
-    engine_flight_time: Optional[float] = None
-    engine_total_time: Optional[float] = None
-    engine_run_time: Optional[float] = None
+    engine_prev_time: Optional[Decimal] = None
+    engine_flight_time: Optional[Decimal] = None
+    engine_total_time: Optional[Decimal] = None
+    engine_run_time: Optional[Decimal] = None
     engine_tsn: Optional[str] = Field(
         default=None,
         max_length=100,
         alias="engineTsn",
         description="Optional; omit or leave blank when unknown.",
     )
-    engine_tso: Optional[float] = None
-    engine_tbo: Optional[float] = None
+    engine_tso: Optional[Decimal] = None
+    engine_tbo: Optional[Decimal] = None
 
     # Propeller time fields
-    propeller_prev_time: Optional[float] = None
-    propeller_flight_time: Optional[float] = None
-    propeller_total_time: Optional[float] = None
-    propeller_run_time: Optional[float] = None
-    propeller_tsn: Optional[float] = Field(
+    propeller_prev_time: Optional[Decimal] = None
+    propeller_flight_time: Optional[Decimal] = None
+    propeller_total_time: Optional[Decimal] = None
+    propeller_run_time: Optional[Decimal] = None
+    propeller_tsn: Optional[Decimal] = Field(
         default=None,
         alias="propellerTsn",
         description="Optional; omit or leave blank when unknown.",
     )
-    propeller_tso: Optional[float] = None
-    propeller_tbo: Optional[float] = None
+    propeller_tso: Optional[Decimal] = None
+    propeller_tbo: Optional[Decimal] = None
 
     # Life time limits
-    life_time_limit_engine: Optional[float] = None
-    life_time_limit_propeller: Optional[float] = None
+    life_time_limit_engine: Optional[Decimal] = None
+    life_time_limit_propeller: Optional[Decimal] = None
 
-    fuel_qty_left_uplift_qty: Optional[float] = None
-    fuel_qty_right_uplift_qty: Optional[float] = None
-    fuel_qty_left_prior_departure: Optional[float] = None
-    fuel_qty_right_prior_departure: Optional[float] = None
-    fuel_qty_left_after_on_blks: Optional[float] = None
-    fuel_qty_right_after_on_blks: Optional[float] = None
+    fuel_qty_left_uplift_qty: Optional[Decimal] = None
+    fuel_qty_right_uplift_qty: Optional[Decimal] = None
+    fuel_qty_left_prior_departure: Optional[Decimal] = None
+    fuel_qty_right_prior_departure: Optional[Decimal] = None
+    fuel_qty_left_after_on_blks: Optional[Decimal] = None
+    fuel_qty_right_after_on_blks: Optional[Decimal] = None
 
-    oil_qty_uplift_qty: Optional[float] = None
-    oil_qty_prior_departure: Optional[float] = None
-    oil_qty_after_on_blks: Optional[float] = None
+    oil_qty_uplift_qty: Optional[Decimal] = None
+    oil_qty_prior_departure: Optional[Decimal] = None
+    oil_qty_after_on_blks: Optional[Decimal] = None
 
     remarks: Optional[str] = None
     actions_taken: Optional[str] = None
@@ -559,6 +560,15 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
                 if v == int(v):
                     v = int(v)
             return str(v)
+        if isinstance(v, str):
+            s = v.strip()
+            if "." in s:
+                try:
+                    f = float(s)
+                except ValueError:
+                    return v
+                if math.isfinite(f) and f == int(f):
+                    return str(int(f))
         return v
 
     @validator("engine_tsn", pre=True)
@@ -595,24 +605,17 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
 
     @validator("propeller_tsn", pre=True)
     def propeller_tsn_excel_unk_to_none(cls, v: Any) -> Any:
-        """Treat Excel sentinel UNK as unknown (NULL); column is float."""
-        from app.services.excel_import.parsers import coerce_import_float
+        """Treat Excel sentinel UNK as unknown (NULL); preserve decimal digits."""
+        from app.services.excel_import.parsers import coerce_import_decimal, is_spreadsheet_empty
 
-        if v is None:
+        if is_spreadsheet_empty(v):
             return None
-        try:
-            if pd.isna(v):
-                return None
-        except (TypeError, ValueError):
-            pass
         if isinstance(v, str) and str(v).strip().upper() == "UNK":
             return None
-        if isinstance(v, str):
-            parsed = coerce_import_float(v)
-            if parsed is None:
-                return v
-            return parsed
-        return v
+        decimal_value = coerce_import_decimal(v)
+        if decimal_value is None:
+            return v
+        return decimal_value
 
     @validator(
         "tach_time_due",
@@ -664,17 +667,15 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
         pre=True,
     )
     def excel_float_normalize_spaces(cls, v: Any) -> Any:
-        """Accept spreadsheet numerics with internal spaces (e.g. ``17588. 11``)."""
-        from app.services.excel_import.parsers import coerce_import_float, is_spreadsheet_empty
+        """Accept spreadsheet numerics with internal spaces; preserve decimal digits."""
+        from app.services.excel_import.parsers import coerce_import_decimal, is_spreadsheet_empty
 
         if is_spreadsheet_empty(v):
             return None
-        if isinstance(v, str):
-            parsed = coerce_import_float(v)
-            if parsed is None:
-                return v
-            return parsed
-        return v
+        decimal_value = coerce_import_decimal(v)
+        if decimal_value is None:
+            return v if isinstance(v, str) else None
+        return decimal_value
 
     @validator(
         "number_of_landings",
@@ -732,7 +733,7 @@ class AircraftTechnicalLogUpdate(BaseModel):
 
     nature_of_flight: Optional[TypeEnum] = None
     next_inspection_due: Optional[str] = Field(None, max_length=100)
-    tach_time_due: Optional[float] = None
+    tach_time_due: Optional[Decimal] = None
 
     origin_station: Optional[str] = Field(None, max_length=50)
     origin_date: Optional[date] = None
@@ -744,62 +745,62 @@ class AircraftTechnicalLogUpdate(BaseModel):
 
     number_of_landings: Optional[int] = None
 
-    hobbs_meter_start: Optional[float] = None
-    hobbs_meter_end: Optional[float] = None
-    hobbs_meter_total: Optional[float] = None
+    hobbs_meter_start: Optional[Decimal] = None
+    hobbs_meter_end: Optional[Decimal] = None
+    hobbs_meter_total: Optional[Decimal] = None
 
-    tachometer_start: Optional[float] = None
-    tachometer_end: Optional[float] = None
-    tachometer_total: Optional[float] = None
+    tachometer_start: Optional[Decimal] = None
+    tachometer_end: Optional[Decimal] = None
+    tachometer_total: Optional[Decimal] = None
 
     # Airframe time fields
-    airframe_prev_time: Optional[float] = None
-    airframe_flight_time: Optional[float] = None
-    airframe_total_time: Optional[float] = None
-    airframe_run_time: Optional[float] = None
-    airframe_aftt: Optional[float] = None
+    airframe_prev_time: Optional[Decimal] = None
+    airframe_flight_time: Optional[Decimal] = None
+    airframe_total_time: Optional[Decimal] = None
+    airframe_run_time: Optional[Decimal] = None
+    airframe_aftt: Optional[Decimal] = None
 
     # Engine time fields
-    engine_prev_time: Optional[float] = None
-    engine_flight_time: Optional[float] = None
-    engine_total_time: Optional[float] = None
-    engine_run_time: Optional[float] = None
+    engine_prev_time: Optional[Decimal] = None
+    engine_flight_time: Optional[Decimal] = None
+    engine_total_time: Optional[Decimal] = None
+    engine_run_time: Optional[Decimal] = None
     engine_tsn: Optional[str] = Field(
         default=None,
         max_length=100,
         alias="engineTsn",
         description="Optional; omit or leave blank when unknown.",
     )
-    engine_tso: Optional[float] = None
-    engine_tbo: Optional[float] = None
+    engine_tso: Optional[Decimal] = None
+    engine_tbo: Optional[Decimal] = None
 
     # Propeller time fields
-    propeller_prev_time: Optional[float] = None
-    propeller_flight_time: Optional[float] = None
-    propeller_total_time: Optional[float] = None
-    propeller_run_time: Optional[float] = None
-    propeller_tsn: Optional[float] = Field(
+    propeller_prev_time: Optional[Decimal] = None
+    propeller_flight_time: Optional[Decimal] = None
+    propeller_total_time: Optional[Decimal] = None
+    propeller_run_time: Optional[Decimal] = None
+    propeller_tsn: Optional[Decimal] = Field(
         default=None,
         alias="propellerTsn",
         description="Optional; omit or leave blank when unknown.",
     )
-    propeller_tso: Optional[float] = None
-    propeller_tbo: Optional[float] = None
+    propeller_tso: Optional[Decimal] = None
+    propeller_tbo: Optional[Decimal] = None
 
     # Life time limits
-    life_time_limit_engine: Optional[float] = None
-    life_time_limit_propeller: Optional[float] = None
+    life_time_limit_engine: Optional[Decimal] = None
+    life_time_limit_propeller: Optional[Decimal] = None
 
-    fuel_qty_left_uplift_qty: Optional[float] = None
-    fuel_qty_right_uplift_qty: Optional[float] = None
-    fuel_qty_left_prior_departure: Optional[float] = None
-    fuel_qty_right_prior_departure: Optional[float] = None
-    fuel_qty_left_after_on_blks: Optional[float] = None
-    fuel_qty_right_after_on_blks: Optional[float] = None
+    fuel_qty_left_uplift_qty: Optional[Decimal] = None
+    fuel_qty_right_uplift_qty: Optional[Decimal] = None
+    fuel_qty_left_prior_departure: Optional[Decimal] = None
+    fuel_qty_right_prior_departure: Optional[Decimal] = None
+    fuel_qty_left_after_on_blks: Optional[Decimal] = None
+    fuel_qty_right_after_on_blks: Optional[Decimal] = None
 
-    oil_qty_uplift_qty: Optional[float] = None
-    oil_qty_prior_departure: Optional[float] = None
-    oil_qty_after_on_blks: Optional[float] = None
+    oil_qty_uplift_qty: Optional[Decimal] = None
+    oil_qty_prior_departure: Optional[Decimal] = None
+    oil_qty_after_on_blks: Optional[Decimal] = None
 
     remarks: Optional[str] = None
     actions_taken: Optional[str] = None
@@ -990,7 +991,7 @@ class ATLAircraftScopedSearchItem(BaseModel):
     origin_date: Optional[date] = None
 
 
-# Canonical time fields on GET /paged and GET /{id}: one decimal place in JSON (response only).
+# Canonical time fields on GET /paged and GET /{id}: returned without response rounding.
 _ATL_RESPONSE_DECIMAL_FIELDS = (
     "airframe_aftt",
     "engine_tsn",
@@ -1003,13 +1004,27 @@ _ATL_RESPONSE_DECIMAL_FIELDS = (
 
 
 def round_optional_float_1(value: Any) -> Optional[float]:
-    """Format nullable numeric ATL time fields to one decimal place for API responses."""
+    """Legacy helper retained for callers outside ATL import read responses."""
     if value is None:
         return None
     try:
         return round(float(value), 1)
     except (TypeError, ValueError):
         return None
+
+
+def _coerce_api_numeric(value: Any) -> Any:
+    """Return stored numeric values without rounding or formatting."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    if isinstance(value, Decimal):
+        return float(value)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return value
 
 
 # ---------- Aircraft Technical Log Read Schema ----------
@@ -1036,19 +1051,15 @@ class AircraftTechnicalLogRead(AircraftTechnicalLogBase):
 
 
 class AircraftTechnicalLogApiRead(AircraftTechnicalLogRead):
-    """GET /paged and GET /{id}: canonical time fields rounded to 1 decimal in JSON."""
-
-    engine_tsn: Optional[float] = Field(
-        default=None,
-        description="Engine TSN; read responses use 1 decimal place.",
-    )
+    """GET /paged and GET /{id}: canonical time fields returned without rounding."""
 
     @root_validator(pre=False)
     def format_response_decimal_fields(cls, values: Any) -> Any:
         if not isinstance(values, dict):
             return values
         for key in _ATL_RESPONSE_DECIMAL_FIELDS:
-            values[key] = round_optional_float_1(values.get(key))
+            if key in values:
+                values[key] = _coerce_api_numeric(values.get(key))
         return values
 
     class Config:
@@ -1083,7 +1094,7 @@ class ATLPagedItemWithAuto(AircraftTechnicalLogRead):
 
 
 class ATLPagedItemWithAutoApiRead(AircraftTechnicalLogApiRead):
-    """ATL paged list item with 1-decimal canonical time fields for GET /paged."""
+    """ATL paged list item with unrounded canonical time fields for GET /paged."""
 
     class Config:
         orm_mode = True

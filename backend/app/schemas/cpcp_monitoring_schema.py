@@ -1,6 +1,6 @@
 import math
 from datetime import date, datetime
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field
 from pydantic.class_validators import validator
@@ -136,6 +136,10 @@ class CPCPMonitoringRead(CPCPMonitoringBase):
     """Schema for reading a CPCP Monitoring entry."""
     id: int
     aircraft_id: int
+    display_order: int = Field(
+        ...,
+        description="1-based persistent row order for UI drag-and-drop and Excel import.",
+    )
     atl: Optional[AtlRefRead] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -171,3 +175,26 @@ class CPCPMonitoringRead(CPCPMonitoringBase):
 
     class Config:
         orm_mode = True
+
+
+class CPCPMonitoringReorderItem(BaseModel):
+    """One row in a CPCP reorder request."""
+    id: int = Field(..., description="CPCP monitoring record ID")
+    display_order: int = Field(..., ge=1, description="1-based display order")
+
+
+class CPCPMonitoringReorderRequest(BaseModel):
+    """Request body for PUT /api/v1/maintenance-cpcp/reorder (and cpcp-monitoring/reorder)."""
+    items: List[CPCPMonitoringReorderItem] = Field(
+        ...,
+        min_items=1,
+        description="Complete ordered set of records for one aircraft",
+    )
+
+
+class CPCPMonitoringReorderResponse(BaseModel):
+    """Saved arrangement after a successful reorder."""
+    items: List[CPCPMonitoringRead] = Field(default_factory=list)
+
+    class Config:
+        orm_mode = False
