@@ -148,63 +148,15 @@ def normalize_sequence_no_digits_only(value: str) -> str:
 
 def parse_zulu_time_to_time(value: Any) -> Optional[time]:
     """Parse origin_time Zulu/HHMM/HH:MM/HHMMSS into Python time object."""
+    from app.services.excel_import.parsers import SpreadsheetParseError, parse_excel_time
+
     value = _excel_empty_to_none(value)
     if value is None:
         return None
-
-    # Already a time object
-    if isinstance(value, time):
-        return value
-
-    # Numeric input: int or float
-    if isinstance(value, (int, float)):
-        if isinstance(value, float):
-            if math.isnan(value) or not math.isfinite(value):
-                return None
-            value = int(value)  # 0239.0 -> 239
-        if not (0 <= value <= 235959):
-            return None
-        s = str(value).zfill(4)  # 239 -> "0239"
-        if len(s) == 4:
-            return datetime.strptime(s, "%H%M").time()
-        elif len(s) == 6:
-            return datetime.strptime(s, "%H%M%S").time()
-        return None
-
-    # String input
-    if isinstance(value, str):
-        s = value.strip().upper()
-        # Remove Zulu/UTC suffixes
-        if s.endswith((" ZULU", " Z", " UTC")):
-            s = s.rsplit(" ", 1)[0]
-        elif s.endswith("Z"):
-            s = s[:-1]
-        s = s.strip()
-
-        # Remove colon
-        s_clean = s.replace(":", "")
-
-        # Remove trailing decimal like ".0" from Excel export
-        if "." in s_clean:
-            s_clean = s_clean.split(".")[0]
-
-        if not s_clean.isdigit():
-            raise ValueError(
-                f"Invalid time format: '{value}'. Use HH:MM, HHMM (e.g., 2317), or Zulu (e.g., 0440 Zulu)."
-            )
-
-        # 3-digit HHMM -> 4-digit
-        if len(s_clean) == 3:
-            s_clean = "0" + s_clean
-        elif len(s_clean) not in (4, 6):
-            raise ValueError(f"Invalid time format: '{value}'.")
-
-        if len(s_clean) == 4:
-            return datetime.strptime(s_clean, "%H%M").time()
-        elif len(s_clean) == 6:
-            return datetime.strptime(s_clean, "%H%M%S").time()
-
-    return None
+    try:
+        return parse_excel_time(value)
+    except SpreadsheetParseError as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def parse_import_reported_released_datetime(value: Any) -> Any:
