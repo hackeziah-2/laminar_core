@@ -234,6 +234,9 @@ async def update_fleet_daily_update(
         status_val = _status_from_str(update_data["status"])
         update_data["status"] = status_val if status_val else obj.status
 
+    if "tach_time_eod" in update_data and update_data["tach_time_eod"] is not None:
+        update_data["tach_time_eod"] = round(float(update_data["tach_time_eod"]), 1)
+
     for k, v in update_data.items():
         if hasattr(obj, k):
             setattr(obj, k, v)
@@ -288,6 +291,9 @@ def _apply_fleet_daily_update_changes(
                 detail=f"Invalid status value: {update_data['status']!r}",
             )
         update_data["status"] = status_val
+
+    if "tach_time_eod" in update_data and update_data["tach_time_eod"] is not None:
+        update_data["tach_time_eod"] = round(float(update_data["tach_time_eod"]), 1)
 
     for k, v in update_data.items():
         if hasattr(obj, k):

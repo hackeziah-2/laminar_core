@@ -114,6 +114,15 @@ def test_bulk_update_fleet_daily_updates_success(
     assert r2.json()["status"] == "AOG"
     assert r2.json()["remarks"] == "Grounded"
 
+    paged = client.get(
+        "/api/v1/fleet-daily-update/paged?page=1&limit=50&search=FDU-BULK-001"
+    )
+    assert paged.status_code == 200, paged.text
+    items = paged.json()["items"]
+    match = next((i for i in items if i["id"] == update_id_1), None)
+    assert match is not None
+    assert match["tach_time_eod"] == 1234.5
+
 
 def test_bulk_update_fleet_daily_updates_missing_id_returns_404(
     client_with_daily_update_auth: TestClient,
