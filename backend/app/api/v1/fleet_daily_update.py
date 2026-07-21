@@ -67,7 +67,8 @@ def _round1(value: Optional[float]) -> Optional[float]:
 
 async def _enrich_item_with_ldnd(session, orm_item):
     """Build list item with next_insp_due / next_insp_due_unit from latest unfilled LDND row,
-    tach_time_due from LDND latest, tach_time_eod from latest ATL,
+    tach_time_due from LDND latest, tach_time_eod from the stored daily-update value
+    (bulk/single update) with ATL tachometer_end as fallback when unset,
     and remaining_time_before_next_isp / remaining_time_before_engine / remaining_time_before_propeller."""
     base = _fleet_daily_update_item_with_aircraft(orm_item)
     aircraft_id = orm_item.aircraft_fk
@@ -82,10 +83,15 @@ async def _enrich_item_with_ldnd(session, orm_item):
     # tach_time_due: from next_due_tach_hours (latest record), rounded to one decimal
     raw_tach_due = ldnd.next_due_tach_hours if ldnd else None
     base["tach_time_due"] = _round1(raw_tach_due)
-    # tach_time_eod: from latest ATL by sequence_no → tachometer_end, rounded to one decimal
-    latest_atl = await get_latest_aircraft_technical_log(session, aircraft_fk=aircraft_id)
-    raw_tach_eod = latest_atl.tachometer_end if latest_atl else None
-    tach_time_eod = float(raw_tach_eod) if raw_tach_eod is not None else None
+
+    # Prefer persisted tach_time_eod (set via bulk/PUT); fall back to latest ATL tachometer_end.
+    stored_eod = base.get("tach_time_eod")
+    if stored_eod is not None:
+        tach_time_eod = float(stored_eod)
+    else:
+        latest_atl = await get_latest_aircraft_technical_log(session, aircraft_fk=aircraft_id)
+        raw_tach_eod = latest_atl.tachometer_end if latest_atl else None
+        tach_time_eod = float(raw_tach_eod) if raw_tach_eod is not None else None
     base["tach_time_eod"] = _round1(tach_time_eod)
 
     # remaining_time_before_next_isp: tach_time_due - tach_time_eod (from raw values), rounded to one decimal
@@ -96,7 +102,7 @@ async def _enrich_item_with_ldnd(session, orm_item):
     )
     base["remaining_time_before_next_isp"] = round(_remaining_or_zero(remaining_isp), 1)
 
-    # remaining_time_before_engine: (TCC Engine last_done_tach + component_limit_hours) - latest ATL tachometer_end, rounded to one decimal
+    # remaining_time_before_engine: (TCC Engine last_done_tach + component_limit_hours) - tach_time_eod
     tcc_engine = await get_latest_tcc_by_aircraft_and_description(session, aircraft_id, "Engine")
     if (
         tcc_engine is not None
@@ -111,7 +117,7 @@ async def _enrich_item_with_ldnd(session, orm_item):
     else:
         base["remaining_time_before_engine"] = 0.0
 
-    # remaining_time_before_propeller: (TCC Propeller last_done_tach + component_limit_hours) - latest ATL tachometer_end, rounded to one decimal
+    # remaining_time_before_propeller: (TCC Propeller last_done_tach + component_limit_hours) - tach_time_eod
     tcc_propeller = await get_latest_tcc_by_aircraft_and_description(session, aircraft_id, "Propeller")
     if (
         tcc_propeller is not None
@@ -215,8 +221,8 @@ async def api_list_fleet_daily_updates_paged(
     """Get paginated list of Fleet Daily Update entries. Search by aircraft registration; filter by status.
     Each item includes next_insp_due and next_insp_due_unit from the latest unfilled LDND row
     (api/v1/aircraft/{id}/ldnd-monitoring/inspection_type/latest semantics), tach_time_due from
-    api/v1/aircraft/{id}/ldnd-monitoring/latest, and tach_time_eod from api/v1/aircraft-technical-log/latest
-    (tachometer_end)."""
+    api/v1/aircraft/{id}/ldnd-monitoring/latest, and tach_time_eod from the stored daily-update
+    value (bulk/PUT), falling back to latest ATL tachometer_end when unset."""
     return await _list_fleet_daily_updates_paged_impl(
         limit=limit,
         page=page,
