@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import date, time
+from decimal import Decimal, ROUND_HALF_UP
 
 from fastapi import HTTPException, Request
 from sqlalchemy import select, or_, cast, case, String, Numeric, func
@@ -9,7 +10,6 @@ from sqlalchemy.orm import selectinload, joinedload
 from app.database import set_audit_fields
 from app.core.atl_derived_times import (
     ATL_AUTO_FIELD_KEYS,
-    ATL_SERVER_COMPUTED_CANONICAL_KEYS,
     persist_atl_auto_fields_to_row,
 )
 from app.core.atl_paged_rbac import atl_rbac_filter
@@ -326,6 +326,16 @@ def _atl_update_payload_from_schema(log_in: AircraftTechnicalLogUpdate) -> dict:
     return log_in.dict(exclude_unset=True, exclude=ex)  # type: ignore[call-arg]
 
 
+def _round_tachometer_total_2(value: Any) -> Any:
+    """Round tachometer_total to 2 decimal places on ATL create/update persist."""
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except Exception:
+        return value
+
+
 def _component_part_to_dict(part_data: ComponentPartsRecordCreate) -> dict:
     if hasattr(part_data, "model_dump"):
         return part_data.model_dump(exclude_unset=True)  # type: ignore[union-attr]
@@ -368,6 +378,11 @@ def _clean_atl_update_data(update_data: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize sequence, enums, coerce work_status / nature_of_flight (persist client time fields as sent)."""
     if "sequence_no" in update_data and update_data["sequence_no"]:
         update_data["sequence_no"] = _sequence_no_digits_only(str(update_data["sequence_no"]))
+
+    if "tachometer_total" in update_data:
+        update_data["tachometer_total"] = _round_tachometer_total_2(
+            update_data.get("tachometer_total")
+        )
 
     if "nature_of_flight" in update_data:
         nf = update_data["nature_of_flight"]
@@ -520,7 +535,7 @@ async def create_aircraft_technical_log(
     audit_user: Optional[AccountInformation] = None,
     audit_request: Optional[Request] = None,
 ) -> AircraftTechnicalLog:
-    """Create a new Aircraft Technical Log entry with optional gap-fill (skipped when first ATL for aircraft/batch stream). Sequence numbers are free-form strings (optional ATL- prefix stripped). Persists auto_* via compute_auto_fields before insert."""
+    """Create a new Aircraft Technical Log entry with optional gap-fill (skipped when first ATL for aircraft/batch stream). Sequence numbers are free-form strings (optional ATL- prefix stripped). Persists auto_* via compute_auto_fields before insert; canonical time fields are saved as sent by the client."""
     sequence_no = _sequence_no_digits_only(data.sequence_no)
     if await _atl_exists_same_aircraft_sequence_batch(
         session,
@@ -537,8 +552,9 @@ async def create_aircraft_technical_log(
     log_data = data.dict(exclude={'component_parts'})
     for k in ATL_AUTO_FIELD_KEYS:
         log_data.pop(k, None)
-    for k in ATL_SERVER_COMPUTED_CANONICAL_KEYS:
-        log_data.pop(k, None)
+    log_data["tachometer_total"] = _round_tachometer_total_2(
+        log_data.get("tachometer_total")
+    )
     # nature_of_flight: empty string or "" -> NULL in DB; otherwise preserve from payload
     nf = log_data.get('nature_of_flight')
     if nf is None or (isinstance(nf, str) and (not str(nf).strip() or str(nf).strip() == "-")):
