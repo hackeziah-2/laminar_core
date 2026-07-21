@@ -1,20 +1,60 @@
 """Unit tests for Aircraft Technical Log endpoints."""
 
 import asyncio
+from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_account
+from app.core.atl_derived_times import ATL_AUTO_FIELD_KEYS, apply_computed_auto_fields_to_row
 from app.models.aircraft_techinical_log import AircraftTechnicalLog, WorkStatus
 from app.main import app
 from app.models.role import Role
+from app.repository.aircraft_technical_log import (
+    _clean_atl_update_data,
+    _round_tachometer_total_2,
+)
 from app.schemas.aircraft_technical_log_schema import (
     AircraftTechnicalLogApiRead,
     ATLPagedItemWithAutoApiRead,
 )
 from tests.conftest import TestSessionLocal
+
+
+def test_round_tachometer_total_to_two_decimals():
+    assert _round_tachometer_total_2(2.567) == Decimal("2.57")
+    assert _round_tachometer_total_2("1.234") == Decimal("1.23")
+    assert _round_tachometer_total_2(None) is None
+    cleaned = _clean_atl_update_data({"tachometer_total": 9.999})
+    assert cleaned["tachometer_total"] == Decimal("10.00")
+
+
+def test_apply_computed_auto_fields_does_not_overwrite_canonical_times():
+    entry = SimpleNamespace(
+        airframe_run_time=11.0,
+        airframe_aftt=22.0,
+        engine_run_time=33.0,
+        engine_tso=44.0,
+        engine_tbo=55.0,
+        propeller_run_time=66.0,
+        propeller_tso=77.0,
+        propeller_tbo=88.0,
+        **{k: None for k in ATL_AUTO_FIELD_KEYS},
+    )
+    auto = {k: 1.234 for k in ATL_AUTO_FIELD_KEYS}
+    apply_computed_auto_fields_to_row(entry, auto)
+    assert entry.airframe_run_time == 11.0
+    assert entry.airframe_aftt == 22.0
+    assert entry.engine_run_time == 33.0
+    assert entry.engine_tso == 44.0
+    assert entry.engine_tbo == 55.0
+    assert entry.propeller_run_time == 66.0
+    assert entry.propeller_tso == 77.0
+    assert entry.propeller_tbo == 88.0
+    assert entry.auto_engine_tso == 1.23
 
 
 def test_atl_api_read_formats_canonical_time_fields_to_one_decimal():
@@ -347,7 +387,7 @@ def test_update_aircraft_technical_log_persists_client_time_fields(
     update_payload = {
         "tachometer_start": 6198,
         "tachometer_end": 61981,
-        "tachometer_total": 55783,
+        "tachometer_total": 55783.456,
         "airframe_run_time": 1,
         "airframe_aftt": 1,
         "engine_run_time": 1,
@@ -365,7 +405,8 @@ def test_update_aircraft_technical_log_persists_client_time_fields(
     )
     assert update_response.status_code == 200, update_response.text
     body = update_response.json()
-    for key, value in update_payload.items():
+    expected = {**update_payload, "tachometer_total": 55783.46}
+    for key, value in expected.items():
         assert body[key] == value, f"{key}: expected {value}, got {body[key]}"
 
     get_response = client_with_atl_auth.get(f"/api/v1/aircraft-technical-log/{log_id}")
@@ -380,13 +421,56 @@ def test_update_aircraft_technical_log_persists_client_time_fields(
         "propeller_tso",
         "propeller_tbo",
     }
-    for key, value in update_payload.items():
+    for key, value in expected.items():
         if key in decimal_fields:
             assert fetched[key] == round(float(value), 1), (
                 f"GET {key}: expected {round(float(value), 1)}, got {fetched[key]}"
             )
         else:
             assert fetched[key] == value, f"GET {key}: expected {value}, got {fetched[key]}"
+
+
+def test_create_aircraft_technical_log_persists_client_time_fields_and_rounds_tach_total(
+    client_with_atl_auth: TestClient,
+    test_aircraft_technical_log_data: dict,
+):
+    """POST must persist client time fields as sent and round tachometer_total to 2 decimals."""
+    payload = {
+        **test_aircraft_technical_log_data,
+        "sequence_no": "ATL-010",
+        "tachometer_total": 2.567,
+        "airframe_run_time": 2.5,
+        "airframe_aftt": 102.5,
+        "engine_run_time": 2.5,
+        "engine_total_time": 500.0,
+        "engine_tsn": "502.50",
+        "engine_tso": 12.5,
+        "engine_tbo": 987.5,
+        "propeller_run_time": 2.5,
+        "propeller_total_time": 200.0,
+        "propeller_tsn": 202.5,
+        "propeller_tso": 22.5,
+        "propeller_tbo": 777.5,
+    }
+    response = client_with_atl_auth.post(
+        "/api/v1/aircraft-technical-log/",
+        json=payload,
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["tachometer_total"] == 2.57
+    assert body["airframe_run_time"] == 2.5
+    assert body["airframe_aftt"] == 102.5
+    assert body["engine_run_time"] == 2.5
+    assert body["engine_total_time"] == 500.0
+    assert body["engine_tsn"] == "502.50"
+    assert body["engine_tso"] == 12.5
+    assert body["engine_tbo"] == 987.5
+    assert body["propeller_run_time"] == 2.5
+    assert body["propeller_total_time"] == 200.0
+    assert body["propeller_tsn"] == 202.5
+    assert body["propeller_tso"] == 22.5
+    assert body["propeller_tbo"] == 777.5
 
 
 def test_delete_aircraft_technical_log(

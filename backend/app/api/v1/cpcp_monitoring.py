@@ -10,6 +10,7 @@ from app.repository.cpcp_monitoring import (
     create_cpcp_monitoring,
     get_cpcp_monitoring,
     list_cpcp_monitorings,
+    reorder_cpcp_monitorings,
     update_cpcp_monitoring,
     soft_delete_cpcp_monitoring,
 )
@@ -28,6 +29,12 @@ router = APIRouter(
     tags=["cpcp-monitoring"],
 )
 
+# Alias matching Excel import key / product naming for reorder.
+router_maintenance_cpcp = APIRouter(
+    prefix="/api/v1/maintenance-cpcp",
+    tags=["cpcp-monitoring"],
+)
+
 
 @router.get("/paged")
 async def api_list_paged(
@@ -40,7 +47,10 @@ async def api_list_paged(
     aircraft_id: Optional[int] = Query(None, description="Filter by aircraft ID"),
     sort: Optional[str] = Query(
         "",
-        description="Sort fields (comma-separated). Prefix '-' for descending. Example: -created_at,inspection_operation",
+        description=(
+            "Sort fields (comma-separated). Prefix '-' for descending. "
+            "Example: -created_at,inspection_operation. Default: display_order ascending."
+        ),
     ),
     session: AsyncSession = Depends(get_session),
 ):
@@ -71,6 +81,55 @@ async def api_list_paged(
         "page": page,
         "pages": pages,
     }
+
+
+async def _api_reorder_cpcp_monitorings(
+    request: Request,
+    payload: cpcp_monitoring_schema.CPCPMonitoringReorderRequest,
+    session: AsyncSession,
+    current_account: AccountInformation,
+):
+    return await reorder_cpcp_monitorings(
+        session,
+        payload.items,
+        audit_account_id=current_account.id,
+        audit_module_name=CPCP_MONITORING_MODULE_NAME,
+        audit_table_name=CPCP_MONITORING_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
+
+
+@router.put(
+    "/reorder",
+    response_model=cpcp_monitoring_schema.CPCPMonitoringReorderResponse,
+    summary="Reorder CPCP Monitoring rows",
+    description=(
+        "Persist drag-and-drop row order for one aircraft. "
+        "`items` must list every active CPCP record for that aircraft with "
+        "sequential display_order values starting at 1."
+    ),
+)
+@router_maintenance_cpcp.put(
+    "/reorder",
+    response_model=cpcp_monitoring_schema.CPCPMonitoringReorderResponse,
+    summary="Reorder CPCP Monitoring rows",
+    description=(
+        "Persist drag-and-drop row order for one aircraft. "
+        "`items` must list every active CPCP record for that aircraft with "
+        "sequential display_order values starting at 1."
+    ),
+)
+async def api_reorder_cpcp_monitorings(
+    request: Request,
+    payload: cpcp_monitoring_schema.CPCPMonitoringReorderRequest,
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
+):
+    """Persist CPCP Monitoring display_order arrangement."""
+    return await _api_reorder_cpcp_monitorings(
+        request, payload, session, current_account
+    )
 
 
 @router.get(

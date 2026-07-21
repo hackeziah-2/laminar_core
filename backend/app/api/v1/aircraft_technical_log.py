@@ -453,7 +453,7 @@ async def api_create(
         audit_user=current_account,
         audit_request=request,
     )
-    return await aircraft_technical_log_read_with_computed(session, entry)
+    return await aircraft_technical_log_read_persisted(session, entry)
 
 
 async def _parse_update_payload(request: Request) -> aircraft_technical_log_schema.AircraftTechnicalLogUpdate:

@@ -30,6 +30,9 @@ class CPCPMonitoring(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
 
     atl_ref = Column(Integer, ForeignKey("aircraft_technical_log.id"), nullable=True, index=True)
 
+    # Persistent UI / Excel row order (1-based). List APIs sort by this ascending.
+    display_order = Column(Integer, nullable=False, index=True, default=1)
+
     aircraft = relationship("Aircraft", backref="cpcp_monitorings")
     atl = relationship("AircraftTechnicalLog", backref="cpcp_monitorings")
 

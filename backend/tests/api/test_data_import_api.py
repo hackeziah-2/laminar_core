@@ -209,6 +209,8 @@ def test_atl_import_persists_values_without_recomputation(
     assert response.json()["status"] == "success"
 
     async def _check_rows() -> None:
+        from decimal import Decimal
+
         from sqlalchemy import Numeric, cast
 
         async with TestSessionLocal() as session:
@@ -223,21 +225,82 @@ def test_atl_import_persists_values_without_recomputation(
             assert len(rows) == 2
 
             first, second = rows
-            assert first.tachometer_start == 1.0
-            assert first.tachometer_end == 2.0
-            assert first.engine_tso == 111.0
-            assert first.engine_tbo == 888.0
+            assert float(first.tachometer_start) == 1.0
+            assert float(first.tachometer_end) == 2.0
+            assert float(first.engine_tso) == 111.0
+            assert float(first.engine_tbo) == 888.0
             assert first.auto_airframe_run_time is None
             assert first.auto_engine_tso is None
 
-            assert second.tachometer_start == 2.0
-            assert second.tachometer_end == 3.5
-            assert second.engine_tso == 222.0
-            assert second.engine_tbo == 777.0
+            assert float(second.tachometer_start) == 2.0
+            assert float(second.tachometer_end) == 3.5
+            assert float(second.engine_tso) == 222.0
+            assert float(second.engine_tbo) == 777.0
             assert second.auto_airframe_run_time is None
             assert second.auto_engine_tso is None
 
     asyncio.run(_check_rows())
+
+
+def test_atl_import_preserves_high_precision_decimals(
+    client_with_maintenance_import_auth: TestClient,
+):
+    """ATL import stores exact decimal digits from spreadsheet text (no rounding)."""
+    import asyncio
+    from decimal import Decimal
+
+    from app.models.aircraft import Aircraft
+    from app.models.aircraft_techinical_log import AircraftTechnicalLog
+    from app.models.atl_batch import AtlBatch
+    from tests.conftest import TestSessionLocal
+
+    async def _seed() -> tuple[int, int]:
+        async with TestSessionLocal() as session:
+            ac = Aircraft(
+                registration="ATL-PREC-AC",
+                model="172",
+                msn="ATL-PREC-MSN",
+                base="Base",
+                ownership="Owner",
+                status="Active",
+            )
+            session.add(ac)
+            await session.flush()
+            batch = AtlBatch(name="Import precision", description="pytest")
+            session.add(batch)
+            await session.commit()
+            await session.refresh(ac)
+            await session.refresh(batch)
+            return ac.id, batch.id
+
+    aircraft_id, batch_id = asyncio.run(_seed())
+    csv_body = (
+        b"SEQ NO.,TACH END,ENGINE TSO,PROPELLER TSN,AIRFRAME AFTT\n"
+        b"001,123.4567,45.10,80.5,502.5000\n"
+    )
+    response = client_with_maintenance_import_auth.post(
+        "/api/v1/excel-data/aircraft-technical-log/import",
+        data={"aircraft_id": str(aircraft_id), "batch_id": str(batch_id)},
+        files={"file": ("atl.csv", csv_body, "text/csv")},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "success"
+
+    async def _check_precision() -> None:
+        async with TestSessionLocal() as session:
+            row = (
+                await session.execute(
+                    select(AircraftTechnicalLog)
+                    .where(AircraftTechnicalLog.aircraft_fk == aircraft_id)
+                    .where(AircraftTechnicalLog.atl_batch_fk == batch_id)
+                )
+            ).scalar_one()
+            assert Decimal(str(row.tachometer_end)) == Decimal("123.4567")
+            assert Decimal(str(row.engine_tso)) == Decimal("45.10")
+            assert Decimal(str(row.propeller_tsn)) == Decimal("80.5")
+            assert Decimal(str(row.airframe_aftt)) == Decimal("502.5000")
+
+    asyncio.run(_check_precision())
 
 
 ATL_LIST_DETAIL_TIME_FIELDS = (
@@ -1235,6 +1298,82 @@ def test_tcc_import_persist_without_part_number(
     asyncio.run(_assert_row())
 
 
+def test_tcc_import_preserves_excel_row_order(
+    client_with_maintenance_import_auth: TestClient,
+):
+    """Imported TCC rows keep Excel order via display_order (A→C→B, not alphabetical)."""
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+
+    from sqlalchemy import select
+
+    from app.models.aircraft import Aircraft
+    from app.models.tcc_maintenance import TCCMaintenance
+    from app.services.tcc_computation import COMPUTED_TCC_COLUMN_KEYS
+    from tests.conftest import TestSessionLocal
+
+    async def _seed_aircraft() -> int:
+        async with TestSessionLocal() as session:
+            ac = Aircraft(
+                registration="TCC-ORDER-AC",
+                model="172",
+                msn="TCC-ORDER-MSN",
+                base="Base",
+                ownership="Owner",
+                status="Active",
+            )
+            session.add(ac)
+            await session.commit()
+            await session.refresh(ac)
+            return ac.id
+
+    aircraft_pk = asyncio.run(_seed_aircraft())
+    rows = [
+        {"Category": "AIRFRAME", "Description": "A", "Part Number": "PN-A"},
+        {"Category": "AIRFRAME", "Description": "C", "Part Number": "PN-C"},
+        {"Category": "AIRFRAME", "Description": "B", "Part Number": "PN-B"},
+    ]
+
+    # TCC after_upsert looks up latest ATL with Postgres-only regex; stub for SQLite tests.
+    with patch(
+        "app.services.excel_import.hooks.maintenance_tcc.build_computed_tcc_field_values",
+        new_callable=AsyncMock,
+        return_value={k: None for k in COMPUTED_TCC_COLUMN_KEYS},
+    ):
+        response = client_with_maintenance_import_auth.post(
+            "/api/v1/excel-data/maintenance-tcc/import",
+            data={"aircraft_id": str(aircraft_pk)},
+            files={"file": ("tcc.csv", tcc_csv_bytes(rows), "text/csv")},
+        )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "success", body
+    assert body["inserted"] == 3
+    assert body["errors"] == []
+
+    async def _assert_db_and_list_order() -> None:
+        async with TestSessionLocal() as session:
+            result = await session.execute(
+                select(TCCMaintenance)
+                .where(TCCMaintenance.aircraft_fk == aircraft_pk)
+                .order_by(TCCMaintenance.display_order.asc())
+            )
+            items = result.scalars().all()
+            assert [i.description for i in items] == ["A", "C", "B"]
+            assert [i.display_order for i in items] == [1, 2, 3]
+
+            from app.repository.tcc_maintenance import list_tcc_maintenances
+
+            listed, total = await list_tcc_maintenances(
+                session, limit=10, offset=0, aircraft_fk=aircraft_pk
+            )
+            assert total == 3
+            assert [i.description for i in listed] == ["A", "C", "B"]
+            assert [i.display_order for i in listed] == [1, 2, 3]
+
+    asyncio.run(_assert_db_and_list_order())
+
+
 def test_tcc_import_schema_sanitizes_pandas_nat_and_nan():
     """Empty Excel date/number cells (NaT/nan) must become None, not DB errors."""
     import math
@@ -1372,6 +1511,88 @@ def test_cpcp_import_dry_run_date_formats(
     assert body["status"] == "dry-run"
     assert body["inserted"] == 2
     assert body["errors"] == []
+
+
+def test_cpcp_import_preserves_excel_row_order(
+    client_with_maintenance_import_auth: TestClient,
+):
+    """Imported CPCP rows keep Excel order via display_order (A→C→B, not alphabetical)."""
+    import asyncio
+
+    from sqlalchemy import select
+
+    from app.models.aircraft import Aircraft
+    from app.models.cpcp_monitoring import CPCPMonitoring
+    from app.repository.cpcp_monitoring import list_cpcp_monitorings
+    from tests.conftest import TestSessionLocal
+
+    async def _seed_aircraft() -> int:
+        async with TestSessionLocal() as session:
+            ac = Aircraft(
+                registration="CPCP-ORDER-AC",
+                model="172",
+                msn="CPCP-ORDER-MSN",
+                base="Base",
+                ownership="Owner",
+                status="Active",
+            )
+            session.add(ac)
+            await session.commit()
+            await session.refresh(ac)
+            return ac.id
+
+    aircraft_pk = asyncio.run(_seed_aircraft())
+    rows = [
+        {
+            "Inspection Operation": "Op A",
+            "Description": "A",
+            "Interval Hours": "100",
+            "Interval Months": "6",
+        },
+        {
+            "Inspection Operation": "Op C",
+            "Description": "C",
+            "Interval Hours": "200",
+            "Interval Months": "12",
+        },
+        {
+            "Inspection Operation": "Op B",
+            "Description": "B",
+            "Interval Hours": "150",
+            "Interval Months": "9",
+        },
+    ]
+
+    response = client_with_maintenance_import_auth.post(
+        "/api/v1/excel-data/maintenance-cpcp/import",
+        data={"aircraft_id": str(aircraft_pk)},
+        files={"file": ("cpcp.csv", cpcp_csv_bytes(rows), "text/csv")},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "success", body
+    assert body["inserted"] == 3
+    assert body["errors"] == []
+
+    async def _assert_db_and_list_order() -> None:
+        async with TestSessionLocal() as session:
+            result = await session.execute(
+                select(CPCPMonitoring)
+                .where(CPCPMonitoring.aircraft_id == aircraft_pk)
+                .order_by(CPCPMonitoring.display_order.asc())
+            )
+            items = result.scalars().all()
+            assert [i.description for i in items] == ["A", "C", "B"]
+            assert [i.display_order for i in items] == [1, 2, 3]
+
+            listed, total = await list_cpcp_monitorings(
+                session, limit=10, offset=0, aircraft_id=aircraft_pk
+            )
+            assert total == 3
+            assert [i.description for i in listed] == ["A", "C", "B"]
+            assert [i.display_order for i in listed] == [1, 2, 3]
+
+    asyncio.run(_assert_db_and_list_order())
 
 
 @pytest.mark.no_auth

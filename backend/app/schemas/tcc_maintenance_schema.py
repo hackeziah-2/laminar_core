@@ -285,6 +285,10 @@ class AircraftTechinicalLogRead(BaseModel):
 class TCCMaintenanceRead(TCCMaintenanceBase):
     """Schema for reading a TCC Maintenance entry."""
     id: int
+    display_order: int = Field(
+        ...,
+        description="1-based persistent row order for UI drag-and-drop and Excel import.",
+    )
     atl: Optional[AircraftTechinicalLogRead] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -298,6 +302,29 @@ class TCCMaintenanceRead(TCCMaintenanceBase):
 
     class Config:
         orm_mode = True
+
+
+class TCCMaintenanceReorderItem(BaseModel):
+    """One row in a TCC reorder request."""
+    id: int = Field(..., description="TCC maintenance record ID")
+    display_order: int = Field(..., ge=1, description="1-based display order")
+
+
+class TCCMaintenanceReorderRequest(BaseModel):
+    """Request body for PUT /api/v1/maintenance-tcc/reorder (and tcc-maintenance/reorder)."""
+    items: List[TCCMaintenanceReorderItem] = Field(
+        ...,
+        min_items=1,
+        description="Complete ordered set of records for one aircraft",
+    )
+
+
+class TCCMaintenanceReorderResponse(BaseModel):
+    """Saved arrangement after a successful reorder."""
+    items: List[TCCMaintenanceRead] = Field(default_factory=list)
+
+    class Config:
+        orm_mode = False
 
 
 class TCCMaintenancePagedResponse(BaseModel):

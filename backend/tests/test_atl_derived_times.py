@@ -557,7 +557,7 @@ def test_atl_engine_propeller_tbo_chains_from_previous_remaining(
     client_with_atl_auth: TestClient,
     test_aircraft_data: dict,
 ):
-    """TBO remaining = previous TBO remaining - current run time (not life_limit - TSO)."""
+    """auto_* TBO remaining = previous remaining - current run time (canonical fields stay client-owned)."""
     aircraft_payload = {
         **test_aircraft_data,
         "msn": "TEST-MSN-ATL-TBO-CHAIN",
@@ -595,6 +595,10 @@ def test_atl_engine_propeller_tbo_chains_from_previous_remaining(
             "sequence_no": "ATL-001",
             "tachometer_start": 100.0,
             "tachometer_end": 101.0,
+            "engine_tso": 501.0,
+            "engine_tbo": 499.0,
+            "propeller_tso": 201.0,
+            "propeller_tbo": 599.0,
         },
     )
     assert first.status_code == 201, first.text
@@ -603,6 +607,10 @@ def test_atl_engine_propeller_tbo_chains_from_previous_remaining(
     assert first_body["engine_tbo"] == 499.0
     assert first_body["propeller_tso"] == 201.0
     assert first_body["propeller_tbo"] == 599.0
+    assert first_body["auto_engine_tso"] == 501.0
+    assert first_body["auto_engine_tbo"] == 499.0
+    assert first_body["auto_propeller_tso"] == 201.0
+    assert first_body["auto_propeller_tbo"] == 599.0
 
     second = client_with_atl_auth.post(
         "/api/v1/aircraft-technical-log/",
@@ -611,6 +619,10 @@ def test_atl_engine_propeller_tbo_chains_from_previous_remaining(
             "sequence_no": "ATL-002",
             "tachometer_start": 101.0,
             "tachometer_end": 103.5,
+            "engine_tso": 503.5,
+            "engine_tbo": 496.5,
+            "propeller_tso": 203.5,
+            "propeller_tbo": 596.5,
         },
     )
     assert second.status_code == 201, second.text
@@ -619,13 +631,17 @@ def test_atl_engine_propeller_tbo_chains_from_previous_remaining(
     assert second_body["engine_tbo"] == 496.5
     assert second_body["propeller_tso"] == 203.5
     assert second_body["propeller_tbo"] == 596.5
+    assert second_body["auto_engine_tso"] == 503.5
+    assert second_body["auto_engine_tbo"] == 496.5
+    assert second_body["auto_propeller_tso"] == 203.5
+    assert second_body["auto_propeller_tbo"] == 596.5
 
 
 def test_atl_tso_tbo_ignore_manual_previous_values_when_computed_chain_exists(
     client_with_atl_auth: TestClient,
     test_aircraft_data: dict,
 ):
-    """Manual engine/propeller TSO/TBO on a prior row must not skew the next computed leg."""
+    """Manual engine/propeller TSO/TBO on a prior row must not skew the next auto_* leg."""
     aircraft_payload = {
         **test_aircraft_data,
         "msn": "TEST-MSN-ATL-MANUAL-IGNORE",
@@ -687,15 +703,25 @@ def test_atl_tso_tbo_ignore_manual_previous_values_when_computed_chain_exists(
             "number_of_landings": 1,
             "tachometer_start": 2.0,
             "tachometer_end": 4.5,
+            "engine_tso": 999.0,
+            "engine_tbo": 1.0,
+            "propeller_tso": 888.0,
+            "propeller_tbo": 2.0,
             "component_parts": [],
         },
     )
     assert create_response.status_code == 201, create_response.text
     body = create_response.json()
-    assert body["engine_tso"] == 103.5
-    assert body["engine_tbo"] == 896.5
-    assert body["propeller_tso"] == 53.5
-    assert body["propeller_tbo"] == 546.5
+    # Canonical fields persist as sent by the client.
+    assert body["engine_tso"] == 999.0
+    assert body["engine_tbo"] == 1.0
+    assert body["propeller_tso"] == 888.0
+    assert body["propeller_tbo"] == 2.0
+    # auto_* still chain from previous auto_* (not misleading manual columns).
+    assert body["auto_engine_tso"] == 103.5
+    assert body["auto_engine_tbo"] == 896.5
+    assert body["auto_propeller_tso"] == 53.5
+    assert body["auto_propeller_tbo"] == 546.5
 
 
 def test_atl_paged_defaults_to_sequence_number_descending(

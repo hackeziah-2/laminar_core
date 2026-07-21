@@ -320,13 +320,19 @@ ATL_AUTO_FIELD_KEYS: tuple[str, ...] = (
     "auto_propeller_tbo",
 )
 
-# Server-owned ATL columns derived from auto_* (never accept client/import overrides).
+# Canonical time columns owned by the client on ATL create/update (frontend computes).
+# Kept for documentation / callers that still need the key list; not overwritten on persist.
 ATL_SERVER_COMPUTED_CANONICAL_KEYS: tuple[str, ...] = (
     "airframe_run_time",
+    "airframe_aftt",
     "engine_run_time",
-    "propeller_run_time",
+    "engine_total_time",
+    "engine_tsn",
     "engine_tso",
     "engine_tbo",
+    "propeller_run_time",
+    "propeller_total_time",
+    "propeller_tsn",
     "propeller_tso",
     "propeller_tbo",
 )
@@ -336,14 +342,10 @@ def apply_computed_auto_fields_to_row(
     entry: AircraftTechnicalLog,
     auto_fields: Dict[str, float],
 ) -> None:
-    """Persist rounded auto_* and canonical engine/propeller time columns on an ATL row."""
+    """Persist rounded auto_* columns only; canonical time fields come from the client."""
     rounded = {k: round(auto_fields[k], 2) for k in ATL_AUTO_FIELD_KEYS}
     for key in ATL_AUTO_FIELD_KEYS:
         setattr(entry, key, rounded[key])
-    canonical = canonical_time_fields_from_auto(rounded)
-    for key in ATL_SERVER_COMPUTED_CANONICAL_KEYS:
-        if key in canonical:
-            setattr(entry, key, canonical[key])
 
 
 def _atl_has_persisted_auto_fields(entry: AircraftTechnicalLog) -> bool:

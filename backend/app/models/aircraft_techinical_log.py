@@ -9,11 +9,15 @@ from sqlalchemy import (
     DateTime,
     Time,
     Text,
-    ForeignKey
+    ForeignKey,
+    Numeric,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import ENUM as PGEnum
 from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
+
+# Exact decimal storage for ATL imported numerics (up to 10 fractional digits).
+ATL_NUMERIC = Numeric(20, 10, asdecimal=True)
 
 
 class TypeEnum(str, enum.Enum):
@@ -52,7 +56,7 @@ class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
         nullable=True,
     )
     next_inspection_due = Column(String(100), nullable=True)
-    tach_time_due = Column(Float, nullable=True)
+    tach_time_due = Column(ATL_NUMERIC, nullable=True)
 
     origin_station = Column(String(50), nullable=True)
     origin_date = Column(Date, nullable=True)
@@ -64,68 +68,68 @@ class AircraftTechnicalLog(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
 
     number_of_landings = Column(Integer, nullable=True)
 
-    hobbs_meter_start = Column(Float, nullable=True)
-    hobbs_meter_end = Column(Float, nullable=True)
-    hobbs_meter_total = Column(Float, nullable=True)
+    hobbs_meter_start = Column(ATL_NUMERIC, nullable=True)
+    hobbs_meter_end = Column(ATL_NUMERIC, nullable=True)
+    hobbs_meter_total = Column(ATL_NUMERIC, nullable=True)
 
-    tachometer_start = Column(Float, nullable=True)
-    tachometer_end = Column(Float, nullable=True)
-    tachometer_total = Column(Float, nullable=True)
+    tachometer_start = Column(ATL_NUMERIC, nullable=True)
+    tachometer_end = Column(ATL_NUMERIC, nullable=True)
+    tachometer_total = Column(ATL_NUMERIC, nullable=True)
 
     # Airframe time fields
-    airframe_prev_time = Column(Float, nullable=True)
-    airframe_flight_time = Column(Float, nullable=True)
-    airframe_total_time = Column(Float, nullable=True)
-    airframe_run_time = Column(Float, nullable=True)
-    airframe_aftt = Column(Float, nullable=True)
+    airframe_prev_time = Column(ATL_NUMERIC, nullable=True)
+    airframe_flight_time = Column(ATL_NUMERIC, nullable=True)
+    airframe_total_time = Column(ATL_NUMERIC, nullable=True)
+    airframe_run_time = Column(ATL_NUMERIC, nullable=True)
+    airframe_aftt = Column(ATL_NUMERIC, nullable=True)
 
     # Engine time fields
-    engine_prev_time = Column(Float, nullable=True)
-    engine_flight_time = Column(Float, nullable=True)
-    engine_total_time = Column(Float, nullable=True)
-    engine_run_time = Column(Float, nullable=True)
+    engine_prev_time = Column(ATL_NUMERIC, nullable=True)
+    engine_flight_time = Column(ATL_NUMERIC, nullable=True)
+    engine_total_time = Column(ATL_NUMERIC, nullable=True)
+    engine_run_time = Column(ATL_NUMERIC, nullable=True)
     engine_tsn = Column(String(100), nullable=True)
-    engine_tso = Column(Float, nullable=True)
-    engine_tbo = Column(Float, nullable=True)
+    engine_tso = Column(ATL_NUMERIC, nullable=True)
+    engine_tbo = Column(ATL_NUMERIC, nullable=True)
 
     # Propeller time fields
-    propeller_prev_time = Column(Float, nullable=True)
-    propeller_flight_time = Column(Float, nullable=True)
-    propeller_total_time = Column(Float, nullable=True)
-    propeller_run_time = Column(Float, nullable=True)
-    propeller_tsn = Column(Float, nullable=True)
-    propeller_tso = Column(Float, nullable=True)
-    propeller_tbo = Column(Float, nullable=True)
+    propeller_prev_time = Column(ATL_NUMERIC, nullable=True)
+    propeller_flight_time = Column(ATL_NUMERIC, nullable=True)
+    propeller_total_time = Column(ATL_NUMERIC, nullable=True)
+    propeller_run_time = Column(ATL_NUMERIC, nullable=True)
+    propeller_tsn = Column(ATL_NUMERIC, nullable=True)
+    propeller_tso = Column(ATL_NUMERIC, nullable=True)
+    propeller_tbo = Column(ATL_NUMERIC, nullable=True)
 
     # Life time limits
-    life_time_limit_engine = Column(Float, nullable=True)
-    life_time_limit_propeller = Column(Float, nullable=True)
+    life_time_limit_engine = Column(ATL_NUMERIC, nullable=True)
+    life_time_limit_propeller = Column(ATL_NUMERIC, nullable=True)
 
     # Persisted computed leg / cumulative times (aligned with atl_derived_times.compute_auto_fields)
-    auto_airframe_run_time = Column(Float, nullable=True)
-    auto_airframe_aftt = Column(Float, nullable=True)
-    auto_engine_run_time = Column(Float, nullable=True)
-    auto_run_time = Column(Float, nullable=True)
-    auto_engine_tsn = Column(Float, nullable=True)
-    auto_engine_tso = Column(Float, nullable=True)
-    auto_engine_tbo = Column(Float, nullable=True)
-    auto_propeller_run_time = Column(Float, nullable=True)
-    auto_propeller_tsn = Column(Float, nullable=True)
-    auto_propeller_tso = Column(Float, nullable=True)
-    auto_propeller_tbo = Column(Float, nullable=True)
+    auto_airframe_run_time = Column(ATL_NUMERIC, nullable=True)
+    auto_airframe_aftt = Column(ATL_NUMERIC, nullable=True)
+    auto_engine_run_time = Column(ATL_NUMERIC, nullable=True)
+    auto_run_time = Column(ATL_NUMERIC, nullable=True)
+    auto_engine_tsn = Column(ATL_NUMERIC, nullable=True)
+    auto_engine_tso = Column(ATL_NUMERIC, nullable=True)
+    auto_engine_tbo = Column(ATL_NUMERIC, nullable=True)
+    auto_propeller_run_time = Column(ATL_NUMERIC, nullable=True)
+    auto_propeller_tsn = Column(ATL_NUMERIC, nullable=True)
+    auto_propeller_tso = Column(ATL_NUMERIC, nullable=True)
+    auto_propeller_tbo = Column(ATL_NUMERIC, nullable=True)
 
-    fuel_qty_left_uplift_qty = Column(Float)
-    fuel_qty_right_uplift_qty = Column(Float)
+    fuel_qty_left_uplift_qty = Column(ATL_NUMERIC)
+    fuel_qty_right_uplift_qty = Column(ATL_NUMERIC)
 
-    fuel_qty_left_prior_departure = Column(Float)
-    fuel_qty_right_prior_departure = Column(Float)
+    fuel_qty_left_prior_departure = Column(ATL_NUMERIC)
+    fuel_qty_right_prior_departure = Column(ATL_NUMERIC)
 
-    fuel_qty_left_after_on_blks = Column(Float)
-    fuel_qty_right_after_on_blks = Column(Float)
+    fuel_qty_left_after_on_blks = Column(ATL_NUMERIC)
+    fuel_qty_right_after_on_blks = Column(ATL_NUMERIC)
 
-    oil_qty_uplift_qty = Column(Float)
-    oil_qty_prior_departure = Column(Float)
-    oil_qty_after_on_blks = Column(Float)
+    oil_qty_uplift_qty = Column(ATL_NUMERIC)
+    oil_qty_prior_departure = Column(ATL_NUMERIC)
+    oil_qty_after_on_blks = Column(ATL_NUMERIC)
 
     remarks = Column(Text)
     actions_taken = Column(Text)
@@ -178,7 +182,7 @@ class ComponentPartsRecord(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
 
     atl_fk = Column(Integer, ForeignKey("aircraft_technical_log.id"), nullable=False)
 
-    qty = Column(Float, nullable=False)
+    qty = Column(ATL_NUMERIC, nullable=False)
     unit = Column(String(20), nullable=False)
 
     nomenclature = Column(String(255), nullable=False)

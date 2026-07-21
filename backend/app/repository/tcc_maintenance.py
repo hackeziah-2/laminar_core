@@ -1,6 +1,6 @@
 from typing import Optional, List, Tuple
 
-from fastapi import Request
+from fastapi import HTTPException, Request, status
 from sqlalchemy import select, func, or_, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -15,7 +15,10 @@ from app.schemas.tcc_maintenance_schema import (
     TCCMaintenanceCreate,
     TCCMaintenanceUpdate,
     TCCMaintenanceRead,
+    TCCMaintenanceReorderItem,
+    TCCMaintenanceReorderResponse,
 )
+from app.services.display_order_reorder import validate_reorder_items
 from app.services.tcc_computation import (
     CLIENT_REMAINING_OVERRIDE_KEYS,
     COMPUTED_TCC_COLUMN_KEYS,
@@ -104,6 +107,14 @@ async def create_tcc_maintenance(
     payload.update(computed)
     for k, v in manual_remaining.items():
         payload[k] = coerce_stored_remaining_override(k, v)
+
+    max_order_result = await session.execute(
+        select(func.coalesce(func.max(TCCMaintenance.display_order), 0)).where(
+            TCCMaintenance.aircraft_fk == payload["aircraft_fk"],
+            TCCMaintenance.is_deleted == False,
+        )
+    )
+    payload["display_order"] = int(max_order_result.scalar() or 0) + 1
 
     obj = TCCMaintenance(**payload)
     session.add(obj)
@@ -252,6 +263,7 @@ async def list_tcc_maintenances(
         "category": TCCMaintenance.category,
         "part_number": TCCMaintenance.part_number,
         "last_done_date": TCCMaintenance.last_done_date,
+        "display_order": TCCMaintenance.display_order,
         "created_at": TCCMaintenance.created_at,
         "updated_at": TCCMaintenance.updated_at,
     }
@@ -264,7 +276,10 @@ async def list_tcc_maintenances(
                 continue
             stmt = stmt.order_by(column.desc() if desc_order else column.asc())
     else:
-        stmt = stmt.order_by(TCCMaintenance.created_at.desc())
+        stmt = stmt.order_by(
+            TCCMaintenance.display_order.asc(),
+            TCCMaintenance.id.asc(),
+        )
 
     count_stmt = (
         select(func.count())
@@ -394,6 +409,23 @@ async def update_tcc_maintenance(
     return TCCMaintenanceRead.from_orm(obj)
 
 
+async def _normalize_tcc_display_order_for_aircraft(
+    session: AsyncSession,
+    aircraft_fk: int,
+) -> None:
+    """Renumber remaining active TCC rows for an aircraft to 1..N."""
+    result = await session.execute(
+        select(TCCMaintenance)
+        .where(TCCMaintenance.aircraft_fk == aircraft_fk)
+        .where(TCCMaintenance.is_deleted == False)
+        .order_by(TCCMaintenance.display_order.asc(), TCCMaintenance.id.asc())
+    )
+    for index, row in enumerate(result.scalars().all(), start=1):
+        if row.display_order != index:
+            row.display_order = index
+            session.add(row)
+
+
 async def soft_delete_tcc_maintenance(
     session: AsyncSession,
     maintenance_id: int,
@@ -413,8 +445,10 @@ async def soft_delete_tcc_maintenance(
     if not obj:
         return False
     old_data_snapshot = serialize_audit_data(obj)
+    aircraft_fk = obj.aircraft_fk
     obj.soft_delete()
     session.add(obj)
+    await _normalize_tcc_display_order_for_aircraft(session, aircraft_fk)
     await session.commit()
 
     if audit_module_name and audit_table_name:
@@ -456,6 +490,7 @@ async def soft_delete_tcc_maintenance_by_aircraft(
     old_data_snapshot = serialize_audit_data(obj)
     obj.soft_delete()
     session.add(obj)
+    await _normalize_tcc_display_order_for_aircraft(session, aircraft_id)
     await session.commit()
 
     if audit_module_name and audit_table_name:
@@ -472,3 +507,113 @@ async def soft_delete_tcc_maintenance_by_aircraft(
         )
 
     return True
+
+
+async def reorder_tcc_maintenances(
+    session: AsyncSession,
+    items: List[TCCMaintenanceReorderItem],
+    *,
+    audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
+) -> TCCMaintenanceReorderResponse:
+    """
+    Atomically update display_order for TCC rows belonging to one aircraft.
+
+    Validates IDs exist, share the same aircraft parent, and form the complete
+    active set for that aircraft. Rolls back on any failure.
+    """
+    validated = validate_reorder_items(items)
+    id_to_order = {record_id: order for record_id, order in validated}
+    record_ids = list(id_to_order.keys())
+
+    result = await session.execute(
+        select(TCCMaintenance)
+        .options(
+            selectinload(TCCMaintenance.aircraft),
+            selectinload(TCCMaintenance.atl),
+        )
+        .where(TCCMaintenance.id.in_(record_ids))
+        .where(TCCMaintenance.is_deleted == False)
+    )
+    rows = list(result.scalars().all())
+    row_map = {row.id: row for row in rows}
+
+    missing_ids = [rid for rid in record_ids if rid not in row_map]
+    if missing_ids:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"TCC Maintenance record(s) not found: {missing_ids}",
+        )
+
+    aircraft_ids = {row.aircraft_fk for row in rows}
+    if len(aircraft_ids) != 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="All TCC records in a reorder must belong to the same aircraft",
+        )
+    aircraft_fk = next(iter(aircraft_ids))
+
+    active_count_result = await session.execute(
+        select(func.count())
+        .select_from(TCCMaintenance)
+        .where(TCCMaintenance.aircraft_fk == aircraft_fk)
+        .where(TCCMaintenance.is_deleted == False)
+    )
+    active_count = int(active_count_result.scalar() or 0)
+    if active_count != len(record_ids):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Reorder must include every active TCC record for the aircraft "
+                f"(expected {active_count} items, got {len(record_ids)})"
+            ),
+        )
+
+    old_data_snapshots = {row.id: serialize_audit_data(row) for row in rows}
+
+    try:
+        # Two-phase update avoids transient unique collisions if a DB constraint is added later.
+        for row in rows:
+            row.display_order = -row.id
+            session.add(row)
+            if audit_account_id is not None:
+                await set_audit_fields(row, audit_account_id, is_create=False)
+        await session.flush()
+
+        for row in rows:
+            row.display_order = id_to_order[row.id]
+            session.add(row)
+
+        await session.commit()
+    except HTTPException:
+        await session.rollback()
+        raise
+    except Exception as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+
+    if audit_module_name and audit_table_name:
+        for row in rows:
+            await session.refresh(row)
+            await create_audit_log(
+                db=session,
+                module_name=audit_module_name,
+                table_name=audit_table_name,
+                record_id=row.id,
+                action=AuditAction.UPDATE,
+                old_data=old_data_snapshots.get(row.id),
+                new_data=row,
+                current_user=audit_user,
+                request=audit_request,
+            )
+
+    ordered_rows = sorted(rows, key=lambda r: (r.display_order, r.id))
+    return TCCMaintenanceReorderResponse(
+        items=[TCCMaintenanceRead.from_orm(row) for row in ordered_rows]
+    )

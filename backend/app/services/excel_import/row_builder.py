@@ -10,12 +10,12 @@ from app.services.excel_import.hooks.base import ImportHook
 from app.services.excel_import.parsers import (
     normalize_import_nature_of_flight,
     parse_import_date,
+    resolve_origin_date_time,
 )
 from app.services.excel_import.validation_errors import format_row_error
 
 _IMPORT_DATE_FIELDS = frozenset(
     {
-        "origin_date",
         "destination_date",
         "pilot_accept_date",
         "rts_date",
@@ -42,6 +42,15 @@ def build_row_for_schema(
 ) -> Dict[str, Any]:
     merged = {**row, **inject_fields}
     hook.transform_row(merged)
+    if "origin_date" in schema_fields or "origin_time" in schema_fields:
+        origin_date, origin_time = resolve_origin_date_time(
+            merged.get("origin_date"),
+            merged.get("origin_time"),
+        )
+        if "origin_date" in schema_fields:
+            merged["origin_date"] = origin_date
+        if "origin_time" in schema_fields:
+            merged["origin_time"] = origin_time
     out: Dict[str, Any] = {}
     for key in schema_fields:
         if key not in merged:
