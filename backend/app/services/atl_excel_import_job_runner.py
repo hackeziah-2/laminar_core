@@ -3,17 +3,15 @@ from __future__ import annotations
 """Background ATL Excel import: validate all rows, then bulk upsert in one transaction."""
 import os
 import time
-from io import BytesIO
 from typing import Any, Dict, Optional
 
-import pandas as pd
 from sqlalchemy import update
 
 from app.constants.atl_excel_import import ATL_EXCEL_COLUMN_MAPPING
 from app.database import AsyncSessionLocal
 from app.models.atl_excel_import_job import AtlExcelImportJob
 from app.services.atl_import_service import run_atl_import
-from app.services.excel_import.reader import normalize_column_mapping
+from app.services.excel_import.reader import read_atl_spreadsheet_bytes
 
 from app.services.atl_excel_import_summary_codec import encode_message_with_summary
 
@@ -41,14 +39,9 @@ def _read_atl_spreadsheet(path: str) -> tuple[list[dict], int, bool]:
     """Read Excel file into record dicts; return (records, source_row_count, has_sequence_no)."""
     with open(path, "rb") as fh:
         raw = fh.read()
-    df = pd.read_excel(BytesIO(raw))
-    df.columns = df.columns.str.strip().str.lower()
-    mapping = normalize_column_mapping(ATL_EXCEL_COLUMN_MAPPING)
-    df = df.rename(columns={k: v for k, v in mapping.items() if k in df.columns})
-    df = df.where(pd.notnull(df), None)
-    has_sequence_no = "sequence_no" in df.columns
-    source_row_count = len(df)
-    records = df.to_dict(orient="records")
+    records = read_atl_spreadsheet_bytes(raw, column_mapping=ATL_EXCEL_COLUMN_MAPPING)
+    has_sequence_no = any("sequence_no" in row for row in records)
+    source_row_count = len(records)
     return records, source_row_count, has_sequence_no
 
 

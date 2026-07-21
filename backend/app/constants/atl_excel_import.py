@@ -31,6 +31,7 @@ ATL_EXCEL_COLUMN_MAPPING = {
     "run time": "airframe_run_time",
     "airframe run time": "airframe_run_time",
     "aftt": "airframe_aftt",
+    "airframe aftt": "airframe_aftt",
     "engine prev time": "engine_prev_time",
     "engine flight time": "engine_flight_time",
     "engine total time": "engine_total_time",

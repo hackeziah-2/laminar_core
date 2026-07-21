@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from app.services.excel_import.parsers import (
     INVALID_FLEXIBLE_DATETIME_MESSAGE,
+    SpreadsheetParseError,
     is_spreadsheet_empty,
 )
 
@@ -25,7 +26,10 @@ _FLEXIBLE_DATETIME_EXPECTED = (
 
 _FIELD_EXPECTED_HINTS: Dict[str, str] = {
     "sequence_no": "Non-empty string (e.g. 001, QM-001, ATL-001).",
-    "origin_date": "DD/MM/YYYY, MM/DD/YYYY, DD-Mon-YY, or YYYY-MM-DD.",
+    "origin_date": (
+        "DD/MM/YYYY, MM/DD/YYYY, DD-Mon-YY, YYYY-MM-DD, YYYY-MM-DD HH:MM:SS, "
+        "or ISO date/datetime values."
+    ),
     "destination_date": "DD/MM/YYYY, MM/DD/YYYY, DD-Mon-YY, or YYYY-MM-DD.",
     "pilot_accept_date": "DD/MM/YYYY, MM/DD/YYYY, DD-Mon-YY, or YYYY-MM-DD.",
     "rts_date": "DD/MM/YYYY, MM/DD/YYYY, DD-Mon-YY, or YYYY-MM-DD.",
@@ -260,6 +264,19 @@ def exception_to_structured_errors(
             raw_row=raw_row,
             field_labels=field_labels,
         )
+    if isinstance(exc, SpreadsheetParseError):
+        labels = dict(field_labels or {})
+        field = exc.field
+        column = labels.get(field, humanize_field_name(field))
+        return [
+            structured_error_dict(
+                row=excel_row,
+                column=column,
+                value=_value_from_raw_row(raw_row, field),
+                error=str(exc).strip() or "Invalid value.",
+                expected=expected_hint_for_field(field),
+            )
+        ]
     return [
         structured_error_dict(
             row=excel_row,

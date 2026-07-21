@@ -1,6 +1,6 @@
 from typing import Optional, List, Tuple
 
-from fastapi import Request
+from fastapi import HTTPException, Request, status
 from sqlalchemy import select, func, or_, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -15,8 +15,11 @@ from app.schemas.cpcp_monitoring_schema import (
     CPCPMonitoringCreate,
     CPCPMonitoringUpdate,
     CPCPMonitoringRead,
+    CPCPMonitoringReorderItem,
+    CPCPMonitoringReorderResponse,
 )
 from app.services.cpcp_computation import apply_cpcp_next_due_fields, to_cpcp_monitoring_read
+from app.services.display_order_reorder import validate_reorder_items
 
 
 async def create_cpcp_monitoring(
@@ -30,7 +33,16 @@ async def create_cpcp_monitoring(
     audit_request: Optional[Request] = None,
 ) -> CPCPMonitoringRead:
     """Create a new CPCP Monitoring entry."""
-    obj = CPCPMonitoring(**data.dict())
+    payload = data.dict()
+    max_order_result = await session.execute(
+        select(func.coalesce(func.max(CPCPMonitoring.display_order), 0)).where(
+            CPCPMonitoring.aircraft_id == payload["aircraft_id"],
+            CPCPMonitoring.is_deleted == False,
+        )
+    )
+    payload["display_order"] = int(max_order_result.scalar() or 0) + 1
+
+    obj = CPCPMonitoring(**payload)
     apply_cpcp_next_due_fields(obj)
     session.add(obj)
     if audit_account_id is not None:
@@ -107,6 +119,7 @@ async def list_cpcp_monitorings(
         "id": CPCPMonitoring.id,
         "inspection_operation": CPCPMonitoring.inspection_operation,
         "last_done_date": CPCPMonitoring.last_done_date,
+        "display_order": CPCPMonitoring.display_order,
         "created_at": CPCPMonitoring.created_at,
         "updated_at": CPCPMonitoring.updated_at,
     }
@@ -119,7 +132,10 @@ async def list_cpcp_monitorings(
                 continue
             stmt = stmt.order_by(column.desc() if desc_order else column.asc())
     else:
-        stmt = stmt.order_by(CPCPMonitoring.created_at.desc())
+        stmt = stmt.order_by(
+            CPCPMonitoring.display_order.asc(),
+            CPCPMonitoring.id.asc(),
+        )
 
     count_stmt = (
         select(func.count())
@@ -200,6 +216,23 @@ async def update_cpcp_monitoring(
     return await to_cpcp_monitoring_read(session, obj)
 
 
+async def _normalize_cpcp_display_order_for_aircraft(
+    session: AsyncSession,
+    aircraft_id: int,
+) -> None:
+    """Renumber remaining active CPCP rows for an aircraft to 1..N."""
+    result = await session.execute(
+        select(CPCPMonitoring)
+        .where(CPCPMonitoring.aircraft_id == aircraft_id)
+        .where(CPCPMonitoring.is_deleted == False)
+        .order_by(CPCPMonitoring.display_order.asc(), CPCPMonitoring.id.asc())
+    )
+    for index, row in enumerate(result.scalars().all(), start=1):
+        if row.display_order != index:
+            row.display_order = index
+            session.add(row)
+
+
 async def soft_delete_cpcp_monitoring(
     session: AsyncSession,
     entry_id: int,
@@ -219,8 +252,10 @@ async def soft_delete_cpcp_monitoring(
     if not obj:
         return False
     old_data_snapshot = serialize_audit_data(obj)
+    aircraft_id = obj.aircraft_id
     obj.soft_delete()
     session.add(obj)
+    await _normalize_cpcp_display_order_for_aircraft(session, aircraft_id)
     await session.commit()
 
     if audit_module_name and audit_table_name:
@@ -237,3 +272,109 @@ async def soft_delete_cpcp_monitoring(
         )
 
     return True
+
+
+async def reorder_cpcp_monitorings(
+    session: AsyncSession,
+    items: List[CPCPMonitoringReorderItem],
+    *,
+    audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
+) -> CPCPMonitoringReorderResponse:
+    """
+    Atomically update display_order for CPCP rows belonging to one aircraft.
+
+    Validates IDs exist, share the same aircraft parent, and form the complete
+    active set for that aircraft. Rolls back on any failure.
+    """
+    validated = validate_reorder_items(items)
+    id_to_order = {record_id: order for record_id, order in validated}
+    record_ids = list(id_to_order.keys())
+
+    result = await session.execute(
+        select(CPCPMonitoring)
+        .options(selectinload(CPCPMonitoring.atl))
+        .where(CPCPMonitoring.id.in_(record_ids))
+        .where(CPCPMonitoring.is_deleted == False)
+    )
+    rows = list(result.scalars().all())
+    row_map = {row.id: row for row in rows}
+
+    missing_ids = [rid for rid in record_ids if rid not in row_map]
+    if missing_ids:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"CPCP Monitoring record(s) not found: {missing_ids}",
+        )
+
+    aircraft_ids = {row.aircraft_id for row in rows}
+    if len(aircraft_ids) != 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="All CPCP records in a reorder must belong to the same aircraft",
+        )
+    aircraft_id = next(iter(aircraft_ids))
+
+    active_count_result = await session.execute(
+        select(func.count())
+        .select_from(CPCPMonitoring)
+        .where(CPCPMonitoring.aircraft_id == aircraft_id)
+        .where(CPCPMonitoring.is_deleted == False)
+    )
+    active_count = int(active_count_result.scalar() or 0)
+    if active_count != len(record_ids):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Reorder must include every active CPCP record for the aircraft "
+                f"(expected {active_count} items, got {len(record_ids)})"
+            ),
+        )
+
+    old_data_snapshots = {row.id: serialize_audit_data(row) for row in rows}
+
+    try:
+        for row in rows:
+            row.display_order = -row.id
+            session.add(row)
+            if audit_account_id is not None:
+                await set_audit_fields(row, audit_account_id, is_create=False)
+        await session.flush()
+
+        for row in rows:
+            row.display_order = id_to_order[row.id]
+            session.add(row)
+
+        await session.commit()
+    except HTTPException:
+        await session.rollback()
+        raise
+    except Exception as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+
+    if audit_module_name and audit_table_name:
+        for row in rows:
+            await session.refresh(row)
+            await create_audit_log(
+                db=session,
+                module_name=audit_module_name,
+                table_name=audit_table_name,
+                record_id=row.id,
+                action=AuditAction.UPDATE,
+                old_data=old_data_snapshots.get(row.id),
+                new_data=row,
+                current_user=audit_user,
+                request=audit_request,
+            )
+
+    ordered_rows = sorted(rows, key=lambda r: (r.display_order, r.id))
+    return CPCPMonitoringReorderResponse(
+        items=[CPCPMonitoringRead.from_orm(row) for row in ordered_rows]
+    )

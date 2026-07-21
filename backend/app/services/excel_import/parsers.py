@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 import re
+from decimal import Decimal, InvalidOperation
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional, Tuple
 
@@ -65,21 +66,39 @@ def normalize_import_numeric_string(value: str) -> str:
 
 def coerce_import_float(value: Any) -> Optional[float]:
     """Parse optional numeric spreadsheet cells; NaN/NaT/blank → None."""
+    decimal_value = coerce_import_decimal(value)
+    if decimal_value is None:
+        return None
+    return float(decimal_value)
+
+
+def coerce_import_decimal(value: Any) -> Optional[Decimal]:
+    """
+    Parse spreadsheet numerics without rounding.
+
+    Prefer string/Decimal sources so Excel/CSV decimal digits are preserved.
+    """
     if is_spreadsheet_empty(value):
         return None
+    if isinstance(value, Decimal):
+        return value
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return Decimal(value)
+    if isinstance(value, float):
+        if math.isnan(value) or not math.isfinite(value):
+            return None
+        return Decimal(str(value))
     if isinstance(value, str):
         s = normalize_import_numeric_string(value)
         if not s or s.upper() in ("-", "NA", "N/A"):
             return None
         try:
-            x = float(s)
-        except ValueError:
+            return Decimal(s)
+        except InvalidOperation:
             return None
-    elif isinstance(value, (int, float)) and not isinstance(value, bool):
-        x = float(value)
-    else:
-        return None
-    return x if math.isfinite(x) else None
+    return None
 
 
 def make_hashable(obj: Any) -> Any:
@@ -157,8 +176,264 @@ def parse_import_date(v: Any) -> Any:
     return v
 
 
+INVALID_ORIGIN_DATE_MESSAGE = (
+    "Invalid date. Accepted formats include DD/MM/YYYY, MM/DD/YYYY, DD-Mon-YY, "
+    "YYYY-MM-DD, YYYY-MM-DD HH:MM:SS, or ISO date/datetime values."
+)
+
+INVALID_ORIGIN_TIME_MESSAGE = (
+    "Invalid time. Use HH:MM, HH:MM:SS, HHMM (e.g. 0830), or Zulu time (e.g. 0440 Zulu)."
+)
+
+
+class SpreadsheetParseError(ValueError):
+    """Row-level parse failure tied to a schema field name."""
+
+    def __init__(self, *, field: str, message: str) -> None:
+        self.field = field
+        super().__init__(message)
+
+
+_ORIGIN_DATETIME_STRING_FORMATS: Tuple[str, ...] = (
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%d %H:%M",
+    "%d/%m/%Y %H:%M:%S",
+    "%d/%m/%Y %H:%M",
+    "%m/%d/%Y %H:%M:%S",
+    "%m/%d/%Y %H:%M",
+    "%d-%b-%y %H%M",
+    "%d-%b-%Y %H%M",
+    "%d-%b-%y %H:%MZ",
+    "%d-%b-%Y %H:%MZ",
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%dT%H:%M",
+)
+
+_ORIGIN_DATE_ONLY_STRING_FORMATS: Tuple[str, ...] = (
+    "%d/%m/%Y",
+    "%d/%m/%y",
+    "%d-%b-%y",
+    "%d-%b-%Y",
+    "%m/%d/%Y",
+    "%m/%d/%y",
+    "%Y-%m-%d",
+    "%B %d, %Y",
+    "%b %d, %Y",
+)
+
+
+def _datetime_wall_components(dt: datetime) -> Tuple[date, time]:
+    """Extract date/time without timezone conversion."""
+    return (
+        date(dt.year, dt.month, dt.day),
+        time(dt.hour, dt.minute, dt.second, dt.microsecond),
+    )
+
+
+def _excel_serial_to_datetime(value: float | int) -> datetime | None:
+    if isinstance(value, float) and (math.isnan(value) or not math.isfinite(value)):
+        return None
+    serial = float(value)
+    if 1 <= serial < 100000:
+        return datetime(1899, 12, 30) + timedelta(days=serial)
+    return None
+
+
+def _parse_origin_date_string(s: str) -> Tuple[date, Optional[time]]:
+    normalized = _normalize_flexible_datetime_string(s)
+
+    if re.fullmatch(r"\d+(?:\.0+)?", normalized):
+        try:
+            serial_dt = _excel_serial_to_datetime(float(normalized))
+            if serial_dt is not None:
+                if float(normalized) == int(float(normalized)):
+                    return serial_dt.date(), None
+                return _datetime_wall_components(serial_dt)
+        except ValueError:
+            pass
+
+    for fmt in _ORIGIN_DATETIME_STRING_FORMATS:
+        try:
+            parsed = datetime.strptime(normalized, fmt)
+            return _datetime_wall_components(parsed)
+        except ValueError:
+            continue
+
+    for fmt in _ORIGIN_DATE_ONLY_STRING_FORMATS:
+        try:
+            parsed = datetime.strptime(normalized, fmt)
+            return parsed.date(), None
+        except ValueError:
+            continue
+
+    iso_candidate = normalized
+    if iso_candidate.upper().endswith("Z") and "T" in iso_candidate:
+        iso_candidate = iso_candidate[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(iso_candidate)
+        return _datetime_wall_components(parsed)
+    except ValueError:
+        pass
+
+    raise SpreadsheetParseError(field="origin_date", message=INVALID_ORIGIN_DATE_MESSAGE)
+
+
+def parse_excel_datetime(value: Any) -> Tuple[Optional[date], Optional[time]]:
+    """Parse Origin Date values; split combined datetimes into date and time parts."""
+    if is_spreadsheet_empty(value):
+        return None, None
+
+    if isinstance(value, datetime):
+        return _datetime_wall_components(value)
+
+    if isinstance(value, date):
+        return value, None
+
+    if isinstance(value, time):
+        return None, value
+
+    if hasattr(value, "to_pydatetime"):
+        try:
+            converted = value.to_pydatetime()
+            if isinstance(converted, datetime):
+                return _datetime_wall_components(converted)
+        except (ValueError, AttributeError, OSError, TypeError):
+            pass
+
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        serial_dt = _excel_serial_to_datetime(value)
+        if serial_dt is not None:
+            if float(value) == int(float(value)):
+                return serial_dt.date(), None
+            return _datetime_wall_components(serial_dt)
+        if isinstance(value, float) and (math.isnan(value) or not math.isfinite(value)):
+            return None, None
+
+    if isinstance(value, str):
+        return _parse_origin_date_string(value.strip())
+
+    raise SpreadsheetParseError(field="origin_date", message=INVALID_ORIGIN_DATE_MESSAGE)
+
+
+def parse_excel_time(value: Any) -> Optional[time]:
+    """Parse Origin Time spreadsheet values into a ``time`` (blank → ``None``)."""
+    if is_spreadsheet_empty(value):
+        return None
+
+    if isinstance(value, time):
+        return value
+
+    if isinstance(value, datetime):
+        return time(value.hour, value.minute, value.second, value.microsecond)
+
+    if hasattr(value, "to_pydatetime"):
+        try:
+            converted = value.to_pydatetime()
+            if isinstance(converted, datetime):
+                return time(
+                    converted.hour,
+                    converted.minute,
+                    converted.second,
+                    converted.microsecond,
+                )
+        except (ValueError, AttributeError, OSError, TypeError):
+            pass
+
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if isinstance(value, float):
+            if math.isnan(value) or not math.isfinite(value):
+                return None
+            if 0 <= value < 1:
+                total_seconds = int(round(value * 86400))
+                hours, remainder = divmod(total_seconds, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                return time(hours, minutes, seconds)
+            value = int(value)
+        if not (0 <= value <= 235959):
+            raise SpreadsheetParseError(
+                field="origin_time",
+                message=INVALID_ORIGIN_TIME_MESSAGE,
+            )
+        s = str(value).zfill(4)
+        if len(s) == 4:
+            try:
+                return datetime.strptime(s, "%H%M").time()
+            except ValueError as exc:
+                raise SpreadsheetParseError(
+                    field="origin_time",
+                    message=INVALID_ORIGIN_TIME_MESSAGE,
+                ) from exc
+        if len(s) == 6:
+            try:
+                return datetime.strptime(s, "%H%M%S").time()
+            except ValueError as exc:
+                raise SpreadsheetParseError(
+                    field="origin_time",
+                    message=INVALID_ORIGIN_TIME_MESSAGE,
+                ) from exc
+        raise SpreadsheetParseError(
+            field="origin_time",
+            message=INVALID_ORIGIN_TIME_MESSAGE,
+        )
+
+    if isinstance(value, str):
+        s = value.strip().upper()
+        if not s or s in _EMPTY_DATETIME_TOKENS:
+            return None
+        if s.endswith((" ZULU", " Z", " UTC")):
+            s = s.rsplit(" ", 1)[0]
+        elif s.endswith("Z"):
+            s = s[:-1]
+        s = s.strip()
+        s_clean = s.replace(":", "")
+        if "." in s_clean:
+            s_clean = s_clean.split(".")[0]
+        if not s_clean.isdigit():
+            raise SpreadsheetParseError(
+                field="origin_time",
+                message=INVALID_ORIGIN_TIME_MESSAGE,
+            )
+        if len(s_clean) == 3:
+            s_clean = "0" + s_clean
+        elif len(s_clean) not in (4, 6):
+            raise SpreadsheetParseError(
+                field="origin_time",
+                message=INVALID_ORIGIN_TIME_MESSAGE,
+            )
+        try:
+            if len(s_clean) == 4:
+                return datetime.strptime(s_clean, "%H%M").time()
+            return datetime.strptime(s_clean, "%H%M%S").time()
+        except ValueError as exc:
+            raise SpreadsheetParseError(
+                field="origin_time",
+                message=INVALID_ORIGIN_TIME_MESSAGE,
+            ) from exc
+
+    raise SpreadsheetParseError(
+        field="origin_time",
+        message=INVALID_ORIGIN_TIME_MESSAGE,
+    )
+
+
+def resolve_origin_date_time(
+    origin_date_raw: Any,
+    origin_time_raw: Any,
+) -> Tuple[Optional[date], Optional[time]]:
+    """Map Origin Date / Origin Time spreadsheet columns to DB date and time values."""
+    parsed_date, extracted_time = parse_excel_datetime(origin_date_raw)
+    explicit_origin_time = parse_excel_time(origin_time_raw)
+    origin_time = (
+        explicit_origin_time
+        if explicit_origin_time is not None
+        else extracted_time
+    )
+    return parsed_date, origin_time
+
+
 def parse_import_origin_date(v: Any) -> Any:
-    return parse_import_date(v)
+    parsed_date, _ = parse_excel_datetime(v)
+    return parsed_date
 
 
 def _normalize_flexible_datetime_string(value: str) -> str:

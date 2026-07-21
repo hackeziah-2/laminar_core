@@ -184,7 +184,57 @@ def test_coerce_import_float_strips_internal_spaces():
     assert coerce_import_float("not-a-number") is None
 
 
+def test_coerce_import_decimal_preserves_fractional_digits():
+    from decimal import Decimal
+
+    from app.services.excel_import.parsers import coerce_import_decimal
+
+    assert coerce_import_decimal("123.4567") == Decimal("123.4567")
+    assert coerce_import_decimal("45.10") == Decimal("45.10")
+    assert coerce_import_decimal("80.5") == Decimal("80.5")
+    assert coerce_import_decimal("17588. 11") == Decimal("17588.11")
+
+
+def test_import_schema_preserves_exact_decimal_strings():
+    from decimal import Decimal
+
+    from app.schemas.aircraft_technical_log_schema import AircraftTechnicalLogImportSchema
+
+    row = AircraftTechnicalLogImportSchema(
+        aircraft_fk=1,
+        sequence_no="001",
+        tachometer_end="123.4567",
+        engine_tso="45.10",
+        propeller_tsn="80.5",
+        airframe_aftt="502.5000",
+    )
+    assert row.tachometer_end == Decimal("123.4567")
+    assert row.engine_tso == Decimal("45.10")
+    assert row.propeller_tsn == Decimal("80.5")
+    assert row.airframe_aftt == Decimal("502.5000")
+
+
+def test_api_read_schema_does_not_round_imported_values():
+    from app.schemas.aircraft_technical_log_schema import AircraftTechnicalLogApiRead
+
+    read = AircraftTechnicalLogApiRead(
+        id=1,
+        aircraft_fk=1,
+        sequence_no="001",
+        airframe_aftt=502.567,
+        engine_tso=300.256,
+        propeller_tsn=150.5123,
+        engine_tsn="1200.50",
+    )
+    assert read.airframe_aftt == 502.567
+    assert read.engine_tso == 300.256
+    assert read.propeller_tsn == 150.5123
+    assert read.engine_tsn == "1200.50"
+
+
 def test_import_schema_accepts_spaced_numeric_strings():
+    from decimal import Decimal
+
     from app.schemas.aircraft_technical_log_schema import AircraftTechnicalLogImportSchema
 
     row = AircraftTechnicalLogImportSchema(
@@ -194,9 +244,9 @@ def test_import_schema_accepts_spaced_numeric_strings():
         engine_tsn="17588. 11",
         airframe_aftt="100. 5",
     )
-    assert row.propeller_tsn == 17588.11
+    assert row.propeller_tsn == Decimal("17588.11")
     assert row.engine_tsn == "17588.11"
-    assert row.airframe_aftt == 100.5
+    assert row.airframe_aftt == Decimal("100.5")
 
 
 @pytest.mark.parametrize(

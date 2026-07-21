@@ -70,6 +70,7 @@ class ExcelImportService:
         records = await read_upload_records(
             file,
             column_mapping=config.column_mapping,
+            preserve_numeric_text=config.hook_key == "aircraft_technical_log",
         )
         source_row_count = len(records)
         if config.hook_key != "aircraft_technical_log":
@@ -146,8 +147,10 @@ class ExcelImportService:
 
         try:
             with session.no_autoflush:
-                for _excel_row, validated in validated_rows:
-                    await upsert_validated_row(
+                for row_order, (_excel_row, validated) in enumerate(
+                    validated_rows, start=1
+                ):
+                    obj, _created = await upsert_validated_row(
                         session,
                         config.model,
                         validated,
@@ -155,6 +158,10 @@ class ExcelImportService:
                         hook,
                         audit_account_id=config.audit_account_id,
                     )
+                    # Preserve Excel data-row order for targets that support it
+                    # (Maintenance TCC / CPCP).
+                    if hasattr(obj, "display_order"):
+                        obj.display_order = row_order
 
             await session.commit()
             await hook.after_commit(
