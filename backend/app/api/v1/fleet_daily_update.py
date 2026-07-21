@@ -67,7 +67,8 @@ def _round1(value: Optional[float]) -> Optional[float]:
 
 async def _enrich_item_with_ldnd(session, orm_item):
     """Build list item with next_insp_due / next_insp_due_unit from latest unfilled LDND row,
-    tach_time_due from LDND latest, tach_time_eod from latest ATL,
+    tach_time_due from LDND latest, tach_time_eod from the stored daily-update value
+    (bulk/single update) with ATL tachometer_end as fallback when unset,
     and remaining_time_before_next_isp / remaining_time_before_engine / remaining_time_before_propeller."""
     base = _fleet_daily_update_item_with_aircraft(orm_item)
     aircraft_id = orm_item.aircraft_fk
@@ -82,18 +83,26 @@ async def _enrich_item_with_ldnd(session, orm_item):
     # tach_time_due: from next_due_tach_hours (latest record), rounded to one decimal
     raw_tach_due = ldnd.next_due_tach_hours if ldnd else None
     base["tach_time_due"] = _round1(raw_tach_due)
-    # tach_time_eod: from latest ATL by sequence_no → tachometer_end, rounded to one decimal
-    latest_atl = await get_latest_aircraft_technical_log(session, aircraft_fk=aircraft_id)
-    tach_time_eod = latest_atl.tachometer_end if latest_atl else None
 
-    base["tach_time_eod"] =  base["tach_time_eod"]
-    # _round1(tach_time_eod)
+    # Prefer persisted tach_time_eod (set via bulk/PUT); fall back to latest ATL tachometer_end.
+    stored_eod = base.get("tach_time_eod")
+    if stored_eod is not None:
+        tach_time_eod = float(stored_eod)
+    else:
+        latest_atl = await get_latest_aircraft_technical_log(session, aircraft_fk=aircraft_id)
+        raw_tach_eod = latest_atl.tachometer_end if latest_atl else None
+        tach_time_eod = float(raw_tach_eod) if raw_tach_eod is not None else None
+    base["tach_time_eod"] = _round1(tach_time_eod)
 
     # remaining_time_before_next_isp: tach_time_due - tach_time_eod (from raw values), rounded to one decimal
-    remaining_isp = (raw_tach_due - tach_time_eod) if (raw_tach_due is not None and tach_time_eod is not None) else None
+    remaining_isp = (
+        (float(raw_tach_due) - tach_time_eod)
+        if (raw_tach_due is not None and tach_time_eod is not None)
+        else None
+    )
     base["remaining_time_before_next_isp"] = round(_remaining_or_zero(remaining_isp), 1)
 
-    # remaining_time_before_engine: (TCC Engine last_done_tach + component_limit_hours) - latest ATL tachometer_end, rounded to one decimal
+    # remaining_time_before_engine: (TCC Engine last_done_tach + component_limit_hours) - tach_time_eod
     tcc_engine = await get_latest_tcc_by_aircraft_and_description(session, aircraft_id, "Engine")
     if (
         tcc_engine is not None
@@ -101,12 +110,14 @@ async def _enrich_item_with_ldnd(session, orm_item):
         and tcc_engine.component_limit_hours is not None
         and tach_time_eod is not None
     ):
-        remaining_engine = (tcc_engine.last_done_tach + tcc_engine.component_limit_hours) - tach_time_eod
+        remaining_engine = (
+            float(tcc_engine.last_done_tach) + float(tcc_engine.component_limit_hours)
+        ) - tach_time_eod
         base["remaining_time_before_engine"] = round(_remaining_or_zero(remaining_engine), 1)
     else:
         base["remaining_time_before_engine"] = 0.0
 
-    # remaining_time_before_propeller: (TCC Propeller last_done_tach + component_limit_hours) - latest ATL tachometer_end, rounded to one decimal
+    # remaining_time_before_propeller: (TCC Propeller last_done_tach + component_limit_hours) - tach_time_eod
     tcc_propeller = await get_latest_tcc_by_aircraft_and_description(session, aircraft_id, "Propeller")
     if (
         tcc_propeller is not None
@@ -114,12 +125,78 @@ async def _enrich_item_with_ldnd(session, orm_item):
         and tcc_propeller.component_limit_hours is not None
         and tach_time_eod is not None
     ):
-        remaining_propeller = (tcc_propeller.last_done_tach + tcc_propeller.component_limit_hours) - tach_time_eod
+        remaining_propeller = (
+            float(tcc_propeller.last_done_tach) + float(tcc_propeller.component_limit_hours)
+        ) - tach_time_eod
         base["remaining_time_before_propeller"] = round(_remaining_or_zero(remaining_propeller), 1)
     else:
         base["remaining_time_before_propeller"] = 0.0
 
     return base
+
+
+async def _list_fleet_daily_updates_paged_impl(
+    *,
+    limit: int,
+    page: int,
+    search: Optional[str],
+    status: Optional[str],
+    aircraft_fk: Optional[int],
+    sort: Optional[str],
+    session: AsyncSession,
+):
+    offset = (page - 1) * limit
+    sort_param = (sort.strip() if (sort and isinstance(sort, str)) else None) or ""
+    items, total = await list_fleet_daily_updates(
+        session=session,
+        limit=limit,
+        offset=offset,
+        search=search.strip() if search and search.strip() else None,
+        aircraft_fk=aircraft_fk,
+        status=status,
+        sort=sort_param,
+    )
+    pages = ceil(total / limit) if total else 0
+    enriched = []
+    for i in items:
+        enriched.append(await _enrich_item_with_ldnd(session, i))
+    return {
+        "items": enriched,
+        "total": total,
+        "page": page,
+        "pages": pages,
+    }
+
+
+@router.get("/")
+async def api_list_fleet_daily_updates_root(
+    limit: int = Query(10, ge=1, le=100, description="Page size"),
+    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    search: Optional[str] = Query(
+        None,
+        description="Search by aircraft registration (partial match)",
+    ),
+    status: Optional[str] = Query(
+        None,
+        description="Filter by status: Operational, Ongoing Maintenance, AOG",
+    ),
+    aircraft_fk: Optional[int] = Query(None, description="Filter by aircraft ID"),
+    sort: Optional[str] = Query(
+        "",
+        description="Sort fields (comma-separated). Prefix '-' for descending. E.g. registration, -created_at, status",
+    ),
+    session: AsyncSession = Depends(get_session),
+):
+    """Paginated list (alias of /paged). Frontend historically called GET / with page/limit/sort."""
+    return await _list_fleet_daily_updates_paged_impl(
+        limit=limit,
+        page=page,
+        search=search,
+        status=status,
+        aircraft_fk=aircraft_fk,
+        sort=sort,
+        session=session,
+    )
 
 
 @router.get("/paged")
@@ -144,29 +221,17 @@ async def api_list_fleet_daily_updates_paged(
     """Get paginated list of Fleet Daily Update entries. Search by aircraft registration; filter by status.
     Each item includes next_insp_due and next_insp_due_unit from the latest unfilled LDND row
     (api/v1/aircraft/{id}/ldnd-monitoring/inspection_type/latest semantics), tach_time_due from
-    api/v1/aircraft/{id}/ldnd-monitoring/latest, and tach_time_eod from api/v1/aircraft-technical-log/latest
-    (tachometer_end)."""
-    offset = (page - 1) * limit
-    sort_param = (sort.strip() if (sort and isinstance(sort, str)) else None) or ""
-    items, total = await list_fleet_daily_updates(
-        session=session,
+    api/v1/aircraft/{id}/ldnd-monitoring/latest, and tach_time_eod from the stored daily-update
+    value (bulk/PUT), falling back to latest ATL tachometer_end when unset."""
+    return await _list_fleet_daily_updates_paged_impl(
         limit=limit,
-        offset=offset,
-        search=search.strip() if search and search.strip() else None,
-        aircraft_fk=aircraft_fk,
+        page=page,
+        search=search,
         status=status,
-        sort=sort_param,
+        aircraft_fk=aircraft_fk,
+        sort=sort,
+        session=session,
     )
-    pages = ceil(total / limit) if total else 0
-    enriched = []
-    for i in items:
-        enriched.append(await _enrich_item_with_ldnd(session, i))
-    return {
-        "items": enriched,
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
 
 
 @router.put(
@@ -190,6 +255,16 @@ async def api_list_fleet_daily_updates_paged(
         "Each item in `updates` must include `id`; optional fields are `aircraft_id`, `status`, "
         "`tach_time_eod`, and `remarks`. Only provided fields are updated. "
         "All record IDs are validated before any write; the entire batch rolls back if any update fails. "
+        "Requires `can_update` permission on the Daily Update module."
+    ),
+)
+@router.post(
+    "/bulk/",
+    response_model=fleet_daily_update_schema.FleetDailyUpdateBulkUpdateResponse,
+    summary="Bulk partial update Fleet Daily Update records",
+    description=(
+        "Apply partial updates to multiple Fleet Daily Update records in one atomic request. "
+        "Accepts POST as well as PUT/PATCH for clients that send POST. "
         "Requires `can_update` permission on the Daily Update module."
     ),
 )
