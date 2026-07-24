@@ -3,7 +3,7 @@ from typing import List, Optional, Tuple, Union
 
 from sqlalchemy import select, or_, cast, String
 from sqlalchemy.sql import func
-from fastapi import Query, Depends, UploadFile, File, Form, HTTPException, Request
+from fastapi import Query, Depends, UploadFile, File, Form, HTTPException, Request, status as http_status
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,11 +26,60 @@ from app.models.logbooks import (
 from app.models.tcc_maintenance import TCCMaintenance
 from app.models.document_on_board import DocumentOnBoard
 from app.models.cpcp_monitoring import CPCPMonitoring
-from app.schemas.aircraft_schema import AircraftCreate, AircraftOut, AircraftUpdate
+from app.schemas.aircraft_schema import (
+    AircraftCreate,
+    AircraftOut,
+    AircraftReorderItem,
+    AircraftReorderResponse,
+    AircraftUpdate,
+)
 from app.database import active_query, set_audit_fields
 from app.models.account import AccountInformation
 from app.models.audit_log import AuditAction
 from app.services.audit_trail_service import create_audit_log, serialize_audit_data
+from app.services.display_order_reorder import validate_reorder_items
+
+
+async def _next_aircraft_display_order(session: AsyncSession) -> int:
+    """
+    Return MAX(active display_order) + 1, concurrency-safe via row lock on the
+    current last active aircraft (when any exist).
+    """
+    lock_result = await session.execute(
+        select(Aircraft)
+        .where(Aircraft.is_deleted == False)
+        .order_by(Aircraft.display_order.desc(), Aircraft.id.desc())
+        .limit(1)
+        .with_for_update()
+    )
+    top = lock_result.scalar_one_or_none()
+    if top is None:
+        return 1
+    return int(top.display_order or 0) + 1
+
+
+async def _normalize_aircraft_display_order(session: AsyncSession) -> None:
+    """Renumber remaining active aircraft to contiguous 1..N."""
+    result = await session.execute(
+        select(Aircraft)
+        .where(Aircraft.is_deleted == False)
+        .order_by(Aircraft.display_order.asc(), Aircraft.id.asc())
+    )
+    for index, row in enumerate(result.scalars().all(), start=1):
+        if row.display_order != index:
+            row.display_order = index
+            session.add(row)
+
+
+async def place_restored_aircraft_at_end(
+    session: AsyncSession,
+    aircraft: Aircraft,
+) -> None:
+    """After undeleting an aircraft, append it to the end of the active fleet order."""
+    next_order = await _next_aircraft_display_order(session)
+    aircraft.is_deleted = False
+    aircraft.display_order = next_order
+    session.add(aircraft)
 
 
 async def _sync_fleet_daily_update_when_aircraft_maintenance(
@@ -153,6 +202,7 @@ async def list_aircraft(
         "base": Aircraft.base,
         "model": Aircraft.model,
         "status": Aircraft.status,
+        "display_order": Aircraft.display_order,
         "created_at": Aircraft.created_at,
         "updated_at": Aircraft.updated_at,
     }
@@ -171,11 +221,11 @@ async def list_aircraft(
                 continue
             order_clauses.append(column.desc() if desc_order else column.asc())
         if order_clauses:
-            stmt = stmt.order_by(*order_clauses)
+            stmt = stmt.order_by(*order_clauses, Aircraft.id.asc())
         else:
-            stmt = stmt.order_by(Aircraft.created_at.desc())
+            stmt = stmt.order_by(Aircraft.display_order.asc(), Aircraft.id.asc())
     else:
-        stmt = stmt.order_by(Aircraft.created_at.desc())
+        stmt = stmt.order_by(Aircraft.display_order.asc(), Aircraft.id.asc())
 
     # Total count (same filters, no ORDER BY)
     count_stmt = (
@@ -218,7 +268,7 @@ async def list_aircraft_minimal(session: AsyncSession) -> List[Aircraft]:
     result = await session.execute(
         select(Aircraft)
         .where(Aircraft.is_deleted == False)
-        .order_by(Aircraft.registration.asc())
+        .order_by(Aircraft.display_order.asc(), Aircraft.id.asc())
     )
     return result.scalars().all()
 
@@ -281,7 +331,8 @@ async def create_aircraft_with_file(
     if await _find_active_aircraft_by_field(session, "msn", aircraft_data["msn"]):
         raise HTTPException(status_code=400, detail="Aircraft with this msn already exists")
 
-    
+    aircraft_data["display_order"] = await _next_aircraft_display_order(session)
+
     aircraft = Aircraft(
         **aircraft_data
     )
@@ -446,6 +497,7 @@ async def soft_delete_aircraft(
     # Aircraft
     aircraft.soft_delete()
     session.add(aircraft)
+    await _normalize_aircraft_display_order(session)
     await session.commit()
 
     if audit_module_name and audit_table_name:
@@ -462,3 +514,110 @@ async def soft_delete_aircraft(
         )
 
     return True
+
+
+async def reorder_aircraft(
+    session: AsyncSession,
+    items: List[AircraftReorderItem],
+    *,
+    audit_account_id: Optional[int] = None,
+    audit_module_name: Optional[str] = None,
+    audit_table_name: Optional[str] = None,
+    audit_user: Optional[AccountInformation] = None,
+    audit_request: Optional[Request] = None,
+) -> AircraftReorderResponse:
+    """
+    Atomically update Aircraft.display_order for the full active fleet.
+
+    Validates IDs exist and are active, and that the payload is the complete
+    active set. Rolls back on any failure. Does not mutate Fleet Daily Update
+    business fields.
+    """
+    validated = validate_reorder_items(items, id_attr="aircraft_id")
+    id_to_order = {record_id: order for record_id, order in validated}
+    record_ids = list(id_to_order.keys())
+
+    result = await session.execute(
+        select(Aircraft)
+        .where(Aircraft.id.in_(record_ids))
+        .where(Aircraft.is_deleted == False)
+    )
+    rows = list(result.scalars().all())
+    row_map = {row.id: row for row in rows}
+
+    missing_ids = [rid for rid in record_ids if rid not in row_map]
+    if missing_ids:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail=f"Aircraft record(s) not found: {missing_ids}",
+        )
+
+    active_count_result = await session.execute(
+        select(func.count())
+        .select_from(Aircraft)
+        .where(Aircraft.is_deleted == False)
+    )
+    active_count = int(active_count_result.scalar() or 0)
+    if active_count != len(record_ids):
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Reorder must include every active aircraft "
+                f"(expected {active_count} items, got {len(record_ids)})"
+            ),
+        )
+
+    previous_orders = {row.id: row.display_order for row in rows}
+
+    try:
+        # Two-phase update avoids transient unique collisions if a DB constraint is added later.
+        for row in rows:
+            row.display_order = -row.id
+            session.add(row)
+            if audit_account_id is not None:
+                await set_audit_fields(row, audit_account_id, is_create=False)
+        await session.flush()
+
+        for row in rows:
+            row.display_order = id_to_order[row.id]
+            session.add(row)
+
+        await session.commit()
+    except HTTPException:
+        await session.rollback()
+        raise
+    except Exception as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+
+    if audit_module_name and audit_table_name:
+        new_orders = {row.id: id_to_order[row.id] for row in rows}
+        await create_audit_log(
+            db=session,
+            module_name=audit_module_name,
+            table_name=audit_table_name,
+            record_id=record_ids[0],
+            action=AuditAction.BULK_UPDATE,
+            old_data={
+                "action": "REORDER",
+                "aircraft_ids": record_ids,
+                "display_orders": previous_orders,
+            },
+            new_data={
+                "action": "REORDER",
+                "aircraft_ids": record_ids,
+                "display_orders": new_orders,
+            },
+            current_user=audit_user,
+            request=audit_request,
+        )
+
+    ordered_rows = sorted(rows, key=lambda r: (r.display_order, r.id))
+    for row in ordered_rows:
+        await session.refresh(row)
+    return AircraftReorderResponse(
+        items=[AircraftOut.from_orm(row) for row in ordered_rows]
+    )
