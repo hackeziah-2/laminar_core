@@ -60,8 +60,8 @@ def test_list_aircraft_minimal(client: TestClient):
     data = response.json()
 
     assert data == [
-        {"id": 2, "registration": "TEST-001"},
-        {"id": 1, "registration": "TEST-002"},
+        {"id": 1, "registration": "TEST-002", "display_order": 1},
+        {"id": 2, "registration": "TEST-001", "display_order": 2},
     ]
 
 

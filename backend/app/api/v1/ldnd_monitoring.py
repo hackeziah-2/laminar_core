@@ -17,6 +17,7 @@ from app.repository.ldnd_monitoring import (
     get_ldnd_monitoring_by_aircraft,
     get_ldnd_latest_by_aircraft,
     get_ldnd_latest_unfilled_by_aircraft,
+    get_ldnd_detail_by_aircraft,
     list_ldnd_monitoring,
     create_ldnd_monitoring,
     update_ldnd_monitoring,
@@ -173,6 +174,22 @@ async def api_delete_ldnd_monitoring(
 
 
 # ========== Aircraft-scoped endpoints ==========
+
+@router_aircraft_scoped.get(
+    "/{aircraft_id}/ldnd-detail",
+    response_model=ldnd_monitoring_schema.LDNDDetailResponse,
+    summary="Get LDND aircraft detail (next inspection, last updated, current tach)",
+)
+async def api_get_ldnd_detail_by_aircraft(
+    aircraft_id: int,
+    session: AsyncSession = Depends(get_session),
+):
+    """Return latest LDND inspection info and current tachometer time for an aircraft."""
+    aircraft = await get_aircraft(session, aircraft_id)
+    if not aircraft:
+        raise HTTPException(status_code=404, detail="Aircraft not found")
+    return await get_ldnd_detail_by_aircraft(session, aircraft_id)
+
 
 @router_aircraft_scoped.get(
     "/{aircraft_id}/ldnd-monitoring/latest",

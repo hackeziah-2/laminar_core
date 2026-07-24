@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, validator, root_validator, Field
 
@@ -79,6 +79,10 @@ class AircraftUpdate(AircraftBase):
 
 class AircraftOut(AircraftBase):
     id: int
+    display_order: int = Field(
+        ...,
+        description="1-based persistent fleet row order shared with Fleet Daily Update.",
+    )
     created_at: Optional[datetime] = None
     atl_count: Optional[int] = 0
     # For Aircraft Details: download button and modal view when image
@@ -93,7 +97,8 @@ class AircraftOut(AircraftBase):
             return v
         # Build dict from ORM for Pydantic; add download URLs and is_image hints
         base_keys = [
-            "id", "created_at", "registration", "report_description", "model", "model_year", "msn",
+            "id", "display_order", "created_at", "registration", "report_description",
+            "model", "model_year", "msn",
             "base", "ownership", "status", "airframe_aftt", "airframe_service_manual", "airframe_ipc",
             "engine_model", "engine_serial_number", "engine_life_time_limit",
             "engine_tsn", "engine_tso",
@@ -119,9 +124,36 @@ class AircraftOut(AircraftBase):
 class AircraftListItem(BaseModel):
     id: int
     registration: str
+    display_order: int
 
     class Config:
         orm_mode = True
+
+
+class AircraftReorderItem(BaseModel):
+    """One aircraft in a shared fleet reorder request."""
+
+    aircraft_id: int = Field(..., description="Aircraft ID")
+    display_order: int = Field(..., ge=1, description="1-based display order")
+
+
+class AircraftReorderRequest(BaseModel):
+    """Request body for PUT /api/v1/aircraft/reorder."""
+
+    items: List[AircraftReorderItem] = Field(
+        ...,
+        min_items=1,
+        description="Complete ordered set of every active aircraft",
+    )
+
+
+class AircraftReorderResponse(BaseModel):
+    """Saved fleet arrangement after a successful reorder."""
+
+    items: List[AircraftOut] = Field(default_factory=list)
+
+    class Config:
+        orm_mode = False
 
 
 

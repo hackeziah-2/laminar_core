@@ -7,13 +7,19 @@ from typing import List, Sequence, Tuple
 from fastapi import HTTPException, status
 
 
-def validate_reorder_items(items: Sequence) -> List[Tuple[int, int]]:
+def validate_reorder_items(
+    items: Sequence,
+    *,
+    id_attr: str = "id",
+) -> List[Tuple[int, int]]:
     """
     Validate reorder payload items.
 
     Returns list of (id, display_order) preserving request order.
     Raises HTTPException on duplicate IDs, invalid/duplicate orders, or
     non-sequential display_order values (must be 1..N).
+
+    ``id_attr`` selects the identifier field (e.g. ``"id"`` or ``"aircraft_id"``).
     """
     if not items:
         raise HTTPException(
@@ -21,7 +27,7 @@ def validate_reorder_items(items: Sequence) -> List[Tuple[int, int]]:
             detail="items must not be empty",
         )
 
-    ids = [item.id for item in items]
+    ids = [getattr(item, id_attr) for item in items]
     if len(ids) != len(set(ids)):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -50,4 +56,4 @@ def validate_reorder_items(items: Sequence) -> List[Tuple[int, int]]:
             ),
         )
 
-    return [(item.id, item.display_order) for item in items]
+    return [(getattr(item, id_attr), item.display_order) for item in items]

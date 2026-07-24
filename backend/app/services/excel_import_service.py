@@ -147,6 +147,7 @@ class ExcelImportService:
 
         try:
             with session.no_autoflush:
+                imported_ids: List[int] = []
                 for row_order, (_excel_row, validated) in enumerate(
                     validated_rows, start=1
                 ):
@@ -159,9 +160,29 @@ class ExcelImportService:
                         audit_account_id=config.audit_account_id,
                     )
                     # Preserve Excel data-row order for targets that support it
-                    # (Maintenance TCC / CPCP).
+                    # (Maintenance TCC / CPCP / Aircraft Fleet Profile).
                     if hasattr(obj, "display_order"):
                         obj.display_order = row_order
+                        if getattr(obj, "id", None) is not None:
+                            imported_ids.append(obj.id)
+
+                # Partial aircraft fleet import: keep Excel order for imported rows,
+                # then append active aircraft not in the file without duplicate positions.
+                if config.model.__name__ == "Aircraft" and imported_ids:
+                    from app.models.aircraft import Aircraft
+                    from sqlalchemy import select
+
+                    remainder = await session.execute(
+                        select(Aircraft)
+                        .where(Aircraft.is_deleted == False)
+                        .where(Aircraft.id.notin_(imported_ids))
+                        .order_by(Aircraft.display_order.asc(), Aircraft.id.asc())
+                    )
+                    next_order = len(imported_ids) + 1
+                    for row in remainder.scalars().all():
+                        row.display_order = next_order
+                        next_order += 1
+                        session.add(row)
 
             await session.commit()
             await hook.after_commit(

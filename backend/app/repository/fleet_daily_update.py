@@ -176,6 +176,7 @@ async def list_fleet_daily_updates(
         "aircraft_fk": FleetDailyUpdate.aircraft_fk,
         "registration": Aircraft.registration,
         "status": FleetDailyUpdate.status,
+        "display_order": Aircraft.display_order,
         "created_at": FleetDailyUpdate.created_at,
         "updated_at": FleetDailyUpdate.updated_at,
     }
@@ -192,11 +193,11 @@ async def list_fleet_daily_updates(
                 continue
             order_clauses.append(column.desc() if desc_order else column.asc())
         if order_clauses:
-            stmt = stmt.order_by(*order_clauses)
+            stmt = stmt.order_by(*order_clauses, Aircraft.id.asc())
         else:
-            stmt = stmt.order_by(FleetDailyUpdate.created_at.desc())
+            stmt = stmt.order_by(Aircraft.display_order.asc(), Aircraft.id.asc())
     else:
-        stmt = stmt.order_by(FleetDailyUpdate.created_at.desc())
+        stmt = stmt.order_by(Aircraft.display_order.asc(), Aircraft.id.asc())
 
     total_count = (await session.execute(count_stmt)).scalar()
     if limit > 0:
