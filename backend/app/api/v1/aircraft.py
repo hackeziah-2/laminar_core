@@ -28,6 +28,7 @@ from app.repository.aircraft import (
     get_aircraft_raw,
     create_aircraft_with_file,
     soft_delete_aircraft,
+    reorder_aircraft,
 )
 from app.services.aircraft_history_service import (
     list_aircraft_history_paged,
@@ -66,7 +67,7 @@ async def api_list_paged(
     ),
     sort: Optional[str] = Query(
         "",
-        description="Sort: field name or -field for desc, comma-separated (e.g. registration,-created_at)",
+        description="Sort: field name or -field for desc, comma-separated (e.g. registration,-created_at). Default: display_order ascending.",
     ),
     session: AsyncSession = Depends(get_session),
 ):
@@ -80,6 +81,35 @@ async def api_list_paged(
     pages = ceil(total / limit) if limit else 0
     items_out = [aircraft_schema.AircraftOut.from_orm(a) for a in items]
     return {"items": items_out, "total": total, "page": page, "pages": pages}
+
+
+@router.put(
+    "/reorder",
+    response_model=aircraft_schema.AircraftReorderResponse,
+    summary="Reorder aircraft fleet rows",
+    description=(
+        "Persist drag-and-drop aircraft arrangement for Aircraft Fleet Profile. "
+        "Fleet Daily Update follows the same Aircraft.display_order. "
+        "`items` must list every active aircraft with sequential display_order values starting at 1."
+    ),
+)
+async def api_reorder_aircraft(
+    request: Request,
+    payload: aircraft_schema.AircraftReorderRequest,
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
+):
+    """Persist shared aircraft display_order arrangement."""
+    return await reorder_aircraft(
+        session,
+        payload.items,
+        audit_account_id=current_account.id,
+        audit_module_name=AIRCRAFT_MODULE_NAME,
+        audit_table_name=AIRCRAFT_TABLE_NAME,
+        audit_user=current_account,
+        audit_request=request,
+    )
+
 
 @router.get(
     "/{aircraft_id}/atl/",

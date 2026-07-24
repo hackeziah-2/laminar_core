@@ -10,6 +10,7 @@ from app.models.account import AccountInformation
 from app.models.atl_monitoring import LDNDMonitoring, UnitEnum
 from app.models.audit_log import AuditAction
 from app.services.audit_trail_service import create_audit_log, serialize_audit_data
+from app.models.fleet_daily_update import FleetDailyUpdate
 from app.schemas.ldnd_monitoring_schema import (
     AircraftSummary,
     LDNDMonitoringCreate,
@@ -17,6 +18,8 @@ from app.schemas.ldnd_monitoring_schema import (
     LDNDMonitoringRead,
     LDNDLatestResponse,
     LDNDInspectionTypeLatestResponse,
+    LDNDDetailLastUpdated,
+    LDNDDetailResponse,
 )
 
 
@@ -160,6 +163,72 @@ async def get_ldnd_latest_by_aircraft(
         performed_date_start=performed_date_start,
         performed_date_end=performed_date_end,
         aircraft=aircraft,
+    )
+
+
+async def get_ldnd_detail_by_aircraft(
+    session: AsyncSession, aircraft_id: int
+) -> LDNDDetailResponse:
+    """Latest LDND (by created_at, id) + latest Fleet Daily Update tach for an aircraft."""
+    ldnd_stmt = (
+        select(LDNDMonitoring)
+        .where(LDNDMonitoring.aircraft_fk == aircraft_id)
+        .where(LDNDMonitoring.is_deleted == False)
+        .order_by(
+            LDNDMonitoring.created_at.desc().nulls_last(),
+            LDNDMonitoring.id.desc(),
+        )
+        .limit(1)
+    )
+    ldnd_result = await session.execute(ldnd_stmt)
+    ldnd_row = ldnd_result.scalar_one_or_none()
+
+    fdu_stmt = (
+        select(FleetDailyUpdate.tach_time_eod)
+        .where(FleetDailyUpdate.aircraft_fk == aircraft_id)
+        .where(FleetDailyUpdate.is_deleted == False)
+        .order_by(
+            FleetDailyUpdate.created_at.desc().nulls_last(),
+            FleetDailyUpdate.id.desc(),
+        )
+        .limit(1)
+    )
+    fdu_result = await session.execute(fdu_stmt)
+    current_tach = fdu_result.scalar_one_or_none()
+
+    if not ldnd_row:
+        return LDNDDetailResponse(
+            aircraft_id=aircraft_id,
+            next_inspection=None,
+            last_updated=LDNDDetailLastUpdated(
+                inspection_type=None,
+                unit=None,
+                display_value=None,
+                updated_at=None,
+            ),
+            current_tach=current_tach,
+        )
+
+    unit_str = (
+        getattr(ldnd_row.unit, "value", None) or str(ldnd_row.unit)
+        if ldnd_row.unit is not None
+        else None
+    )
+    inspection_type = ldnd_row.inspection_type
+    display_value = None
+    if inspection_type is not None and unit_str is not None:
+        display_value = f"{inspection_type} - {unit_str}"
+
+    return LDNDDetailResponse(
+        aircraft_id=aircraft_id,
+        next_inspection=ldnd_row.last_done_tach_due,
+        last_updated=LDNDDetailLastUpdated(
+            inspection_type=inspection_type,
+            unit=unit_str,
+            display_value=display_value,
+            updated_at=ldnd_row.created_at,
+        ),
+        current_tach=current_tach,
     )
 
 

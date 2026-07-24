@@ -44,11 +44,19 @@ router_aircraft_scoped = APIRouter(
 
 
 def _fleet_daily_update_item_with_aircraft(orm):
-    """Build list item dict with aircraft: { id, registration }."""
+    """Build list item dict with aircraft: { id, registration, display_order }."""
     read = fleet_daily_update_schema.FleetDailyUpdateRead.from_orm(orm)
     data_item = read.dict()
+    display_order = (
+        getattr(orm.aircraft, "display_order", None) if orm.aircraft is not None else None
+    )
+    data_item["display_order"] = display_order
     data_item["aircraft"] = (
-        {"id": orm.aircraft.id, "registration": orm.aircraft.registration}
+        {
+            "id": orm.aircraft.id,
+            "registration": orm.aircraft.registration,
+            "display_order": display_order,
+        }
         if orm.aircraft is not None
         else None
     )
@@ -183,7 +191,7 @@ async def api_list_fleet_daily_updates_root(
     aircraft_fk: Optional[int] = Query(None, description="Filter by aircraft ID"),
     sort: Optional[str] = Query(
         "",
-        description="Sort fields (comma-separated). Prefix '-' for descending. E.g. registration, -created_at, status",
+        description="Sort fields (comma-separated). Prefix '-' for descending. Default: aircraft display_order ascending. E.g. registration, -created_at, status, display_order",
     ),
     session: AsyncSession = Depends(get_session),
 ):
@@ -214,7 +222,7 @@ async def api_list_fleet_daily_updates_paged(
     aircraft_fk: Optional[int] = Query(None, description="Filter by aircraft ID"),
     sort: Optional[str] = Query(
         "",
-        description="Sort fields (comma-separated). Prefix '-' for descending. E.g. registration, -created_at, status",
+        description="Sort fields (comma-separated). Prefix '-' for descending. Default: aircraft display_order ascending. E.g. registration, -created_at, status, display_order",
     ),
     session: AsyncSession = Depends(get_session),
 ):

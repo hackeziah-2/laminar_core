@@ -11,6 +11,10 @@ class AircraftRef(BaseModel):
     """Aircraft reference in fleet daily update response."""
     id: int
     registration: str
+    display_order: Optional[int] = Field(
+        None,
+        description="Aircraft fleet display_order (shared with Fleet Profile).",
+    )
 
     class Config:
         orm_mode = True
@@ -87,6 +91,10 @@ class FleetDailyUpdateUpdate(BaseModel):
 class FleetDailyUpdateRead(FleetDailyUpdateBase):
     """Schema for reading a Fleet Daily Update entry."""
     id: int
+    display_order: Optional[int] = Field(
+        None,
+        description="Aircraft.display_order — shared fleet arrangement source of truth.",
+    )
     aircraft: Optional[AircraftRef] = None
     created_by: Optional[int] = None
     updated_by: Optional[int] = None

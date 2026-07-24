@@ -162,6 +162,30 @@ class LDNDInspectionTypeLatestResponse(BaseModel):
         orm_mode = True
 
 
+class LDNDDetailLastUpdated(BaseModel):
+    """Last-updated inspection metadata from the most recently created LDND record."""
+
+    inspection_type: Optional[str] = None
+    unit: Optional[str] = None
+    display_value: Optional[str] = None
+    updated_at: Optional[datetime] = None
+
+
+class LDNDDetailResponse(BaseModel):
+    """Aircraft LDND detail: next inspection, last updated, and current tach from Fleet Daily Update."""
+
+    aircraft_id: int
+    next_inspection: Optional[float] = Field(
+        None,
+        description="last_done_tach_due from the most recently created LDND record.",
+    )
+    last_updated: LDNDDetailLastUpdated
+    current_tach: Optional[float] = Field(
+        None,
+        description="tach_time_eod from the latest Fleet Daily Update for the aircraft.",
+    )
+
+
 class LDNDLatestResponse(BaseModel):
     """Maintenance summary: current tach, next inspection, last updated, and latest record details (from the latest performed LDND record for aircraft)."""
 

@@ -32,6 +32,7 @@ class Aircraft(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     )
 
     id = Column(Integer, primary_key=True, index=True)
+    display_order = Column(Integer, nullable=False, index=True, default=1)
     registration = Column(String(89), nullable=False, index=True)
     report_description = Column(Text, nullable=True)
     model = Column(String, nullable=False, index=True)
