@@ -100,7 +100,7 @@ def test_me_returns_profile_with_full_name(client: TestClient):
     assert r.status_code == 200
     body = r.json()
     assert body["username"] == "me_endpoint_user"
-    assert body["full_name"] == "Jane Pilot"
+    assert body["full_name"] == "JANE PILOT"
     assert body["email"] == "me@example.com"
     assert "role" in body
     assert "designation" in body

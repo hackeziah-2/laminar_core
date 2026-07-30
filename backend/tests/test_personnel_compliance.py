@@ -31,7 +31,7 @@ def test_personnel_compliance_paged_includes_nonempty_account_full_name(
     assert r2.status_code == 201, r2.text
     created = r2.json()
     assert created["account_information"] is not None
-    assert created["account_information"]["full_name"] == "Pilot, Jane"
+    assert created["account_information"]["full_name"] == "PILOT, JANE"
 
     r3 = client.get("/api/v1/personnel-compliance/paged?page=1&limit=10")
     assert r3.status_code == 200, r3.text
@@ -51,7 +51,7 @@ def test_personnel_compliance_paged_includes_nonempty_account_full_name(
     fn = item["account_information"]["full_name"]
     assert fn is not None
     assert str(fn).strip() != ""
-    assert fn == "Pilot, Jane"
+    assert fn == "PILOT, JANE"
 
 
 def test_personnel_compliance_paged_includes_auth_initial_doi_from_latest_personnel_authorization(

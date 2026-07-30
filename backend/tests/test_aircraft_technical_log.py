@@ -995,3 +995,122 @@ def test_atl_delete_writes_audit_log(
     assert delete_log["action"] == "DELETE"
     assert delete_log["old_data"] is not None
     assert delete_log["new_data"] is None
+
+
+def test_atl_paged_returns_uppercase_signer_names(
+    client_with_atl_auth: TestClient,
+):
+    """GET /paged returns rts_signed_by and pilot_accepted_by as uppercase full names."""
+    import asyncio
+
+    from app.core.security import get_password_hash
+    from app.models.account import AccountInformation
+    from tests.conftest import TestSessionLocal
+
+    rts = client_with_atl_auth.post(
+        "/api/v1/account-information/",
+        json={
+            "first_name": "Juan",
+            "middle_name": "Santos",
+            "last_name": "Dela Cruz",
+            "username": "juan_atl_rts",
+            "password": "securepassword123",
+            "status": True,
+        },
+    )
+    assert rts.status_code == 201
+    rts_id = rts.json()["id"]
+
+    async def _seed_row() -> int:
+        async with TestSessionLocal() as session:
+            pilot = AccountInformation(
+                first_name="pedro",
+                middle_name=None,
+                last_name="reyes",
+                username="pedro_atl_pilot_lower",
+                password=get_password_hash("securepassword123"),
+                status=True,
+            )
+            session.add(pilot)
+            await session.flush()
+            row = AircraftTechnicalLog(
+                aircraft_fk=1,
+                sequence_no="901",
+                work_status=WorkStatus.APPROVED,
+                rts_signed_by=rts_id,
+                pilot_accepted_by=pilot.id,
+            )
+            session.add(row)
+            await session.commit()
+            await session.refresh(row)
+            return row.id
+
+    log_id = asyncio.run(_seed_row())
+
+    response = client_with_atl_auth.get(
+        "/api/v1/aircraft-technical-log/paged?limit=50&page=1&sort=-created_at"
+    )
+    assert response.status_code == 200
+    item = next(i for i in response.json()["items"] if i["id"] == log_id)
+    assert item["rts_signed_by"] == "JUAN SANTOS DELA CRUZ"
+    assert item["pilot_accepted_by"] == "PEDRO REYES"
+
+
+def test_atl_manage_paged_returns_uppercase_signer_names(
+    client_with_atl_auth: TestClient,
+):
+    """GET /manage/paged returns rts_signed_by and pilot_accepted_by as uppercase full names."""
+    import asyncio
+
+    from tests.conftest import TestSessionLocal
+
+    rts = client_with_atl_auth.post(
+        "/api/v1/account-information/",
+        json={
+            "first_name": "Juan",
+            "middle_name": "Santos",
+            "last_name": "Dela Cruz",
+            "username": "juan_atl_manage_rts",
+            "password": "securepassword123",
+            "status": True,
+        },
+    )
+    assert rts.status_code == 201
+    rts_id = rts.json()["id"]
+
+    pilot = client_with_atl_auth.post(
+        "/api/v1/account-information/",
+        json={
+            "first_name": "Pedro",
+            "last_name": "Reyes",
+            "username": "pedro_atl_manage_pilot",
+            "password": "securepassword123",
+            "status": True,
+        },
+    )
+    assert pilot.status_code == 201
+    pilot_id = pilot.json()["id"]
+
+    async def _seed_row() -> int:
+        async with TestSessionLocal() as session:
+            row = AircraftTechnicalLog(
+                aircraft_fk=1,
+                sequence_no="902",
+                work_status=WorkStatus.APPROVED,
+                rts_signed_by=rts_id,
+                pilot_accepted_by=pilot_id,
+            )
+            session.add(row)
+            await session.commit()
+            await session.refresh(row)
+            return row.id
+
+    log_id = asyncio.run(_seed_row())
+
+    response = client_with_atl_auth.get(
+        "/api/v1/aircraft-technical-log/manage/paged?limit=50&page=1&sort=-created_at"
+    )
+    assert response.status_code == 200
+    item = next(i for i in response.json()["items"] if i["id"] == log_id)
+    assert item["rts_signed_by"] == "JUAN SANTOS DELA CRUZ"
+    assert item["pilot_accepted_by"] == "PEDRO REYES"
