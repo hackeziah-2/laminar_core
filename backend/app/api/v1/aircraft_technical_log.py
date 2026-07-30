@@ -36,6 +36,7 @@ from app.repository.aircraft_technical_log import (
     bulk_update_aircraft_technical_log_work_status,
     soft_delete_aircraft_technical_log,
     bulk_soft_delete_aircraft_technical_logs,
+    apply_uppercase_signer_names_to_atl_dicts,
 )
 from app.api.deps import get_current_active_account
 from app.constants.audit import ATL_MODULE_NAME, ATL_TABLE_NAME
@@ -176,6 +177,7 @@ async def api_list_paged(
         aircraft_technical_log_schema.ATLPagedItemWithAutoApiRead.from_orm(item).dict()
         for item in items
     ]
+    result_items = await apply_uppercase_signer_names_to_atl_dicts(session, result_items)
 
     return {
         "items": result_items,
@@ -386,6 +388,7 @@ async def api_atl_list_paged(
         aircraft_technical_log_schema.ATLPagedItemWithAuto.from_orm(item).dict()
         for item in items
     ]
+    result_items = await apply_uppercase_signer_names_to_atl_dicts(session, result_items)
 
     return {
         "items": result_items,

@@ -37,6 +37,7 @@ from app.schemas.aircraft_technical_log_schema import (
     AircraftTechnicalLogBulkDeleteItem,
     ComponentPartsRecordCreate,
 )
+from app.utils.name_normalize import format_full_name_upper, normalize_name
 
 def _sequence_no_digits_only(sequence_no: str) -> str:
     """Strip optional leading 'ATL-' and whitespace. Keeps any remaining string (e.g. '001', 'QM-001')."""
@@ -1191,6 +1192,50 @@ def _build_aircraft_technical_logs_list_statements(
         )
 
     return stmt, count_stmt
+
+
+_ATL_SIGNER_ACCOUNT_FIELDS = ("rts_signed_by", "pilot_accepted_by")
+
+
+async def apply_uppercase_signer_names_to_atl_dicts(
+    session: AsyncSession,
+    items: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Replace rts_signed_by / pilot_accepted_by account IDs with uppercase full names.
+
+    Existing lowercase account name rows are uppercased via format_full_name_upper.
+    Null signer fields stay null. Unresolved account IDs become null.
+    """
+    account_ids = {
+        item[field]
+        for item in items
+        for field in _ATL_SIGNER_ACCOUNT_FIELDS
+        if isinstance(item.get(field), int)
+    }
+    by_id: Dict[int, AccountInformation] = {}
+    if account_ids:
+        result = await session.execute(
+            select(AccountInformation).where(AccountInformation.id.in_(account_ids))
+        )
+        by_id = {account.id: account for account in result.scalars().all()}
+
+    for item in items:
+        for field in _ATL_SIGNER_ACCOUNT_FIELDS:
+            value = item.get(field)
+            if value is None:
+                continue
+            if isinstance(value, str):
+                item[field] = normalize_name(value)
+                continue
+            account = by_id.get(value)
+            if account is None:
+                item[field] = None
+                continue
+            name = format_full_name_upper(
+                account.first_name, account.middle_name, account.last_name
+            )
+            item[field] = name or None
+    return items
 
 
 async def list_aircraft_technical_logs(
