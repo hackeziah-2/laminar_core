@@ -44,8 +44,9 @@ def test_create_account_information(client: TestClient):
     response = client.post("/api/v1/account-information/", json=account_data)
     assert response.status_code == 201
     data = response.json()
-    assert data["first_name"] == account_data["first_name"]
-    assert data["last_name"] == account_data["last_name"]
+    assert data["first_name"] == "JOHN"
+    assert data["last_name"] == "DOE"
+    assert data["middle_name"] == "M"
     assert data["username"] == account_data["username"]
     assert data["id"] is not None
     # Password should not be in response
@@ -91,8 +92,8 @@ def test_get_account_information(client: TestClient):
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == account_id
-    assert data["first_name"] == account_data["first_name"]
-    assert data["last_name"] == account_data["last_name"]
+    assert data["first_name"] == "JANE"
+    assert data["last_name"] == "SMITH"
     assert data["username"] == account_data["username"]
     # Password should not be in response
     assert "password" not in data
@@ -131,11 +132,11 @@ def test_update_account_information(client: TestClient):
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["first_name"] == update_data["first_name"]
+    assert data["first_name"] == "JOHNNY"
     assert data["designation"] == update_data["designation"]
     assert data["status"] == update_data["status"]
     # Other fields should remain unchanged
-    assert data["last_name"] == account_data["last_name"]
+    assert data["last_name"] == "DOE"
     assert data["username"] == account_data["username"]
 
 
@@ -288,7 +289,7 @@ def test_list_account_information_with_search(client: TestClient):
     data = response.json()
     assert data["total"] >= 1
     assert any(
-        "John" in item["first_name"] or "John" in item["last_name"]
+        "JOHN" in item["first_name"] or "JOHN" in item["last_name"]
         for item in data["items"]
     )
 
@@ -509,9 +510,9 @@ def test_create_account_information_all_fields(client: TestClient):
     response = client.post("/api/v1/account-information/", json=account_data)
     assert response.status_code == 201
     data = response.json()
-    assert data["first_name"] == account_data["first_name"]
-    assert data["last_name"] == account_data["last_name"]
-    assert data["middle_name"] == account_data["middle_name"]
+    assert data["first_name"] == "JOHN"
+    assert data["last_name"] == "DOE"
+    assert data["middle_name"] == "MICHAEL"
     assert data["username"] == account_data["username"]
     assert data["designation"] == account_data["designation"]
     assert data["license_no"] == account_data["license_no"]
@@ -530,8 +531,8 @@ def test_create_account_information_minimal_fields(client: TestClient):
     response = client.post("/api/v1/account-information/", json=account_data)
     assert response.status_code == 201
     data = response.json()
-    assert data["first_name"] == account_data["first_name"]
-    assert data["last_name"] == account_data["last_name"]
+    assert data["first_name"] == "JOHN"
+    assert data["last_name"] == "DOE"
     assert data["username"] == account_data["username"]
     # Default status should be active (True)
     assert data["status"] == True
@@ -615,7 +616,7 @@ async def test_update_account_information_repository(db_session: AsyncSession):
         db_session, created.id, update_data
     )
     assert updated is not None
-    assert updated.first_name == "Updated"
+    assert updated.first_name == "UPDATED"
     assert updated.designation == "Pilot"
     # Other fields should remain unchanged
     assert updated.last_name == account_data.last_name
@@ -651,3 +652,201 @@ async def test_soft_delete_account_information_repository(
     # Test deleting non-existent account
     not_found = await soft_delete_account_information(db_session, 999)
     assert not_found is False
+
+
+def test_normalize_name_helper():
+    from app.utils.name_normalize import format_full_name_upper, normalize_name
+
+    assert normalize_name(None) is None
+    assert normalize_name("") == ""
+    assert normalize_name("   ") == ""
+    assert normalize_name("  juan  ") == "JUAN"
+    assert format_full_name_upper("Juan", "Santos", "Dela Cruz") == "JUAN SANTOS DELA CRUZ"
+    assert format_full_name_upper("Juan", None, "Dela Cruz") == "JUAN DELA CRUZ"
+    assert format_full_name_upper("Juan", "", "Dela Cruz") == "JUAN DELA CRUZ"
+    assert format_full_name_upper("Juan", "  ", "Dela Cruz") == "JUAN DELA CRUZ"
+
+
+def test_create_account_information_uppercases_names(client: TestClient):
+    """Create trims and uppercases first/middle/last name before saving."""
+    account_data = {
+        "first_name": "  juan  ",
+        "middle_name": " santos ",
+        "last_name": "dela cruz",
+        "username": "juan_upper_create",
+        "password": "securepassword123",
+        "status": True,
+    }
+    response = client.post("/api/v1/account-information/", json=account_data)
+    assert response.status_code == 201
+    data = response.json()
+    assert data["first_name"] == "JUAN"
+    assert data["middle_name"] == "SANTOS"
+    assert data["last_name"] == "DELA CRUZ"
+
+
+def test_create_account_information_null_and_empty_middle_name(client: TestClient):
+    """Null/empty/missing middle_name are preserved safely."""
+    missing = {
+        "first_name": "Pedro",
+        "last_name": "Reyes",
+        "username": "pedro_no_middle",
+        "password": "securepassword123",
+        "status": True,
+    }
+    r1 = client.post("/api/v1/account-information/", json=missing)
+    assert r1.status_code == 201
+    assert r1.json()["middle_name"] is None
+
+    empty = {
+        "first_name": "Pedro",
+        "middle_name": "",
+        "last_name": "Reyes",
+        "username": "pedro_empty_middle",
+        "password": "securepassword123",
+        "status": True,
+    }
+    r2 = client.post("/api/v1/account-information/", json=empty)
+    assert r2.status_code == 201
+    assert r2.json()["middle_name"] == ""
+
+    null = {
+        "first_name": "Pedro",
+        "middle_name": None,
+        "last_name": "Reyes",
+        "username": "pedro_null_middle",
+        "password": "securepassword123",
+        "status": True,
+    }
+    r3 = client.post("/api/v1/account-information/", json=null)
+    assert r3.status_code == 201
+    assert r3.json()["middle_name"] is None
+
+
+def test_update_account_information_uppercases_names(client: TestClient):
+    """Update trims and uppercases name fields before saving."""
+    create_response = client.post(
+        "/api/v1/account-information/",
+        json={
+            "first_name": "Ana",
+            "last_name": "Cruz",
+            "username": "ana_upper_update",
+            "password": "securepassword123",
+            "status": True,
+        },
+    )
+    assert create_response.status_code == 201
+    account_id = create_response.json()["id"]
+
+    response = client.put(
+        f"/api/v1/account-information/{account_id}",
+        json={
+            "first_name": "  maria  ",
+            "middle_name": " lopez ",
+            "last_name": "santos",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["first_name"] == "MARIA"
+    assert data["middle_name"] == "LOPEZ"
+    assert data["last_name"] == "SANTOS"
+
+
+def test_paged_account_information_returns_uppercase_names(client: TestClient):
+    """Paged list returns uppercase names, including legacy lowercase DB rows."""
+    import asyncio
+
+    from app.core.security import get_password_hash
+    from app.models.account import AccountInformation
+    from tests.conftest import TestSessionLocal
+
+    create_response = client.post(
+        "/api/v1/account-information/",
+        json={
+            "first_name": "Juan",
+            "middle_name": "Santos",
+            "last_name": "Dela Cruz",
+            "username": "juan_paged_upper",
+            "password": "securepassword123",
+            "status": True,
+        },
+    )
+    assert create_response.status_code == 201
+    created_id = create_response.json()["id"]
+
+    async def _seed_legacy_lowercase() -> int:
+        async with TestSessionLocal() as session:
+            account = AccountInformation(
+                first_name="legacy",
+                middle_name="middle",
+                last_name="name",
+                username="legacy_lower_paged",
+                password=get_password_hash("securepassword123"),
+                status=True,
+            )
+            session.add(account)
+            await session.commit()
+            await session.refresh(account)
+            return account.id
+
+    legacy_id = asyncio.run(_seed_legacy_lowercase())
+
+    response = client.get("/api/v1/account-information/paged?limit=100&page=1")
+    assert response.status_code == 200
+    items = {item["id"]: item for item in response.json()["items"]}
+
+    assert items[created_id]["first_name"] == "JUAN"
+    assert items[created_id]["middle_name"] == "SANTOS"
+    assert items[created_id]["last_name"] == "DELA CRUZ"
+
+    assert items[legacy_id]["first_name"] == "LEGACY"
+    assert items[legacy_id]["middle_name"] == "MIDDLE"
+    assert items[legacy_id]["last_name"] == "NAME"
+
+
+def test_account_informations_list_returns_uppercase_fullname(client: TestClient):
+    """ATL account selection list returns uppercase fullname."""
+    import asyncio
+
+    from app.core.security import get_password_hash
+    from app.models.account import AccountInformation
+    from tests.conftest import TestSessionLocal
+
+    create_response = client.post(
+        "/api/v1/account-information/",
+        json={
+            "first_name": "Juan",
+            "middle_name": "Santos",
+            "last_name": "Dela Cruz",
+            "username": "juan_list_upper",
+            "password": "securepassword123",
+            "status": True,
+        },
+    )
+    assert create_response.status_code == 201
+    created_id = create_response.json()["id"]
+
+    async def _seed_legacy_lowercase() -> int:
+        async with TestSessionLocal() as session:
+            account = AccountInformation(
+                first_name="pedro",
+                middle_name=None,
+                last_name="reyes",
+                username="pedro_list_lower",
+                password=get_password_hash("securepassword123"),
+                status=True,
+            )
+            session.add(account)
+            await session.commit()
+            await session.refresh(account)
+            return account.id
+
+    legacy_id = asyncio.run(_seed_legacy_lowercase())
+
+    response = client.get("/api/v1/account-information/account-informations-list")
+    assert response.status_code == 200
+    by_id = {item["id"]: item for item in response.json()}
+
+    assert by_id[created_id]["fullname"] == "JUAN SANTOS DELA CRUZ"
+    assert by_id[legacy_id]["fullname"] == "PEDRO REYES"

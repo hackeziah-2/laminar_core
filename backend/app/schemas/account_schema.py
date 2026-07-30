@@ -1,6 +1,8 @@
 from datetime import datetime, date
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
+
+from app.utils.name_normalize import format_full_name_upper, normalize_name
 
 
 # ---------- Account Information Base Schema ----------
@@ -17,6 +19,10 @@ class AccountInformationBase(BaseModel):
     auth_initial_doi: Optional[date] = Field(None, description="Authorization initial date of issue")
     role_id: Optional[int] = Field(None, description="FK to roles")
     status: bool = Field(True, description="True for active, False for inactive")
+
+    @validator("first_name", "last_name", "middle_name", pre=True, always=False)
+    def _normalize_name_fields(cls, value):
+        return normalize_name(value)
 
 
 # ---------- Account Information Create Schema ----------
@@ -40,6 +46,10 @@ class AccountInformationUpdate(BaseModel):
     auth_initial_doi: Optional[date] = Field(None, description="Authorization initial date of issue")
     role_id: Optional[int] = Field(None, description="FK to roles")
     status: Optional[bool] = Field(None, description="True for active, False for inactive")
+
+    @validator("first_name", "last_name", "middle_name", pre=True, always=False)
+    def _normalize_name_fields(cls, value):
+        return normalize_name(value)
 
 
 # ---------- Account Information Read Schema ----------
@@ -98,14 +108,10 @@ class AccountInformationListItem(BaseModel):
 
     @classmethod
     def from_orm_with_fullname(cls, obj):
-        """Create from ORM object with computed fullname."""
-        # Build fullname: first_name + middle_name (if exists) + last_name
-        fullname_parts = [obj.first_name]
-        if obj.middle_name:
-            fullname_parts.append(obj.middle_name)
-        fullname_parts.append(obj.last_name)
-        fullname = " ".join(fullname_parts)
-        
+        """Create from ORM object with computed uppercase fullname."""
+        fullname = format_full_name_upper(
+            obj.first_name, obj.middle_name, obj.last_name
+        )
         return cls(
             id=obj.id,
             fullname=fullname,
