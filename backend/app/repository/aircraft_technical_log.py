@@ -536,7 +536,7 @@ async def create_aircraft_technical_log(
     audit_user: Optional[AccountInformation] = None,
     audit_request: Optional[Request] = None,
 ) -> AircraftTechnicalLog:
-    """Create a new Aircraft Technical Log entry with optional gap-fill (skipped when first ATL for aircraft/batch stream). Sequence numbers are free-form strings (optional ATL- prefix stripped). Persists auto_* via compute_auto_fields before insert; canonical time fields are saved as sent by the client."""
+    """Create a new Aircraft Technical Log entry. Sequence numbers are free-form strings (optional ATL- prefix stripped). Persists auto_* via compute_auto_fields before insert; canonical time fields are saved as sent by the client."""
     sequence_no = _sequence_no_digits_only(data.sequence_no)
     if await _atl_exists_same_aircraft_sequence_batch(
         session,
@@ -579,21 +579,6 @@ async def create_aircraft_technical_log(
 
     await _validate_atl_batch_fk(session, log_data.get("atl_batch_fk"))
 
-    # Latest sequence in the same aircraft + batch stream (NULL batch only groups NULL atl_batch_fk rows)
-    latest_stmt = (
-        select(AircraftTechnicalLog)
-        .where(AircraftTechnicalLog.aircraft_fk == data.aircraft_fk)
-        .where(AircraftTechnicalLog.is_deleted.is_(False))
-    )
-    if data.atl_batch_fk is None:
-        latest_stmt = latest_stmt.where(AircraftTechnicalLog.atl_batch_fk.is_(None))
-    else:
-        latest_stmt = latest_stmt.where(AircraftTechnicalLog.atl_batch_fk == data.atl_batch_fk)
-    latest_stmt = latest_stmt.order_by(_sequence_no_as_numeric().desc()).limit(1)
-    latest_result = await session.execute(latest_stmt)
-    latest_atl = latest_result.scalar_one_or_none()
-    latest_sequence_no = latest_atl.sequence_no if latest_atl else None
-
     # Auto-populate hobbs_meter_start and tachometer_start from the previous ATL by sequence_no.
     if log_data.get('hobbs_meter_start') is None or log_data.get('tachometer_start') is None:
         prev_hobbs_start, prev_tach_start = await _get_previous_meter_starts(
@@ -613,37 +598,53 @@ async def create_aircraft_technical_log(
     session.add(entry)
     await session.flush()
 
-    # Generate missing sequence IDs only when there is existing data (skip when first ATL for aircraft)
-    if latest_sequence_no is not None:
-        try:
-            missing_sequences = generate_range(latest_sequence_no, sequence_no)
-        except (ValueError, IndexError):
-            missing_sequences = []
-        if missing_sequences:
-            for seq_no in missing_sequences:
-                if await _atl_exists_same_aircraft_sequence_batch(
-                    session,
-                    aircraft_fk=data.aircraft_fk,
-                    sequence_no=seq_no,
-                    atl_batch_fk=data.atl_batch_fk,
-                ):
-                    continue
-                gap_entry = AircraftTechnicalLog(
-                    sequence_no=seq_no,
-                    aircraft_fk=data.aircraft_fk,
-                    atl_batch_fk=data.atl_batch_fk,
-                    work_status=WorkStatus.FOR_REVIEW,
-                )
-                prev_hobbs, prev_tach = await _get_previous_meter_starts(
-                    session, data.aircraft_fk, seq_no, atl_batch_fk=data.atl_batch_fk
-                )
-                gap_entry.hobbs_meter_start = prev_hobbs
-                gap_entry.tachometer_start = prev_tach
-                # await persist_atl_auto_fields_to_row(session, gap_entry, aircraft_row) Range auto complete
-                if audit_account_id is not None:
-                    await set_audit_fields(gap_entry, audit_account_id, is_create=True)
-                session.add(gap_entry)
-                await session.flush()
+    # Disabled: Sequence No. gap creation upon ATL create (GAP rows between latest and new sequence).
+    # # Latest sequence in the same aircraft + batch stream (NULL batch only groups NULL atl_batch_fk rows)
+    # latest_stmt = (
+    #     select(AircraftTechnicalLog)
+    #     .where(AircraftTechnicalLog.aircraft_fk == data.aircraft_fk)
+    #     .where(AircraftTechnicalLog.is_deleted.is_(False))
+    # )
+    # if data.atl_batch_fk is None:
+    #     latest_stmt = latest_stmt.where(AircraftTechnicalLog.atl_batch_fk.is_(None))
+    # else:
+    #     latest_stmt = latest_stmt.where(AircraftTechnicalLog.atl_batch_fk == data.atl_batch_fk)
+    # latest_stmt = latest_stmt.order_by(_sequence_no_as_numeric().desc()).limit(1)
+    # latest_result = await session.execute(latest_stmt)
+    # latest_atl = latest_result.scalar_one_or_none()
+    # latest_sequence_no = latest_atl.sequence_no if latest_atl else None
+    #
+    # # Generate missing sequence IDs only when there is existing data (skip when first ATL for aircraft)
+    # if latest_sequence_no is not None:
+    #     try:
+    #         missing_sequences = generate_range(latest_sequence_no, sequence_no)
+    #     except (ValueError, IndexError):
+    #         missing_sequences = []
+    #     if missing_sequences:
+    #         for seq_no in missing_sequences:
+    #             if await _atl_exists_same_aircraft_sequence_batch(
+    #                 session,
+    #                 aircraft_fk=data.aircraft_fk,
+    #                 sequence_no=seq_no,
+    #                 atl_batch_fk=data.atl_batch_fk,
+    #             ):
+    #                 continue
+    #             gap_entry = AircraftTechnicalLog(
+    #                 sequence_no=seq_no,
+    #                 aircraft_fk=data.aircraft_fk,
+    #                 atl_batch_fk=data.atl_batch_fk,
+    #                 work_status=WorkStatus.FOR_REVIEW,
+    #             )
+    #             prev_hobbs, prev_tach = await _get_previous_meter_starts(
+    #                 session, data.aircraft_fk, seq_no, atl_batch_fk=data.atl_batch_fk
+    #             )
+    #             gap_entry.hobbs_meter_start = prev_hobbs
+    #             gap_entry.tachometer_start = prev_tach
+    #             # await persist_atl_auto_fields_to_row(session, gap_entry, aircraft_row) Range auto complete
+    #             if audit_account_id is not None:
+    #                 await set_audit_fields(gap_entry, audit_account_id, is_create=True)
+    #             session.add(gap_entry)
+    #             await session.flush()
 
     # Create component parts if provided
     if data.component_parts:
