@@ -28,7 +28,7 @@ async def list_organizational_approvals(
     search: Optional[str] = None,
     sort: str = "",
 ) -> Tuple[List[OrganizationalApproval], int]:
-    """List with pagination; filter by certificate_fk; search on number, web_link; sort by certification (name), date_of_expiration."""
+    """List with pagination; filter by certificate_fk; search on number, web_link, certificate name; sort by certification (name), date_of_expiration."""
     stmt = (
         select(OrganizationalApproval)
         .options(selectinload(OrganizationalApproval.certificate))
@@ -36,14 +36,6 @@ async def list_organizational_approvals(
     )
     if certificate_fk is not None:
         stmt = stmt.where(OrganizationalApproval.certificate_fk == certificate_fk)
-    if search and search.strip():
-        q = f"%{search.strip()}%"
-        stmt = stmt.where(
-            or_(
-                OrganizationalApproval.number.ilike(q),
-                OrganizationalApproval.web_link.ilike(q),
-            )
-        )
 
     # Sort: certificate_category_types__name / certification = certificate name (requires join), date_of_expiration, etc.
     sortable = {
@@ -56,10 +48,23 @@ async def list_organizational_approvals(
     }
     name_sort_keys = ("certification", "certificate_category_types__name")
     sort_parts = [p.strip() for p in (sort or "").split(",") if p.strip()]
+    sort_names = [p.lstrip("-").strip() for p in sort_parts]
+    search_term = search.strip() if search and search.strip() else None
+    needs_certificate_join = bool(search_term) or any(k in sort_names for k in name_sort_keys)
+    if needs_certificate_join:
+        stmt = stmt.outerjoin(OrganizationalApproval.certificate)
+
+    if search_term:
+        q = f"%{search_term}%"
+        stmt = stmt.where(
+            or_(
+                OrganizationalApproval.number.ilike(q),
+                OrganizationalApproval.web_link.ilike(q),
+                CertificateCategoryType.name.ilike(q),
+            )
+        )
+
     if sort_parts:
-        sort_names = [p.lstrip("-").strip() for p in sort_parts]
-        if any(k in sort_names for k in name_sort_keys):
-            stmt = stmt.outerjoin(OrganizationalApproval.certificate)
         order_parts = []
         for part in sort_parts:
             desc = part.startswith("-")
@@ -88,18 +93,21 @@ async def list_organizational_approvals(
     )
     if certificate_fk is not None:
         count_stmt = count_stmt.where(OrganizationalApproval.certificate_fk == certificate_fk)
-    if search and search.strip():
-        q = f"%{search.strip()}%"
-        count_stmt = count_stmt.where(
+    if search_term:
+        q = f"%{search_term}%"
+        count_stmt = count_stmt.outerjoin(
+            OrganizationalApproval.certificate
+        ).where(
             or_(
                 OrganizationalApproval.number.ilike(q),
                 OrganizationalApproval.web_link.ilike(q),
+                CertificateCategoryType.name.ilike(q),
             )
         )
     total = (await session.execute(count_stmt)).scalar()
     stmt = stmt.limit(limit).offset(offset)
     result = await session.execute(stmt)
-    items = result.scalars().all()
+    items = result.scalars().unique().all() if needs_certificate_join else result.scalars().all()
     return items, total
 
 

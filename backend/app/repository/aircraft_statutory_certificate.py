@@ -3,12 +3,13 @@ import uuid
 from typing import Optional, List, Tuple
 
 from fastapi import HTTPException, Request, UploadFile
-from sqlalchemy import select, func
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import set_audit_fields
 from app.models.account import AccountInformation
+from app.models.aircraft import Aircraft
 from app.models.audit_log import AuditAction
 from app.services.audit_trail_service import create_audit_log, serialize_audit_data
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
@@ -61,9 +62,10 @@ async def list_aircraft_statutory_certificates(
     offset: int = 0,
     aircraft_fk: Optional[int] = None,
     category_type: Optional[CategoryTypeEnum] = None,
+    search: Optional[str] = None,
     sort: Optional[str] = "",
 ) -> Tuple[List[AircraftStatutoryCertificate], int]:
-    """List certificates with pagination and optional filter by category_type and aircraft_fk."""
+    """List certificates with pagination; search registration, category_type, web_link."""
     stmt = (
         select(AircraftStatutoryCertificate)
         .options(selectinload(AircraftStatutoryCertificate.aircraft))
@@ -73,6 +75,23 @@ async def list_aircraft_statutory_certificates(
         stmt = stmt.where(AircraftStatutoryCertificate.aircraft_fk == aircraft_fk)
     if category_type is not None:
         stmt = stmt.where(AircraftStatutoryCertificate.category_type == category_type)
+
+    search_joined = False
+    if search and search.strip():
+        q = f"%{search.strip()}%"
+        stmt = stmt.outerjoin(
+            Aircraft, AircraftStatutoryCertificate.aircraft_fk == Aircraft.id
+        )
+        search_joined = True
+        stmt = stmt.where(
+            or_(
+                Aircraft.registration.ilike(q),
+                Aircraft.msn.ilike(q),
+                Aircraft.model.ilike(q),
+                cast(AircraftStatutoryCertificate.category_type, String).ilike(q),
+                AircraftStatutoryCertificate.web_link.ilike(q),
+            )
+        )
 
     sortable = {
         "id": AircraftStatutoryCertificate.id,
@@ -101,11 +120,24 @@ async def list_aircraft_statutory_certificates(
         count_stmt = count_stmt.where(AircraftStatutoryCertificate.aircraft_fk == aircraft_fk)
     if category_type is not None:
         count_stmt = count_stmt.where(AircraftStatutoryCertificate.category_type == category_type)
+    if search and search.strip():
+        q = f"%{search.strip()}%"
+        count_stmt = count_stmt.outerjoin(
+            Aircraft, AircraftStatutoryCertificate.aircraft_fk == Aircraft.id
+        ).where(
+            or_(
+                Aircraft.registration.ilike(q),
+                Aircraft.msn.ilike(q),
+                Aircraft.model.ilike(q),
+                cast(AircraftStatutoryCertificate.category_type, String).ilike(q),
+                AircraftStatutoryCertificate.web_link.ilike(q),
+            )
+        )
 
     total = (await session.execute(count_stmt)).scalar()
     stmt = stmt.limit(limit).offset(offset)
     result = await session.execute(stmt)
-    items = result.scalars().all()
+    items = result.scalars().unique().all() if search_joined else result.scalars().all()
     return items, total
 
 

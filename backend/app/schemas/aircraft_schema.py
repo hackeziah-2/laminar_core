@@ -230,7 +230,7 @@ class AircraftDetailsSummary(BaseModel):
 
 
 class AircraftDetailsATLBlock(BaseModel):
-    """Latest ATL row (max sequence_no) with times from the same auto_* / auto_comp rules as ATL paged."""
+    """Latest ATL row (highest numeric sequence_no) — stored hour fields from that record."""
 
     tachometer_end: Optional[float] = None
     airframe_aftt: Optional[float] = None

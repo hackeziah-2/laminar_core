@@ -25,6 +25,7 @@ from app.models.account import AccountInformation
 from app.models.audit_log import AuditAction
 from app.services.audit_trail_service import create_audit_log, serialize_audit_data
 from app.services.atl_service import AtlService
+from app.services.aircraft_fuel_report_service import invalidate_fuel_report_cache
 from app.core.atl_edit_rbac import validate_atl_edit_allowed_for_account
 from app.core.atl_workflow_rbac import is_atl_work_status_transition_allowed
 from app.models.role import Role
@@ -666,6 +667,7 @@ async def create_aircraft_technical_log(
     await session.commit()
     await session.refresh(entry)
     await session.refresh(entry, ['aircraft', 'component_parts'])
+    invalidate_fuel_report_cache(origin_date=getattr(entry, "origin_date", None))
 
     if audit_module_name and audit_table_name:
         await create_audit_log(
@@ -810,6 +812,9 @@ async def update_aircraft_technical_log(
         .where(AircraftTechnicalLog.is_deleted.is_(False))
     )
     reloaded = result.scalar_one_or_none()
+    invalidate_fuel_report_cache(
+        origin_date=getattr(reloaded, "origin_date", None) if reloaded else None
+    )
 
     if reloaded and audit_module_name and audit_table_name:
         await create_audit_log(
@@ -1343,6 +1348,7 @@ async def soft_delete_aircraft_technical_log(
     obj.soft_delete()
     session.add(obj)
     await session.commit()
+    invalidate_fuel_report_cache(origin_date=getattr(obj, "origin_date", None))
 
     if audit_module_name and audit_table_name:
         await create_audit_log(
