@@ -45,10 +45,15 @@ async def api_list_paged(
         "",
         description="Sort: date_of_expiration, -date_of_expiration, created_at, etc.",
     ),
+    ordering: Optional[str] = Query(
+        None,
+        description="Alias for sort (e.g. date_of_expiration, -date_of_expiration).",
+    ),
     session: AsyncSession = Depends(get_session),
 ):
     """List OEM technical publications with pagination. Sort ASC/DESC by date_of_expiration; search by item type name."""
     offset = (page - 1) * limit
+    effective_sort = (sort or "").strip() or (ordering or "").strip()
     items, total = await list_oem_technical_publications(
         session=session,
         limit=limit,
@@ -56,7 +61,7 @@ async def api_list_paged(
         item_fk=item_fk,
         category_type=category_type.value if category_type else None,
         search=search,
-        sort=sort,
+        sort=effective_sort,
     )
     pages = ceil(total / limit) if total else 0
     return OemTechnicalPublicationPagedResponse(

@@ -38,7 +38,7 @@ async def api_list_paged(
     limit: int = Query(10, ge=1, le=100),
     page: int = Query(1, ge=1),
     certificate_fk: Optional[int] = Query(None, description="Filter by certificate category type ID"),
-    search: Optional[str] = Query(None, description="Search in number, web_link"),
+    search: Optional[str] = Query(None, description="Search in number, web_link, certificate category name"),
     sort: Optional[str] = Query(
         "",
         description="Sort: certificate_category_types__name, certification, date_of_expiration, -date_of_expiration, created_at, etc.",
@@ -53,7 +53,7 @@ async def api_list_paged(
     ),
     session: AsyncSession = Depends(get_session),
 ):
-    """List organizational approvals with pagination. Sort by certificate_category_types__name (category name), date_of_expiration; search on number and web_link."""
+    """List organizational approvals with pagination. Sort by certificate_category_types__name (category name), date_of_expiration; search on number, web_link, and certificate name."""
     offset = (page - 1) * limit
     effective_sort = (sort or "").strip()
     if not effective_sort and sort_by and sort_by.strip():

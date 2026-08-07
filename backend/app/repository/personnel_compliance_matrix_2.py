@@ -112,6 +112,7 @@ async def list_personnel_compliance_matrix_2_paged(
             AccountInformation.first_name.ilike(q),
             AccountInformation.last_name.ilike(q),
             AccountInformation.middle_name.ilike(q),
+            AccountInformation.auth_stamp.ilike(q),
             concat_last_first.ilike(q),
             concat_first_last.ilike(q),
         )
@@ -131,6 +132,7 @@ async def list_personnel_compliance_matrix_2_paged(
         "auth_issue_date": PersonnelAuthorization.auth_issue_date,
         "auth_expiry_date": PersonnelAuthorization.auth_expiry_date,
         "date_of_expiration": PersonnelAuthorization.auth_expiry_date,
+        "expiry_date": PersonnelAuthorization.auth_expiry_date,
         "caap_lic_expiry": PersonnelAuthorization.caap_license_expiry,
         "caap_license_expiry": PersonnelAuthorization.caap_license_expiry,
         "hf_training_expiry": PersonnelAuthorization.human_factors_training_expiry,
