@@ -42,13 +42,17 @@ async def api_matrix_2_paged(
     page: int = Query(1, ge=1),
     search: Optional[str] = Query(
         None,
-        description="Search by account name (first, last, middle, or Last, First / First Last patterns).",
+        description="Search by account name (first, last, middle, or Last, First / First Last patterns) or auth stamp.",
+    ),
+    name: Optional[str] = Query(
+        None,
+        description="Alias for search (account name / auth stamp).",
     ),
     sort: Optional[str] = Query(
         "",
         description=(
             "Sort keys: name, full_name, authorization_no, account_information_id, "
-            "auth_expiry_date, caap_lic_expiry, hf_training_expiry, "
+            "auth_expiry_date, expiry_date, caap_lic_expiry, hf_training_expiry, "
             "type_training_expiry_cessna, type_training_expiry_baron, etc. Prefix with - for DESC."
         ),
     ),
@@ -62,11 +66,16 @@ async def api_matrix_2_paged(
     ),
 ):
     offset = (page - 1) * limit
+    effective_search = None
+    for value in (search, name):
+        if value and value.strip():
+            effective_search = value.strip()
+            break
     rows, total, compliance_by_account = await list_personnel_compliance_matrix_2_paged(
         session=session,
         limit=limit,
         offset=offset,
-        search=search,
+        search=effective_search,
         sort=sort or "",
         designation=account_information__designation,
     )

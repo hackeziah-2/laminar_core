@@ -39,7 +39,7 @@ from app.repository.aircraft_technical_log import (
     search_atl_by_sequence_no,
     get_latest_aircraft_technical_log,
 )
-from app.core.atl_derived_times import resolve_auto_fields, map_auto_fields_to_comp
+from app.core.atl_derived_times import resolve_auto_fields
 from app.database import get_session
 from app.api.deps import get_current_active_account
 from app.constants.audit import AIRCRAFT_MODULE_NAME, AIRCRAFT_TABLE_NAME
@@ -164,8 +164,10 @@ def _round_optional_float_2(value) -> Optional[float]:
     summary="Aircraft details and latest ATL",
     description=(
         "Returns identification fields for the aircraft and the latest non-deleted ATL "
-        "(highest sequence_no). ATL time fields use the same cumulative auto_* rules as "
-        "GET …/atl/paged (airframe_aftt from auto_comp_airframe_aftt; engine/prop times from auto_engine_* / auto_propeller_*)."
+        "(highest numeric sequence_no — not created_at/updated_at). "
+        "ATL hour fields are the stored values from that row "
+        "(engine/prop TSN/TSO/TBO, airframe_aftt, tachometer_end). "
+        "When no ATL exists, atl is null and clients should fall back to Aircraft Profile."
     ),
 )
 async def api_aircraft_details(
@@ -187,18 +189,15 @@ async def api_aircraft_details(
     latest = await get_latest_aircraft_technical_log(session, aircraft_fk=aircraft_id)
     atl_block = None
     if latest is not None:
-        auto_base = await resolve_auto_fields(session, latest, aircraft)
-        auto_rounded = {k: round(v, 2) for k, v in auto_base.items()}
-        auto_comp = {k: round(v, 2) for k, v in map_auto_fields_to_comp(auto_rounded).items()}
         atl_block = aircraft_schema.AircraftDetailsATLBlock(
             tachometer_end=_round_optional_float_2(latest.tachometer_end),
-            airframe_aftt=auto_comp.get("auto_comp_airframe_aftt"),
-            engine_tsn=auto_rounded.get("auto_engine_tsn"),
-            engine_tbo=auto_rounded.get("auto_engine_tbo"),
-            engine_tso=auto_rounded.get("auto_engine_tso"),
-            propeller_tsn=auto_rounded.get("auto_propeller_tsn"),
-            propeller_tbo=auto_rounded.get("auto_propeller_tbo"),
-            propeller_tso=auto_rounded.get("auto_propeller_tso"),
+            airframe_aftt=_round_optional_float_2(latest.airframe_aftt),
+            engine_tsn=_round_optional_float_2(latest.engine_tsn),
+            engine_tbo=_round_optional_float_2(latest.engine_tbo),
+            engine_tso=_round_optional_float_2(latest.engine_tso),
+            propeller_tsn=_round_optional_float_2(latest.propeller_tsn),
+            propeller_tbo=_round_optional_float_2(latest.propeller_tbo),
+            propeller_tso=_round_optional_float_2(latest.propeller_tso),
             sequence_no=str(latest.sequence_no).strip() if latest.sequence_no is not None else "",
         )
 

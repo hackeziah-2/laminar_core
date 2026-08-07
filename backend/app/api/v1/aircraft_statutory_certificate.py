@@ -50,10 +50,14 @@ async def api_list_paged(
     page: int = Query(1, ge=1),
     aircraft_fk: Optional[int] = Query(None),
     category_type: Optional[CategoryTypeEnum] = Query(None),
+    search: Optional[str] = Query(
+        None,
+        description="Search by aircraft registration, MSN, model, category_type, or web_link",
+    ),
     sort: Optional[str] = Query(""),
     session: AsyncSession = Depends(get_session),
 ):
-    """List aircraft statutory certificates with pagination and filter by category_type."""
+    """List aircraft statutory certificates with pagination, search, and filter by category_type."""
     offset = (page - 1) * limit
     items, total = await list_aircraft_statutory_certificates(
         session=session,
@@ -61,6 +65,7 @@ async def api_list_paged(
         offset=offset,
         aircraft_fk=aircraft_fk,
         category_type=category_type,
+        search=search,
         sort=sort,
     )
     pages = ceil(total / limit) if total else 0
@@ -194,6 +199,10 @@ async def api_list_by_aircraft_paged(
     limit: int = Query(10, ge=1, le=100),
     page: int = Query(1, ge=1),
     category_type: Optional[CategoryTypeEnum] = Query(None),
+    search: Optional[str] = Query(
+        None,
+        description="Search by category_type or web_link (aircraft is already scoped)",
+    ),
     sort: Optional[str] = Query(""),
     session: AsyncSession = Depends(get_session),
 ):
@@ -205,6 +214,7 @@ async def api_list_by_aircraft_paged(
         offset=offset,
         aircraft_fk=aircraft_id,
         category_type=category_type,
+        search=search,
         sort=sort,
     )
     pages = ceil(total / limit) if total else 0

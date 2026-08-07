@@ -10,9 +10,12 @@ from app.repository.fleet_daily_update import get_dashboard_counts
 from app.schemas.aircraft_fuel_report_schema import (
     AircraftFuelReportQuery,
     AircraftFuelReportResponse,
-    FuelReportPeriod,
 )
-from app.services.aircraft_fuel_report_service import get_aircraft_fuel_report
+from app.services.aircraft_fuel_report_service import (
+    get_aircraft_fuel_report,
+    parse_aircraft_filter,
+    parse_aircraft_id_filter,
+)
 
 router = APIRouter(
     prefix="/api/v1/dashboard",
@@ -35,50 +38,56 @@ async def api_dashboard(
 @router.get(
     "/aircraft-fuel-report",
     response_model=AircraftFuelReportResponse,
-    summary="Aircraft fuel consumption dashboard",
+    summary="Monthly aircraft fuel consumption report",
     description=(
-        "Aggregates approved/completed Aircraft Technical Log (ATL) fuel and flight-hour "
-        "data for weekly, monthly, or yearly charting. Fuel used per ATL is "
-        "(prior departure − after on-blocks) for left and right tanks. Flight hours use "
-        "persisted airframe_flight_time. Fuel burn / hour is SUM(fuel) / SUM(hours)."
+        "Monthly fleet fuel/hours rollup from approved/completed ATL Logbook rows. "
+        "Month bucket = ORIGIN DATE (fallback: reporting date). "
+        "Hours = RUN TIME (airframe_run_time, with auto/tach fallbacks; null→0). "
+        "Fuel = (PRIOR DEP L+R) − (AFTER ON-BLKS L+R); null fuel/oil/landings→0. "
+        "Fuel burn / hour = SUM(fuel) / SUM(hours) (null when hours are zero). "
+        "Oil = OIL PRIOR DEP − OIL AFTER ON-BLKS. Landings = NO OF LND. "
+        "Optional filters: start_month/end_month (YYYY-MM), "
+        "aircraft (comma-separated tails), aircraft_id (comma-separated PKs)."
     ),
 )
 async def api_aircraft_fuel_report(
-    period: FuelReportPeriod = Query(
-        ...,
-        description="Aggregation period: weekly | monthly | yearly",
-    ),
-    year: int = Query(..., ge=1900, le=2100, description="Reporting year"),
-    month: Optional[int] = Query(
+    start_month: Optional[str] = Query(
         None,
-        ge=1,
-        le=12,
-        description="Calendar month (required when period=monthly)",
+        description="Inclusive start month YYYY-MM (default: earliest available)",
+        pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
     ),
-    week: Optional[int] = Query(
+    end_month: Optional[str] = Query(
         None,
-        ge=1,
-        le=53,
-        description="ISO week number (required when period=weekly)",
+        description="Inclusive end month YYYY-MM (default: latest available)",
+        pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
     ),
-    aircraft_id: Optional[int] = Query(
+    aircraft: Optional[str] = Query(
         None,
-        ge=1,
-        description="Optional aircraft primary key filter",
+        description="Optional comma-separated aircraft tail numbers (e.g. RP-C12,RP-C14)",
+    ),
+    aircraft_id: Optional[str] = Query(
+        None,
+        description="Optional comma-separated aircraft ids (e.g. 1,2)",
     ),
     session: AsyncSession = Depends(get_session),
 ):
-    """Return fuel consumption series, per-aircraft breakdown, and grand totals."""
+    """Return monthly summary, per-aircraft breakdown, and data-quality flags."""
+    try:
+        aircraft_ids = parse_aircraft_id_filter(aircraft_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid aircraft_id: {exc}",
+        ) from exc
+
     try:
         query = AircraftFuelReportQuery(
-            period=period,
-            year=year,
-            month=month,
-            week=week,
-            aircraft_id=aircraft_id,
+            start_month=start_month,
+            end_month=end_month,
+            aircraft=parse_aircraft_filter(aircraft),
+            aircraft_ids=aircraft_ids,
         )
     except ValidationError as exc:
-        # Flatten to a concise detail string for API clients.
         messages = []
         for err in exc.errors():
             loc = ".".join(str(p) for p in err.get("loc", ()))

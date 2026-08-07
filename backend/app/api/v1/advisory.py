@@ -74,6 +74,17 @@ async def _fetch_advisory_page(
     return items, total_items, total_pages
 
 
+def _resolve_advisory_item_filter(
+    search: Optional[str],
+    item_filter: Optional[str],
+) -> Optional[str]:
+    """Prefer `search` (frontend / notification metadata), fall back to `item`."""
+    for value in (search, item_filter):
+        if value and value.strip():
+            return value.strip()
+    return None
+
+
 @router.get("/filter-options", response_model=AdvisoryFilterOptionsResponse, summary="Advisory type filter options")
 async def get_advisory_filter_options():
     return AdvisoryFilterOptionsResponse(filters=ADVISORY_TYPE_FILTER_OPTIONS)
@@ -89,10 +100,14 @@ async def get_advisory(
         alias="type",
         description="Filter by TYPE: CERTIFICATE, SUBSCRIPTION, REGULATORY_CORRESPONDENCE_NON_CERT, or LICENSE",
     ),
+    search: Optional[str] = Query(
+        None,
+        description="Search by ITEM: case-insensitive substring match (preferred; used by UI / notification metadata)",
+    ),
     item_filter: Optional[str] = Query(
         None,
         alias="item",
-        description="Filter by ITEM: case-insensitive substring match",
+        description="Alias for search: filter by ITEM (case-insensitive substring match)",
     ),
     sort: Optional[str] = Query(
         None,
@@ -107,7 +122,7 @@ async def get_advisory(
         limit=limit,
         type_filter=type_filter,
         sort_remaining_validity=sort_remaining_validity,
-        item_filter=item_filter,
+        item_filter=_resolve_advisory_item_filter(search, item_filter),
     )
     return AdvisoryPagedResponse(
         items=items,
@@ -127,10 +142,14 @@ async def get_advisory_paged(
         alias="type",
         description="Filter by TYPE: CERTIFICATE, SUBSCRIPTION, REGULATORY_CORRESPONDENCE_NON_CERT, or LICENSE",
     ),
+    search: Optional[str] = Query(
+        None,
+        description="Search by ITEM: case-insensitive substring match (preferred; used by UI / notification metadata)",
+    ),
     item_filter: Optional[str] = Query(
         None,
         alias="item",
-        description="Filter by ITEM: case-insensitive substring match",
+        description="Alias for search: filter by ITEM (case-insensitive substring match)",
     ),
     sort: Optional[str] = Query(
         None,
@@ -142,6 +161,7 @@ async def get_advisory_paged(
         page=page,
         limit=limit,
         type_filter=type_filter,
+        search=search,
         item_filter=item_filter,
         sort=sort,
         session=session,
