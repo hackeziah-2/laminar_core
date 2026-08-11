@@ -15,6 +15,7 @@ from app.services.aircraft_fuel_report_service import (
     get_aircraft_fuel_report,
     parse_aircraft_filter,
     parse_aircraft_id_filter,
+    parse_years_filter,
 )
 
 router = APIRouter(
@@ -46,6 +47,10 @@ async def api_dashboard(
         "Fuel = (PRIOR DEP L+R) − (AFTER ON-BLKS L+R); null fuel/oil/landings→0. "
         "Fuel burn / hour = SUM(fuel) / SUM(hours) (null when hours are zero). "
         "Oil = OIL PRIOR DEP − OIL AFTER ON-BLKS. Landings = NO OF LND. "
+        "Also returns year-over-year flying hours (years=YYYY,YYYY; "
+        "default: calendar years spanned by start_month..end_month) "
+        "and optional per-aircraft month slicer (month_year=YYYY-MM). "
+        "Fuel quantities are gallons (meta.fuel_unit). "
         "Optional filters: start_month/end_month (YYYY-MM), "
         "aircraft (comma-separated tails), aircraft_id (comma-separated PKs)."
     ),
@@ -69,9 +74,25 @@ async def api_aircraft_fuel_report(
         None,
         description="Optional comma-separated aircraft ids (e.g. 1,2)",
     ),
+    years: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated calendar years for YoY flying hours "
+            "(e.g. 2025,2026). Defaults to years spanned by "
+            "start_month..end_month."
+        ),
+    ),
+    month_year: Optional[str] = Query(
+        None,
+        description=(
+            "Single month YYYY-MM for per-aircraft fuel/hours breakdown slicer "
+            "(e.g. 2025-04)."
+        ),
+        pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
+    ),
     session: AsyncSession = Depends(get_session),
 ):
-    """Return monthly summary, per-aircraft breakdown, and data-quality flags."""
+    """Return monthly summary, YoY hours, per-aircraft month breakdown, and flags."""
     try:
         aircraft_ids = parse_aircraft_id_filter(aircraft_id)
     except ValueError as exc:
@@ -81,11 +102,21 @@ async def api_aircraft_fuel_report(
         ) from exc
 
     try:
+        years_list = parse_years_filter(years)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid years: {exc}",
+        ) from exc
+
+    try:
         query = AircraftFuelReportQuery(
             start_month=start_month,
             end_month=end_month,
             aircraft=parse_aircraft_filter(aircraft),
             aircraft_ids=aircraft_ids,
+            years=years_list,
+            month_year=month_year,
         )
     except ValidationError as exc:
         messages = []

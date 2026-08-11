@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field, root_validator, validator
 
@@ -35,8 +35,13 @@ class AircraftFuelReportQuery(BaseModel):
     aircraft: List[str] = Field(default_factory=list)
     # Optional aircraft PKs (merged with tails when resolving the filter)
     aircraft_ids: List[int] = Field(default_factory=list)
+    # Calendar years for YoY flying-hours summary
+    # (default: years spanned by start_month..end_month)
+    years: List[int] = Field(default_factory=list)
+    # Single month slicer for per-aircraft breakdown (YYYY-MM)
+    month_year: Optional[str] = None
 
-    @validator("start_month", "end_month", pre=True)
+    @validator("start_month", "end_month", "month_year", pre=True)
     def _empty_to_none(cls, v):
         if v is None:
             return None
@@ -44,7 +49,7 @@ class AircraftFuelReportQuery(BaseModel):
             return None
         return v
 
-    @validator("start_month", "end_month")
+    @validator("start_month", "end_month", "month_year")
     def _validate_ym(cls, v):
         if v is None:
             return None
@@ -61,6 +66,29 @@ class AircraftFuelReportQuery(BaseModel):
             parts = [p.strip() for p in v.split(",") if p.strip()]
             return [int(p) for p in parts]
         return list(v)
+
+    @validator("years", pre=True)
+    def _coerce_years(cls, v):
+        if v is None:
+            return []
+        if isinstance(v, int):
+            return [v]
+        if isinstance(v, str):
+            parts = [p.strip() for p in v.split(",") if p.strip()]
+            return [int(p) for p in parts]
+        return list(v)
+
+    @validator("years")
+    def _validate_years(cls, v):
+        out: List[int] = []
+        seen = set()
+        for year in v:
+            if year < 1900 or year > 2100:
+                raise ValueError("year out of range")
+            if year not in seen:
+                seen.add(year)
+                out.append(year)
+        return out
 
     @root_validator
     def _range_order(cls, values):
@@ -83,6 +111,8 @@ class FuelReportMeta(BaseModel):
     source: str = "ATL Logbook"
     range: FuelReportRange
     generated_at: datetime
+    # ATL fuel columns are unitless numerics; product convention is gallons.
+    fuel_unit: str = "gallons"
 
 
 class FuelReportSummary(BaseModel):
@@ -120,8 +150,36 @@ class DataQualityFlag(BaseModel):
     origin_date: Optional[str] = None
 
 
+class YoyFlyingHoursMonth(BaseModel):
+    month: str
+    values: Dict[str, float]
+    flag: Optional[str] = None
+
+
+class YoyFlyingHours(BaseModel):
+    years: List[int]
+    months: List[YoyFlyingHoursMonth]
+    average_fh: Dict[str, float]
+    grand_total: Dict[str, float]
+
+
+class AircraftMonthBreakdownRow(BaseModel):
+    tail_number: str
+    hours: float
+    fuel: float
+    fuel_burn_per_hour: Optional[float] = None
+    flag: Optional[str] = None
+
+
+class AircraftMonthBreakdown(BaseModel):
+    month_year: Optional[str] = None
+    aircraft: List[AircraftMonthBreakdownRow] = Field(default_factory=list)
+
+
 class AircraftFuelReportResponse(BaseModel):
     meta: FuelReportMeta
     summary: FuelReportSummary
     monthly: List[MonthlyFuelRow]
     data_quality_flags: List[DataQualityFlag] = Field(default_factory=list)
+    yoy_flying_hours: YoyFlyingHours
+    aircraft_month_breakdown: AircraftMonthBreakdown

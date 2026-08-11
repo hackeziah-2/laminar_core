@@ -254,13 +254,203 @@ def test_empty_range_returns_empty_monthly_not_404(client: TestClient):
     invalidate_fuel_report_cache()
     response = client.get(
         ENDPOINT,
-        params={"start_month": "2099-01", "end_month": "2099-03"},
+        params={"start_month": "2099-01", "end_month": "2099-03", "years": "2098,2099"},
     )
     assert response.status_code == 200
     body = response.json()
     assert body["monthly"] == []
     assert body["summary"]["total_hours"] == 0.0
     assert body["meta"]["range"] == {"start": "2099-01", "end": "2099-03"}
+    assert body["meta"]["fuel_unit"] == "gallons"
+    assert body["yoy_flying_hours"]["years"] == [2098, 2099]
+    assert body["yoy_flying_hours"]["grand_total"] == {"2098": 0.0, "2099": 0.0}
+    assert body["aircraft_month_breakdown"] == {"month_year": None, "aircraft": []}
+
+
+@pytest.mark.no_auth
+def test_yoy_and_aircraft_month_breakdown(client: TestClient):
+    invalidate_fuel_report_cache()
+
+    async def seed_yoy():
+        async with TestSessionLocal() as session:
+            ac_a = Aircraft(
+                registration="RP-C12",
+                model="172",
+                msn="MSN-YOY-A",
+                base="MNL",
+                ownership="Owner",
+                status="Active",
+            )
+            ac_b = Aircraft(
+                registration="RP-C20",
+                model="172",
+                msn="MSN-YOY-B",
+                base="MNL",
+                ownership="Owner",
+                status="Active",
+            )
+            ac_c = Aircraft(
+                registration="RP-C14",
+                model="172",
+                msn="MSN-YOY-C",
+                base="MNL",
+                ownership="Owner",
+                status="Active",
+            )
+            session.add_all([ac_a, ac_b, ac_c])
+            await session.flush()
+            session.add_all(
+                [
+                    AircraftTechnicalLog(
+                        aircraft_fk=ac_a.id,
+                        sequence_no="Y1",
+                        work_status=WorkStatus.APPROVED,
+                        origin_date=date(2025, 7, 1),
+                        airframe_run_time=Decimal("100"),
+                        fuel_qty_left_prior_departure=Decimal("50"),
+                        fuel_qty_right_prior_departure=Decimal("50"),
+                        fuel_qty_left_after_on_blks=Decimal("0"),
+                        fuel_qty_right_after_on_blks=Decimal("0"),
+                        number_of_landings=1,
+                    ),
+                    AircraftTechnicalLog(
+                        aircraft_fk=ac_a.id,
+                        sequence_no="Y2",
+                        work_status=WorkStatus.APPROVED,
+                        origin_date=date(2026, 7, 1),
+                        airframe_run_time=Decimal("400"),
+                        fuel_qty_left_prior_departure=Decimal("200"),
+                        fuel_qty_right_prior_departure=Decimal("200"),
+                        fuel_qty_left_after_on_blks=Decimal("0"),
+                        fuel_qty_right_after_on_blks=Decimal("0"),
+                        number_of_landings=1,
+                    ),
+                    # April slicer: RP-C12/C14 burn=20, RP-C20 burn=5 (4x outlier)
+                    AircraftTechnicalLog(
+                        aircraft_fk=ac_a.id,
+                        sequence_no="A1",
+                        work_status=WorkStatus.APPROVED,
+                        origin_date=date(2025, 4, 10),
+                        airframe_run_time=Decimal("10"),
+                        fuel_qty_left_prior_departure=Decimal("100"),
+                        fuel_qty_right_prior_departure=Decimal("100"),
+                        fuel_qty_left_after_on_blks=Decimal("0"),
+                        fuel_qty_right_after_on_blks=Decimal("0"),
+                        number_of_landings=1,
+                    ),
+                    AircraftTechnicalLog(
+                        aircraft_fk=ac_c.id,
+                        sequence_no="A1b",
+                        work_status=WorkStatus.APPROVED,
+                        origin_date=date(2025, 4, 10),
+                        airframe_run_time=Decimal("10"),
+                        fuel_qty_left_prior_departure=Decimal("100"),
+                        fuel_qty_right_prior_departure=Decimal("100"),
+                        fuel_qty_left_after_on_blks=Decimal("0"),
+                        fuel_qty_right_after_on_blks=Decimal("0"),
+                        number_of_landings=1,
+                    ),
+                    AircraftTechnicalLog(
+                        aircraft_fk=ac_b.id,
+                        sequence_no="A2",
+                        work_status=WorkStatus.COMPLETED,
+                        origin_date=date(2025, 4, 11),
+                        airframe_run_time=Decimal("10"),
+                        fuel_qty_left_prior_departure=Decimal("30"),
+                        fuel_qty_right_prior_departure=Decimal("20"),
+                        fuel_qty_left_after_on_blks=Decimal("0"),
+                        fuel_qty_right_after_on_blks=Decimal("0"),
+                        number_of_landings=1,
+                    ),
+                ]
+            )
+            await session.commit()
+
+    asyncio.run(seed_yoy())
+
+    response = client.get(
+        ENDPOINT,
+        params={
+            "start_month": "2026-07",
+            "end_month": "2026-07",
+            "years": "2025,2026",
+            "month_year": "2025-04",
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+
+    assert body["meta"]["fuel_unit"] == "gallons"
+    assert body["summary"]["total_hours"] == 400.0
+
+    july = body["yoy_flying_hours"]["months"][6]
+    assert july["month"] == "July"
+    assert july["values"] == {"2025": 100.0, "2026": 400.0}
+    assert july["flag"] == "large_yoy_variance"
+    assert any(f["code"] == "large_yoy_variance" for f in body["data_quality_flags"])
+
+    bd = body["aircraft_month_breakdown"]
+    assert bd["month_year"] == "Apr-25"
+    by_tail = {a["tail_number"]: a for a in bd["aircraft"]}
+    assert by_tail["RP-C12"]["hours"] == 10.0
+    assert by_tail["RP-C12"]["fuel"] == 200.0
+    assert by_tail["RP-C12"]["fuel_burn_per_hour"] == 20.0
+    assert by_tail["RP-C12"]["fuel"] / by_tail["RP-C12"]["hours"] == 20.0
+    assert by_tail["RP-C20"]["fuel_burn_per_hour"] == 5.0
+    assert by_tail["RP-C20"]["flag"] == "fuel_burn_outlier"
+    assert any(f["code"] == "fuel_burn_outlier" for f in body["data_quality_flags"])
+
+
+@pytest.mark.no_auth
+def test_aircraft_month_zero_hours_burn_null(client: TestClient):
+    """Integration: 0 hours in aircraft_month_breakdown → fuel_burn_per_hour null."""
+    invalidate_fuel_report_cache()
+
+    async def seed_zero_ac():
+        async with TestSessionLocal() as session:
+            ac = Aircraft(
+                registration="RP-C88",
+                model="172",
+                msn="MSN-ZERO-BD",
+                base="MNL",
+                ownership="Owner",
+                status="Active",
+            )
+            session.add(ac)
+            await session.flush()
+            session.add(
+                AircraftTechnicalLog(
+                    aircraft_fk=ac.id,
+                    sequence_no="ZB1",
+                    work_status=WorkStatus.APPROVED,
+                    origin_date=date(2026, 8, 1),
+                    airframe_run_time=Decimal("0"),
+                    fuel_qty_left_prior_departure=Decimal("10"),
+                    fuel_qty_right_prior_departure=Decimal("10"),
+                    fuel_qty_left_after_on_blks=Decimal("5"),
+                    fuel_qty_right_after_on_blks=Decimal("5"),
+                    number_of_landings=0,
+                )
+            )
+            await session.commit()
+
+    asyncio.run(seed_zero_ac())
+    response = client.get(
+        ENDPOINT,
+        params={
+            "start_month": "2026-08",
+            "end_month": "2026-08",
+            "month_year": "2026-08",
+            "aircraft": "RP-C88",
+            "years": "2026",
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    ac_rows = body["aircraft_month_breakdown"]["aircraft"]
+    assert len(ac_rows) == 1
+    assert ac_rows[0]["hours"] == 0.0
+    assert ac_rows[0]["fuel_burn_per_hour"] is None
 
 
 @pytest.mark.no_auth
@@ -275,3 +465,5 @@ def test_query_validation(client: TestClient):
         ).status_code
         == 422
     )
+    assert client.get(ENDPOINT, params={"years": "abc"}).status_code == 422
+    assert client.get(ENDPOINT, params={"month_year": "2026-13"}).status_code == 422
