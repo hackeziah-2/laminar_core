@@ -180,6 +180,11 @@ async def run_atl_import(
         summary.imported_rows = persisted_inserted + persisted_updated
         summary.processing_time_ms = round((time.perf_counter() - started) * 1000, 2)
 
+        # Bulk path bypasses per-row ATL create/update; clear fuel report cache.
+        from app.services.aircraft_fuel_report_service import invalidate_fuel_report_cache
+
+        invalidate_fuel_report_cache()
+
         return {
             "status": "success",
             "inserted": summary.inserted,

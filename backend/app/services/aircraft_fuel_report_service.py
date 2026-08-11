@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import statistics
 import threading
 from calendar import monthrange
 from collections import defaultdict
@@ -24,11 +25,15 @@ from app.schemas.aircraft_fuel_report_schema import (
     AircraftFuelBreakdown,
     AircraftFuelReportQuery,
     AircraftFuelReportResponse,
+    AircraftMonthBreakdown,
+    AircraftMonthBreakdownRow,
     DataQualityFlag,
     FuelReportMeta,
     FuelReportRange,
     FuelReportSummary,
     MonthlyFuelRow,
+    YoyFlyingHours,
+    YoyFlyingHoursMonth,
     parse_year_month,
 )
 
@@ -36,35 +41,50 @@ logger = logging.getLogger(__name__)
 
 _ZERO = Decimal("0")
 _CHAIN_TOLERANCE = Decimal("0.5")  # gallons — "roughly match" prior AFTER+uplift
+# YoY month flagged when max(hours)/min(hours) among years with data exceeds this.
+# July 152→796 (~5.2x) is the reference case; owners can tune this constant.
+_YOY_VARIANCE_RATIO_THRESHOLD = Decimal("3")
+# Per-aircraft burn flagged when ratio vs peer median exceeds this (e.g. 5 vs ~20).
+_FLEET_BURN_OUTLIER_RATIO = Decimal("4")
 
 _MONTH_ABBR = (
     "Jan", "Feb", "Mar", "Apr", "May", "Jun",
     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 )
+_MONTH_FULL = (
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+)
+
+# Cache key: (start, end, aircraft_ids, years, month_year)
+_CacheKey = Tuple[str, str, Tuple[int, ...], Tuple[int, ...], Optional[str]]
 
 # ---------------------------------------------------------------------------
-# Simple process-local cache keyed on (start_month, end_month, aircraft_ids)
+# Simple process-local cache
 # ---------------------------------------------------------------------------
 _cache_lock = threading.Lock()
-_report_cache: Dict[Tuple[str, str, Tuple[int, ...]], AircraftFuelReportResponse] = {}
+_report_cache: Dict[_CacheKey, AircraftFuelReportResponse] = {}
 
 
 def invalidate_fuel_report_cache(*, origin_date: Optional[date] = None) -> None:
     """
     Drop cached rollups.
 
-    When ``origin_date`` is set, drop entries whose [start, end] covers that month;
-    otherwise clear the entire cache (safe default on ATL writes).
+    When ``origin_date`` is set, drop entries whose monthly range, YoY years,
+    or ``month_year`` slicer covers that date; otherwise clear the entire cache.
     """
     with _cache_lock:
         if origin_date is None:
             _report_cache.clear()
             return
         ym = f"{origin_date.year:04d}-{origin_date.month:02d}"
+        year = origin_date.year
         to_drop = [
             key
             for key in _report_cache
             if key[0] <= ym <= key[1]
+            or year in key[3]
+            or key[4] == ym
         ]
         for key in to_drop:
             _report_cache.pop(key, None)
@@ -74,8 +94,16 @@ def _cache_get(
     start_month: str,
     end_month: str,
     aircraft_ids: Sequence[int],
+    years: Sequence[int],
+    month_year: Optional[str],
 ) -> Optional[AircraftFuelReportResponse]:
-    key = (start_month, end_month, tuple(sorted(aircraft_ids)))
+    key: _CacheKey = (
+        start_month,
+        end_month,
+        tuple(sorted(aircraft_ids)),
+        tuple(sorted(years)),
+        month_year,
+    )
     with _cache_lock:
         return _report_cache.get(key)
 
@@ -84,9 +112,17 @@ def _cache_set(
     start_month: str,
     end_month: str,
     aircraft_ids: Sequence[int],
+    years: Sequence[int],
+    month_year: Optional[str],
     response: AircraftFuelReportResponse,
 ) -> None:
-    key = (start_month, end_month, tuple(sorted(aircraft_ids)))
+    key: _CacheKey = (
+        start_month,
+        end_month,
+        tuple(sorted(aircraft_ids)),
+        tuple(sorted(years)),
+        month_year,
+    )
     with _cache_lock:
         _report_cache[key] = response
 
@@ -109,8 +145,13 @@ def _nz(value: Any) -> Decimal:
 
 
 def _to_float(value: Decimal) -> float:
-    """Round to 2 decimal places for API response values."""
+    """Round to 2 decimal places for legacy monthly/summary fields."""
     return float(value.quantize(Decimal("0.01")))
+
+
+def _raw_float(value: Decimal) -> float:
+    """Convert Decimal → float without display rounding (new YoY / slicer fields)."""
+    return float(value)
 
 
 def month_label(year: int, month: int) -> str:
@@ -125,6 +166,15 @@ def month_key(year: int, month: int) -> str:
 def ym_to_date_bounds(year: int, month: int) -> Tuple[date, date]:
     last = monthrange(year, month)[1]
     return date(year, month, 1), date(year, month, last)
+
+
+def years_from_month_range(start_month: str, end_month: str) -> List[int]:
+    """Inclusive calendar years spanned by start_month..end_month (YYYY-MM)."""
+    start_year, _ = parse_year_month(start_month)
+    end_year, _ = parse_year_month(end_month)
+    if start_year > end_year:
+        start_year, end_year = end_year, start_year
+    return list(range(start_year, end_year + 1))
 
 
 def fuel_consumed(
@@ -199,25 +249,27 @@ def _flag(
     *,
     code: str,
     message: str,
-    row: Any,
-    tail: str,
+    row: Any = None,
+    tail: str = "",
+    origin_date: Optional[str] = None,
 ) -> None:
-    origin = _row_month_date(row)
+    origin = _row_month_date(row) if row is not None else None
+    origin_iso = origin.isoformat() if origin else origin_date
     state.flags.append(
         DataQualityFlag(
             code=code,
             message=message,
-            sequence_no=getattr(row, "sequence_no", None),
+            sequence_no=getattr(row, "sequence_no", None) if row is not None else None,
             aircraft_tail=tail or None,
-            origin_date=origin.isoformat() if origin else None,
+            origin_date=origin_iso,
         )
     )
     logger.warning(
         "fuel_report data_quality code=%s seq=%s tail=%s origin=%s msg=%s",
         code,
-        getattr(row, "sequence_no", None),
+        getattr(row, "sequence_no", None) if row is not None else None,
         tail,
-        origin,
+        origin_iso,
         message,
     )
 
@@ -345,28 +397,195 @@ def _iter_months(start: date, end: date) -> List[Tuple[int, int]]:
     return out
 
 
+def _yoy_ratio(values: Sequence[Decimal]) -> Optional[Decimal]:
+    """max/min among positive values; None if fewer than two positive datapoints."""
+    positive = [v for v in values if v > _ZERO]
+    if len(positive) < 2:
+        return None
+    lo = min(positive)
+    hi = max(positive)
+    if lo == _ZERO:
+        return None
+    return hi / lo
+
+
+def build_yoy_flying_hours(
+    state: _BuildState,
+    years: Sequence[int],
+) -> YoyFlyingHours:
+    """
+    Jan–Dec flying hours per requested year.
+
+    grand_total / average_fh only include months that have data for that year
+    (hours > 0) — missing months are not zero-padded into the totals.
+    """
+    sorted_years = sorted(years)
+    months_out: List[YoyFlyingHoursMonth] = []
+    # Track months-with-data per year for average/grand_total
+    year_month_hours: Dict[int, List[Decimal]] = {y: [] for y in sorted_years}
+
+    for month_idx in range(1, 13):
+        values_dec: Dict[str, Decimal] = {}
+        values_out: Dict[str, float] = {}
+        for y in sorted_years:
+            mk = month_key(y, month_idx)
+            hours = state.by_month.get(mk, _Acc()).hours
+            values_dec[str(y)] = hours
+            values_out[str(y)] = _raw_float(hours)
+            if hours > _ZERO:
+                year_month_hours[y].append(hours)
+
+        flag: Optional[str] = None
+        ratio = _yoy_ratio(list(values_dec.values()))
+        if ratio is not None and ratio >= _YOY_VARIANCE_RATIO_THRESHOLD:
+            flag = "large_yoy_variance"
+            _flag(
+                state,
+                code="large_yoy_variance",
+                message=(
+                    f"{_MONTH_FULL[month_idx - 1]} YoY flying hours ratio "
+                    f"{_raw_float(ratio):.2f}x exceeds threshold "
+                    f"{_raw_float(_YOY_VARIANCE_RATIO_THRESHOLD)}x "
+                    f"(values={ {k: _raw_float(v) for k, v in values_dec.items()} })"
+                ),
+                origin_date=f"{sorted_years[0]:04d}-{month_idx:02d}-01",
+            )
+
+        months_out.append(
+            YoyFlyingHoursMonth(
+                month=_MONTH_FULL[month_idx - 1],
+                values=values_out,
+                flag=flag,
+            )
+        )
+
+    grand_total: Dict[str, float] = {}
+    average_fh: Dict[str, float] = {}
+    for y in sorted_years:
+        samples = year_month_hours[y]
+        if samples:
+            total = sum(samples, _ZERO)
+            grand_total[str(y)] = _raw_float(total)
+            average_fh[str(y)] = _raw_float(total / Decimal(len(samples)))
+        else:
+            grand_total[str(y)] = 0.0
+            average_fh[str(y)] = 0.0
+
+    return YoyFlyingHours(
+        years=sorted_years,
+        months=months_out,
+        average_fh=average_fh,
+        grand_total=grand_total,
+    )
+
+
+def build_aircraft_month_breakdown(
+    state: _BuildState,
+    *,
+    month_year: Optional[str],
+) -> AircraftMonthBreakdown:
+    """
+    Per-aircraft hours/fuel for a single month slicer.
+
+    Uses shared ``fuel_burn_per_hour`` (null when hours == 0).
+    Flags fleet burn outliers via the same data_quality_flags list.
+    """
+    if not month_year:
+        return AircraftMonthBreakdown(month_year=None, aircraft=[])
+
+    y, m = parse_year_month(month_year)
+    mk = month_key(y, m)
+    label = month_label(y, m)
+    by_tail = state.by_month_aircraft.get(mk, {})
+
+    rows: List[AircraftMonthBreakdownRow] = []
+    burns: Dict[str, float] = {}
+    for tail in sorted(by_tail.keys()):
+        acc = by_tail[tail]
+        burn = fuel_burn_per_hour(acc.fuel, acc.hours)
+        if burn is not None:
+            burns[tail] = burn
+        rows.append(
+            AircraftMonthBreakdownRow(
+                tail_number=tail,
+                hours=_raw_float(acc.hours),
+                fuel=_raw_float(acc.fuel),
+                fuel_burn_per_hour=burn,
+            )
+        )
+
+    # Outlier check vs leave-one-out peer median (need ≥2 aircraft with burn rates)
+    if len(burns) >= 2:
+        for row in rows:
+            if row.fuel_burn_per_hour is None:
+                continue
+            peer_values = [v for t, v in burns.items() if t != row.tail_number]
+            if not peer_values:
+                continue
+            peer_median = Decimal(str(statistics.median(peer_values)))
+            if peer_median <= _ZERO:
+                continue
+            burn_dec = Decimal(str(row.fuel_burn_per_hour))
+            ratio = max(burn_dec, peer_median) / min(burn_dec, peer_median)
+            if ratio >= _FLEET_BURN_OUTLIER_RATIO:
+                row.flag = "fuel_burn_outlier"
+                _flag(
+                    state,
+                    code="fuel_burn_outlier",
+                    message=(
+                        f"{row.tail_number} fuel_burn_per_hour="
+                        f"{row.fuel_burn_per_hour} is "
+                        f"{_raw_float(ratio):.2f}x vs peer median "
+                        f"{_raw_float(peer_median)} for {label}"
+                    ),
+                    tail=row.tail_number,
+                    origin_date=f"{y:04d}-{m:02d}-01",
+                )
+
+    return AircraftMonthBreakdown(month_year=label, aircraft=rows)
+
+
 def build_fuel_report(
     rows: Sequence[Any],
     *,
     start_month: str,
     end_month: str,
+    years: Optional[Sequence[int]] = None,
+    month_year: Optional[str] = None,
 ) -> AircraftFuelReportResponse:
-    """Build monthly series + summary + data_quality_flags from ATL rows."""
+    """
+    Build monthly series + YoY + month breakdown + data_quality_flags.
+
+    ``rows`` may span a widened fetch (YoY years / slicer). Monthly series and
+    summary are scoped to ``[start_month, end_month]`` only; YoY and the
+    aircraft month breakdown read from the full aggregated state.
+    """
     sy, sm = parse_year_month(start_month)
     ey, em = parse_year_month(end_month)
     range_start, _ = ym_to_date_bounds(sy, sm)
     _, range_end = ym_to_date_bounds(ey, em)
+    resolved_years = (
+        list(years) if years else years_from_month_range(start_month, end_month)
+    )
 
-    state = process_atl_rows(rows)
+    state_all = process_atl_rows(rows)
+
+    window_rows = [
+        row
+        for row in rows
+        if (origin := _row_month_date(row)) is not None
+        and range_start <= origin <= range_end
+    ]
+    state_window = process_atl_rows(window_rows) if window_rows else _BuildState()
+
     monthly: List[MonthlyFuelRow] = []
-
-    if rows:
+    if window_rows:
         for y, m in _iter_months(range_start, range_end):
             mk = month_key(y, m)
-            acc = state.by_month.get(mk, _Acc())
+            acc = state_window.by_month.get(mk, _Acc())
             breakdown: List[AircraftFuelBreakdown] = []
-            for tail in sorted(state.by_month_aircraft.get(mk, {}).keys()):
-                a = state.by_month_aircraft[mk][tail]
+            for tail in sorted(state_window.by_month_aircraft.get(mk, {}).keys()):
+                a = state_window.by_month_aircraft[mk][tail]
                 breakdown.append(
                     AircraftFuelBreakdown(
                         tail_number=tail,
@@ -390,12 +609,18 @@ def build_fuel_report(
             )
     # else: empty range → monthly: [] (not 404)
 
-    g = state.grand
+    # Carry row-level flags from the monthly window; YoY / outlier flags append next
+    state_all.flags = list(state_window.flags)
+    yoy = build_yoy_flying_hours(state_all, resolved_years)
+    aircraft_month = build_aircraft_month_breakdown(state_all, month_year=month_year)
+
+    g = state_window.grand
     return AircraftFuelReportResponse(
         meta=FuelReportMeta(
             source="ATL Logbook",
             range=FuelReportRange(start=start_month, end=end_month),
             generated_at=ph_now(),
+            fuel_unit="gallons",
         ),
         summary=FuelReportSummary(
             total_hours=_to_float(g.hours),
@@ -405,7 +630,9 @@ def build_fuel_report(
             total_landings=g.landings,
         ),
         monthly=monthly,
-        data_quality_flags=state.flags,
+        data_quality_flags=state_all.flags,
+        yoy_flying_hours=yoy,
+        aircraft_month_breakdown=aircraft_month,
     )
 
 
@@ -418,6 +645,19 @@ def parse_aircraft_filter(raw: Optional[str]) -> List[str]:
 
 def parse_aircraft_id_filter(raw: Optional[str]) -> List[int]:
     """Split comma-separated aircraft PKs; empty → []. Raises ValueError on bad ints."""
+    if not raw or not raw.strip():
+        return []
+    out: List[int] = []
+    for part in raw.split(","):
+        text = part.strip()
+        if not text:
+            continue
+        out.append(int(text))
+    return out
+
+
+def parse_years_filter(raw: Optional[str]) -> List[int]:
+    """Split comma-separated years; empty → [] (caller applies default)."""
     if not raw or not raw.strip():
         return []
     out: List[int] = []
@@ -479,6 +719,27 @@ async def resolve_query_month_bounds(
     return start_ym, end_ym, start_d, end_d
 
 
+def _union_fetch_bounds(
+    *,
+    start_d: date,
+    end_d: date,
+    years: Sequence[int],
+    month_year: Optional[str],
+) -> Tuple[date, date]:
+    """Widen the ATL fetch window to cover monthly range + YoY years + slicer month."""
+    fetch_start, fetch_end = start_d, end_d
+    if years:
+        y_min, y_max = min(years), max(years)
+        fetch_start = min(fetch_start, date(y_min, 1, 1))
+        fetch_end = max(fetch_end, date(y_max, 12, 31))
+    if month_year:
+        my, mm = parse_year_month(month_year)
+        m_start, m_end = ym_to_date_bounds(my, mm)
+        fetch_start = min(fetch_start, m_start)
+        fetch_end = max(fetch_end, m_end)
+    return fetch_start, fetch_end
+
+
 async def get_aircraft_fuel_report(
     session: AsyncSession,
     query: AircraftFuelReportQuery,
@@ -514,17 +775,37 @@ async def get_aircraft_fuel_report(
         aircraft_ids=filter_ids,
     )
 
+    years = (
+        list(query.years)
+        if query.years
+        else years_from_month_range(start_ym, end_ym)
+    )
+    month_year = query.month_year
+
     cache_ids = tuple(sorted(filter_ids or []))
-    cached = _cache_get(start_ym, end_ym, cache_ids)
+    cached = _cache_get(start_ym, end_ym, cache_ids, years, month_year)
     if cached is not None:
         return cached
 
+    fetch_start, fetch_end = _union_fetch_bounds(
+        start_d=start_d,
+        end_d=end_d,
+        years=years,
+        month_year=month_year,
+    )
+
     rows = await fetch_fuel_report_atl_rows(
         session,
-        start_date=start_d,
-        end_date=end_d,
+        start_date=fetch_start,
+        end_date=fetch_end,
         aircraft_ids=filter_ids,
     )
-    response = build_fuel_report(rows, start_month=start_ym, end_month=end_ym)
-    _cache_set(start_ym, end_ym, cache_ids, response)
+    response = build_fuel_report(
+        rows,
+        start_month=start_ym,
+        end_month=end_ym,
+        years=years,
+        month_year=month_year,
+    )
+    _cache_set(start_ym, end_ym, cache_ids, years, month_year, response)
     return response
