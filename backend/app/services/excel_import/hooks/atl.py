@@ -28,11 +28,14 @@ class AtlImportHook(ImportHook):
         audit_account_id,
     ) -> None:
         from app.repository.aircraft_technical_log import _replace_atl_component_parts
+        from app.services.aircraft_fuel_report_service import invalidate_fuel_report_cache
+
+        target = existing or obj
+        invalidate_fuel_report_cache(origin_date=getattr(target, "origin_date", None))
 
         parts = getattr(validated, "component_parts", None)
         if parts is None:
             return
-        target = existing or obj
         atl_id = getattr(target, "id", None)
         if atl_id is None:
             await session.flush()

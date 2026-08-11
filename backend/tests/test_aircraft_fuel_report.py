@@ -243,6 +243,196 @@ def test_build_report_aggregates_by_month_and_aircraft():
     assert report.summary.total_fuel_gal == 27.0  # 22 + 5
     assert report.summary.total_landings == 4
     assert report.meta.source == "ATL Logbook"
+    assert report.meta.fuel_unit == "gallons"
+
+
+def test_yoy_years_derived_from_start_end_month_range():
+    """When years is omitted, YoY columns follow start_month..end_month years."""
+    rows = [
+        _row(
+            origin_date=date(2023, 1, 10),
+            airframe_run_time=Decimal("10"),
+        ),
+        _row(
+            id=2,
+            sequence_no="2",
+            origin_date=date(2023, 6, 10),
+            airframe_run_time=Decimal("20"),
+        ),
+        _row(
+            id=3,
+            sequence_no="3",
+            origin_date=date(2024, 3, 10),
+            airframe_run_time=Decimal("30"),
+        ),
+    ]
+    single = build_fuel_report(
+        rows,
+        start_month="2023-01",
+        end_month="2023-12",
+    )
+    assert single.yoy_flying_hours.years == [2023]
+    assert single.yoy_flying_hours.months[0].values == {"2023": 10.0}
+    assert single.yoy_flying_hours.months[5].values == {"2023": 20.0}
+    assert single.yoy_flying_hours.grand_total == {"2023": 30.0}
+
+    multi = build_fuel_report(
+        rows,
+        start_month="2023-01",
+        end_month="2024-12",
+    )
+    assert multi.yoy_flying_hours.years == [2023, 2024]
+    assert multi.yoy_flying_hours.months[2].values == {"2023": 0.0, "2024": 30.0}
+
+
+def test_yoy_flying_hours_grand_total_skips_empty_months():
+    """grand_total / average only cover months with hours > 0 for that year."""
+    rows = [
+        _row(
+            origin_date=date(2025, 1, 10),
+            airframe_run_time=Decimal("100"),
+        ),
+        _row(
+            id=2,
+            sequence_no="2",
+            origin_date=date(2025, 2, 10),
+            airframe_run_time=Decimal("200"),
+        ),
+        _row(
+            id=3,
+            sequence_no="3",
+            origin_date=date(2026, 1, 10),
+            airframe_run_time=Decimal("150"),
+        ),
+        # July YoY jump: 50 → 250 = 5x → large_yoy_variance
+        _row(
+            id=4,
+            sequence_no="4",
+            origin_date=date(2025, 7, 10),
+            airframe_run_time=Decimal("50"),
+        ),
+        _row(
+            id=5,
+            sequence_no="5",
+            origin_date=date(2026, 7, 10),
+            airframe_run_time=Decimal("250"),
+        ),
+    ]
+    report = build_fuel_report(
+        rows,
+        start_month="2026-01",
+        end_month="2026-01",
+        years=[2025, 2026],
+    )
+    yoy = report.yoy_flying_hours
+    assert yoy.years == [2025, 2026]
+    assert len(yoy.months) == 12
+    assert yoy.months[0].month == "January"
+    assert yoy.months[0].values == {"2025": 100.0, "2026": 150.0}
+    assert yoy.months[6].month == "July"
+    assert yoy.months[6].values == {"2025": 50.0, "2026": 250.0}
+    assert yoy.months[6].flag == "large_yoy_variance"
+    # 2025: Jan+Feb+Jul = 350 over 3 months; 2026: Jan+Jul = 400 over 2 months
+    assert yoy.grand_total == {"2025": 350.0, "2026": 400.0}
+    assert yoy.average_fh == {"2025": 350.0 / 3, "2026": 200.0}
+    assert any(f.code == "large_yoy_variance" for f in report.data_quality_flags)
+    # Monthly series still scoped to start/end only
+    assert [m.month for m in report.monthly] == ["2026-01"]
+    assert report.summary.total_hours == 150.0
+
+
+def test_yoy_empty_years_zeroed_not_404():
+    report = build_fuel_report(
+        [],
+        start_month="2099-01",
+        end_month="2099-01",
+        years=[2098, 2099],
+    )
+    assert report.yoy_flying_hours.years == [2098, 2099]
+    assert len(report.yoy_flying_hours.months) == 12
+    assert report.yoy_flying_hours.grand_total == {"2098": 0.0, "2099": 0.0}
+    assert report.yoy_flying_hours.average_fh == {"2098": 0.0, "2099": 0.0}
+    assert all(
+        m.values == {"2098": 0.0, "2099": 0.0} for m in report.yoy_flying_hours.months
+    )
+
+
+def test_aircraft_month_breakdown_shared_burn_and_zero_hours_null():
+    rows = [
+        _row(
+            registration="RP-C12",
+            origin_date=date(2025, 4, 5),
+            airframe_run_time=Decimal("10"),
+            fuel_qty_left_prior_departure=Decimal("100"),
+            fuel_qty_right_prior_departure=Decimal("100"),
+            fuel_qty_left_after_on_blks=Decimal("0"),
+            fuel_qty_right_after_on_blks=Decimal("0"),
+        ),
+        _row(
+            id=2,
+            sequence_no="2",
+            registration="RP-C14",
+            origin_date=date(2025, 4, 5),
+            airframe_run_time=Decimal("10"),
+            fuel_qty_left_prior_departure=Decimal("100"),
+            fuel_qty_right_prior_departure=Decimal("100"),
+            fuel_qty_left_after_on_blks=Decimal("0"),
+            fuel_qty_right_after_on_blks=Decimal("0"),
+        ),
+        _row(
+            id=3,
+            sequence_no="3",
+            registration="RP-C20",
+            origin_date=date(2025, 4, 6),
+            airframe_run_time=Decimal("10"),
+            # fuel=50 → burn=5 vs peer median 20 → 4x outlier
+            fuel_qty_left_prior_departure=Decimal("30"),
+            fuel_qty_right_prior_departure=Decimal("20"),
+            fuel_qty_left_after_on_blks=Decimal("0"),
+            fuel_qty_right_after_on_blks=Decimal("0"),
+        ),
+        _row(
+            id=4,
+            sequence_no="4",
+            registration="RP-C99",
+            origin_date=date(2025, 4, 7),
+            airframe_run_time=Decimal("0"),
+            fuel_qty_left_prior_departure=Decimal("10"),
+            fuel_qty_right_prior_departure=Decimal("10"),
+            fuel_qty_left_after_on_blks=Decimal("5"),
+            fuel_qty_right_after_on_blks=Decimal("5"),
+        ),
+    ]
+    report = build_fuel_report(
+        rows,
+        start_month="2025-04",
+        end_month="2025-04",
+        years=[2025],
+        month_year="2025-04",
+    )
+    bd = report.aircraft_month_breakdown
+    assert bd.month_year == "Apr-25"
+    by_tail = {a.tail_number: a for a in bd.aircraft}
+    assert by_tail["RP-C12"].hours == 10.0
+    assert by_tail["RP-C12"].fuel == 200.0
+    assert by_tail["RP-C12"].fuel_burn_per_hour == 20.0
+    assert by_tail["RP-C20"].fuel_burn_per_hour == 5.0
+    assert by_tail["RP-C20"].flag == "fuel_burn_outlier"
+    assert by_tail["RP-C12"].flag is None
+    assert by_tail["RP-C99"].hours == 0.0
+    assert by_tail["RP-C99"].fuel_burn_per_hour is None
+    assert any(f.code == "fuel_burn_outlier" for f in report.data_quality_flags)
+
+
+def test_aircraft_month_breakdown_empty_when_month_omitted():
+    report = build_fuel_report(
+        [_row()],
+        start_month="2026-01",
+        end_month="2026-01",
+        years=[2026],
+    )
+    assert report.aircraft_month_breakdown.month_year is None
+    assert report.aircraft_month_breakdown.aircraft == []
 
 
 def test_cache_invalidate_clears():
