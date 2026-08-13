@@ -51,6 +51,20 @@ def _excel_empty_to_none(value: Any) -> Any:
     return value
 
 
+def _optional_account_fk_to_none(value: Any) -> Any:
+    """Treat missing / cleared assignee values as None so DB stores NULL.
+
+    Accepts null, empty string, whitespace, and sentinel tokens None/null/undefined.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        s = value.strip()
+        if not s or s.lower() in ("none", "null", "undefined", "-", "na", "n/a"):
+            return None
+    return value
+
+
 def _import_scalar_clean(value: Any) -> Any:
     """Like _excel_empty_to_none but also treats pandas NA as None (nested part cells)."""
     try:
@@ -356,6 +370,19 @@ class AircraftTechnicalLogBase(BaseModel):
             return None
         return v
 
+    @validator(
+        "pilot_fk",
+        "pilot_accepted_by",
+        "rts_signed_by",
+        "remark_person",
+        "actiontaken_person",
+        "maintenance_fk",
+        pre=True,
+    )
+    def empty_assignee_to_none(cls, v: Any) -> Any:
+        """Cleared / missing assignees → None (DB NULL). Never persist 'None' string."""
+        return _optional_account_fk_to_none(v)
+
     @validator("nature_of_flight", pre=True)
     def empty_str_to_none_nature_of_flight(cls, v: Any) -> Any:
         """Treat empty string, whitespace-only, or "-" as None so DB stores NULL."""
@@ -641,6 +668,7 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
     )
     def excel_int_to_none_or_int(cls, v: Any) -> Any:
         """Coerce Excel NaN to None; reject non-numeric values when a cell is provided."""
+        v = _optional_account_fk_to_none(v)
         v = _excel_empty_to_none(v)
         if v is None:
             return None
@@ -806,6 +834,19 @@ class AircraftTechnicalLogUpdate(BaseModel):
             return None
         return v
 
+    @validator(
+        "pilot_fk",
+        "pilot_accepted_by",
+        "rts_signed_by",
+        "remark_person",
+        "actiontaken_person",
+        "maintenance_fk",
+        pre=True,
+    )
+    def empty_assignee_to_none_update(cls, v: Any) -> Any:
+        """Cleared assignees on edit → None so update persists NULL (exclude_unset still receives the key)."""
+        return _optional_account_fk_to_none(v)
+
     @validator("nature_of_flight", pre=True)
     def empty_str_to_none_nature_of_flight_update(cls, v: Any) -> Any:
         """Treat empty string, whitespace-only, or "-" as None so DB stores NULL."""
@@ -931,16 +972,6 @@ class ATLSearchItem(BaseModel):
 
     class Config:
         orm_mode = True
-
-
-class ATLAircraftScopedSearchItem(BaseModel):
-    """GET /api/v1/aircraft/{aircraft_id}/atl/?sequence_number= — sequence row with tach end, computed AFTT (same chain as auto_airframe_aftt / atl/paged), and origin date."""
-
-    id: int
-    sequence_no: str
-    tachometer_end: Optional[float] = None
-    auto_airframe_aftt: Optional[float] = None
-    origin_date: Optional[date] = None
 
 
 # Canonical time fields on GET /paged and GET /{id}: returned without response rounding.

@@ -71,3 +71,6 @@ AUTHORIZATION_SCOPE_OTHERS_TABLE_NAME = "authorization_scope_others"
 
 ROLE_MODULE_NAME = "roles"
 ROLE_TABLE_NAME = "roles"
+
+NATURE_OF_FLIGHT_DESCRIPTION_MODULE_NAME = "nature_of_flight_description"
+NATURE_OF_FLIGHT_DESCRIPTION_TABLE_NAME = "nature_of_flight_description"

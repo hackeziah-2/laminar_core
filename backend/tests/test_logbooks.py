@@ -76,6 +76,7 @@ def test_create_engine_logbook(client: TestClient, aircraft_id: int):
         "date": "2026-01-27",
         "engine_tsn": 1000.5,
         "sequence_no": "ENG-001",
+        "logbook_seq_no": "ENG-001",
         "tach_time": 500.0,
         "engine_tso": 200.0,
         "engine_tbo": 1000.0,
@@ -86,6 +87,7 @@ def test_create_engine_logbook(client: TestClient, aircraft_id: int):
     assert response.status_code == 201
     data = response.json()
     assert data["sequence_no"] == logbook_data["sequence_no"]
+    assert data["logbook_seq_no"] == logbook_data["logbook_seq_no"]
     assert data["engine_tsn"] == logbook_data["engine_tsn"]
     assert data["id"] is not None
 
@@ -96,6 +98,7 @@ def test_get_engine_logbook(client: TestClient, aircraft_id: int):
         "aircraft_fk": aircraft_id,
         "date": "2026-01-27",
         "sequence_no": "ENG-002",
+        "logbook_seq_no": "ENG-002",
         "description": "Test entry",
     }
     create_response = _post_logbook(client, "/api/v1/logbooks/engine", logbook_data)
@@ -120,6 +123,7 @@ def test_update_engine_logbook(client: TestClient, aircraft_id: int):
         "aircraft_fk": aircraft_id,
         "date": "2026-01-27",
         "sequence_no": "ENG-003",
+        "logbook_seq_no": "ENG-003",
         "description": "Original description",
     }
     create_response = _post_logbook(client, "/api/v1/logbooks/engine", logbook_data)
@@ -142,6 +146,7 @@ def test_engine_logbook_component_parts_create_and_update(client: TestClient, ai
         "aircraft_fk": aircraft_id,
         "date": "2026-01-27",
         "sequence_no": "ENG-COMP-001",
+        "logbook_seq_no": "ENG-COMP-001",
         "componentParts": [
             {
                 "qty": 1,
@@ -202,6 +207,7 @@ def test_delete_engine_logbook(client: TestClient, aircraft_id: int):
         "aircraft_fk": aircraft_id,
         "date": "2026-01-27",
         "sequence_no": "ENG-004",
+        "logbook_seq_no": "ENG-004",
     }
     create_response = _post_logbook(client, "/api/v1/logbooks/engine", logbook_data)
     logbook_id = create_response.json()["id"]
@@ -229,6 +235,7 @@ def test_create_airframe_logbook(client: TestClient, aircraft_id: int):
         "aircraft_fk": aircraft_id,
         "date": "2026-01-27",
         "sequence_no": "AF-001",
+        "logbook_seq_no": "AF-001",
         "tach_time": 500.0,
         "airframe_time": 2000.0,
         "description": "Airframe inspection",
@@ -247,6 +254,7 @@ def test_get_airframe_logbook(client: TestClient, aircraft_id: int):
         "aircraft_fk": aircraft_id,
         "date": "2026-01-27",
         "sequence_no": "AF-002",
+        "logbook_seq_no": "AF-002",
     }
     create_response = _post_logbook(client, "/api/v1/logbooks/airframe", logbook_data)
     logbook_id = create_response.json()["id"]
@@ -263,6 +271,7 @@ def test_update_airframe_logbook(client: TestClient, aircraft_id: int):
         "aircraft_fk": aircraft_id,
         "date": "2026-01-27",
         "sequence_no": "AF-003",
+        "logbook_seq_no": "AF-003",
     }
     create_response = _post_logbook(client, "/api/v1/logbooks/airframe", logbook_data)
     logbook_id = create_response.json()["id"]
@@ -280,6 +289,7 @@ def test_airframe_logbook_component_parts_create_and_update(client: TestClient, 
         "aircraft_fk": aircraft_id,
         "date": "2026-01-27",
         "sequence_no": "AF-COMP-001",
+        "logbook_seq_no": "AF-COMP-001",
         "componentParts": [
             {
                 "qty": 4,
@@ -328,6 +338,7 @@ def test_delete_airframe_logbook(client: TestClient, aircraft_id: int):
         "aircraft_fk": aircraft_id,
         "date": "2026-01-27",
         "sequence_no": "AF-004",
+        "logbook_seq_no": "AF-004",
     }
     create_response = _post_logbook(client, "/api/v1/logbooks/airframe", logbook_data)
     logbook_id = create_response.json()["id"]
@@ -352,6 +363,7 @@ def test_create_avionics_logbook(client: TestClient, aircraft_id: int):
         "date": "2026-01-27",
         "airframe_tsn": 2000.0,
         "sequence_no": "AV-001",
+        "logbook_seq_no": "AV-001",
         "component": "GPS Unit",
         "part_no": "PN-12345",
         "serial_no": "SN-67890",
@@ -386,6 +398,7 @@ def test_get_avionics_logbook(client: TestClient, aircraft_id: int):
         "aircraft_fk": aircraft_id,
         "date": "2026-01-27",
         "sequence_no": "AV-002",
+        "logbook_seq_no": "AV-002",
         "componentParts": [
             {
                 "qty": 1,
@@ -416,6 +429,7 @@ def test_update_avionics_logbook(client: TestClient, aircraft_id: int):
         "aircraft_fk": aircraft_id,
         "date": "2026-01-27",
         "sequence_no": "AV-003",
+        "logbook_seq_no": "AV-003",
         "componentParts": [
             {
                 "qty": 1,
@@ -465,6 +479,7 @@ def test_avionics_logbook_component_parts_create_and_update(client: TestClient, 
         "aircraft_fk": aircraft_id,
         "date": "2026-01-27",
         "sequence_no": "AV-COMP-001",
+        "logbook_seq_no": "AV-COMP-001",
         "component": "GPS Unit",
         "componentParts": [
             {
@@ -526,6 +541,7 @@ def test_delete_avionics_logbook(client: TestClient, aircraft_id: int):
         "aircraft_fk": aircraft_id,
         "date": "2026-01-27",
         "sequence_no": "AV-004",
+        "logbook_seq_no": "AV-004",
     }
     create_response = _post_logbook(client, "/api/v1/logbooks/avionics", logbook_data)
     logbook_id = create_response.json()["id"]
@@ -550,6 +566,7 @@ def test_create_propeller_logbook(client: TestClient, aircraft_id: int):
         "date": "2026-01-27",
         "propeller_tsn": 1500.0,
         "sequence_no": "PROP-001",
+        "logbook_seq_no": "PROP-001",
         "tach_time": 600.0,
         "propeller_tso": 300.0,
         "propeller_tbo": 1500.0,
@@ -569,6 +586,7 @@ def test_get_propeller_logbook(client: TestClient, aircraft_id: int):
         "aircraft_fk": aircraft_id,
         "date": "2026-01-27",
         "sequence_no": "PROP-002",
+        "logbook_seq_no": "PROP-002",
     }
     create_response = _post_logbook(client, "/api/v1/logbooks/propeller", logbook_data)
     logbook_id = create_response.json()["id"]
@@ -585,6 +603,7 @@ def test_update_propeller_logbook(client: TestClient, aircraft_id: int):
         "aircraft_fk": aircraft_id,
         "date": "2026-01-27",
         "sequence_no": "PROP-003",
+        "logbook_seq_no": "PROP-003",
     }
     create_response = _post_logbook(client, "/api/v1/logbooks/propeller", logbook_data)
     logbook_id = create_response.json()["id"]
@@ -602,6 +621,7 @@ def test_delete_propeller_logbook(client: TestClient, aircraft_id: int):
         "aircraft_fk": aircraft_id,
         "date": "2026-01-27",
         "sequence_no": "PROP-004",
+        "logbook_seq_no": "PROP-004",
     }
     create_response = _post_logbook(client, "/api/v1/logbooks/propeller", logbook_data)
     logbook_id = create_response.json()["id"]
@@ -634,6 +654,7 @@ async def test_create_engine_logbook_repository(db_session: AsyncSession):
         aircraft_fk=aircraft_id,
         date=date(2026, 1, 27),
         sequence_no="ENG-REPO-001",
+        logbook_seq_no="ENG-REPO-001",
         engine_tsn=1000.0,
         description="Repository test",
     )
@@ -650,6 +671,7 @@ async def test_get_engine_logbook_repository(db_session: AsyncSession):
         aircraft_fk=aircraft_id,
         date=date(2026, 1, 27),
         sequence_no="ENG-REPO-002",
+        logbook_seq_no="ENG-REPO-002",
     )
     created = await create_engine_logbook(db_session, logbook_data)
 
@@ -680,6 +702,7 @@ async def test_update_engine_logbook_repository(db_session: AsyncSession):
         aircraft_fk=aircraft_id,
         date=date(2026, 1, 27),
         sequence_no="ENG-REPO-003",
+        logbook_seq_no="ENG-REPO-003",
     )
     created = await create_engine_logbook(db_session, logbook_data)
 
@@ -699,6 +722,7 @@ async def test_engine_logbook_component_parts_create_and_update_repository(db_se
             aircraft_fk=aircraft_id,
             date=date(2026, 4, 15),
             sequence_no="ENG-REPO-COMP-001",
+            logbook_seq_no="ENG-REPO-COMP-001",
             description="Removed damaged fuel nozzle and installed serviceable replacement.",
             component_parts=[
                 ComponentRecordCreate(
@@ -767,6 +791,7 @@ async def test_soft_delete_engine_logbook_repository(db_session: AsyncSession):
         aircraft_fk=aircraft_id,
         date=date(2026, 1, 27),
         sequence_no="ENG-REPO-004",
+        logbook_seq_no="ENG-REPO-004",
     )
     created = await create_engine_logbook(db_session, logbook_data)
 
@@ -785,6 +810,7 @@ async def test_create_airframe_logbook_repository(db_session: AsyncSession):
         aircraft_fk=aircraft_id,
         date=date(2026, 1, 27),
         sequence_no="AF-REPO-001",
+        logbook_seq_no="AF-REPO-001",
     )
     created = await create_airframe_logbook(db_session, logbook_data)
     assert created.id is not None
@@ -798,6 +824,7 @@ async def test_create_avionics_logbook_repository(db_session: AsyncSession):
         aircraft_fk=aircraft_id,
         date=date(2026, 1, 27),
         sequence_no="AV-REPO-001",
+        logbook_seq_no="AV-REPO-001",
         component="Test Component",
     )
     created = await create_avionics_logbook(db_session, logbook_data)
@@ -813,6 +840,7 @@ async def test_create_propeller_logbook_repository(db_session: AsyncSession):
         aircraft_fk=aircraft_id,
         date=date(2026, 1, 27),
         sequence_no="PROP-REPO-001",
+        logbook_seq_no="PROP-REPO-001",
     )
     created = await create_propeller_logbook(db_session, logbook_data)
     assert created.id is not None
@@ -827,6 +855,7 @@ def test_list_engine_logbook_with_search(client: TestClient, aircraft_id: int):
             "aircraft_fk": aircraft_id,
             "date": "2026-01-27",
             "sequence_no": f"ENG-SEARCH-{i}",
+            "logbook_seq_no": f"ENG-SEARCH-{i}",
             "description": f"Test entry {i}",
         }
         _post_logbook(client, "/api/v1/logbooks/engine", logbook_data)
@@ -847,6 +876,7 @@ def test_list_engine_logbook_pagination(client: TestClient, aircraft_id: int):
             "aircraft_fk": aircraft_id,
             "date": "2026-01-27",
             "sequence_no": f"ENG-PAGE-{i}",
+            "logbook_seq_no": f"ENG-PAGE-{i}",
         }
         _post_logbook(client, "/api/v1/logbooks/engine", logbook_data)
 
@@ -891,6 +921,7 @@ def test_create_logbook_with_web_link(client: TestClient, aircraft_id: int, logb
         "aircraft_fk": aircraft_id,
         "date": "2026-01-27",
         "sequence_no": sequence_no,
+        "logbook_seq_no": sequence_no,
         "web_link": web_link,
     }
     response = _post_logbook(client, f"/api/v1/logbooks/{logbook_type}", logbook_data)
@@ -905,6 +936,7 @@ def test_create_logbook_without_web_link(client: TestClient, aircraft_id: int, l
         "aircraft_fk": aircraft_id,
         "date": "2026-01-27",
         "sequence_no": f"{sequence_no}-NONE",
+        "logbook_seq_no": f"{sequence_no}-NONE",
     }
     response = _post_logbook(client, f"/api/v1/logbooks/{logbook_type}", logbook_data)
     assert response.status_code == 201, response.text
@@ -918,6 +950,7 @@ def test_update_logbook_web_link(client: TestClient, aircraft_id: int, logbook_t
         "aircraft_fk": aircraft_id,
         "date": "2026-01-27",
         "sequence_no": f"{sequence_no}-UPD",
+        "logbook_seq_no": f"{sequence_no}-UPD",
         "web_link": f"https://example.com/{logbook_type}/before",
     }
     create_response = _post_logbook(client, f"/api/v1/logbooks/{logbook_type}", create_data)
@@ -942,6 +975,7 @@ def test_partial_update_preserves_web_link(client: TestClient, aircraft_id: int,
         "aircraft_fk": aircraft_id,
         "date": "2026-01-27",
         "sequence_no": f"{sequence_no}-PARTIAL",
+        "logbook_seq_no": f"{sequence_no}-PARTIAL",
         "web_link": web_link,
     }
     create_response = _post_logbook(client, f"/api/v1/logbooks/{logbook_type}", create_data)
@@ -967,6 +1001,7 @@ def test_list_and_detail_include_web_link(client: TestClient, aircraft_id: int, 
         "aircraft_fk": aircraft_id,
         "date": "2026-01-27",
         "sequence_no": f"{sequence_no}-LIST",
+        "logbook_seq_no": f"{sequence_no}-LIST",
         "web_link": web_link,
     }
     create_response = _post_logbook(client, f"/api/v1/logbooks/{logbook_type}", create_data)
@@ -992,6 +1027,7 @@ def test_reject_web_link_longer_than_2048(client: TestClient, aircraft_id: int, 
         "aircraft_fk": aircraft_id,
         "date": "2026-01-27",
         "sequence_no": f"{sequence_no}-LONG",
+        "logbook_seq_no": f"{sequence_no}-LONG",
         "web_link": "https://example.com/" + ("x" * 2049),
     }
     response = _post_logbook(client, f"/api/v1/logbooks/{logbook_type}", logbook_data)
@@ -1033,6 +1069,7 @@ def _audit_logbook_payload(aircraft_id: int, sequence_no: str) -> dict:
         "aircraft_fk": aircraft_id,
         "date": "2026-01-27",
         "sequence_no": sequence_no,
+        "logbook_seq_no": sequence_no,
         "description": "Audit test entry",
     }
 
@@ -1132,3 +1169,148 @@ def test_logbook_delete_writes_audit_log(
     assert delete_log["action"] == "DELETE"
     assert delete_log["old_data"] is not None
     assert delete_log["new_data"] is None
+
+
+# ========== logbook_seq_no Tests ==========
+_LOGBOOK_SEQ_NO_TYPES = ("engine", "airframe", "avionics", "propeller")
+
+
+@pytest.mark.parametrize("logbook_type", _LOGBOOK_SEQ_NO_TYPES)
+def test_create_requires_logbook_seq_no(client: TestClient, aircraft_id: int, logbook_type: str):
+    """Create rejects missing logbook_seq_no."""
+    response = _post_logbook(
+        client,
+        f"/api/v1/logbooks/{logbook_type}",
+        {
+            "aircraft_fk": aircraft_id,
+            "date": "2026-01-27",
+            "sequence_no": f"{logbook_type.upper()}-NO-SEQ",
+        },
+    )
+    assert response.status_code == 400
+    assert "Validation error" in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "invalid_value",
+    [None, "", "   ", "x" * 51],
+    ids=["null", "blank", "whitespace", "too_long"],
+)
+@pytest.mark.parametrize("logbook_type", _LOGBOOK_SEQ_NO_TYPES)
+def test_create_rejects_invalid_logbook_seq_no(
+    client: TestClient,
+    aircraft_id: int,
+    logbook_type: str,
+    invalid_value,
+):
+    """Create rejects null, blank, whitespace-only, and >50 char logbook_seq_no."""
+    payload = {
+        "aircraft_fk": aircraft_id,
+        "date": "2026-01-27",
+        "sequence_no": f"{logbook_type.upper()}-INVALID",
+        "logbook_seq_no": invalid_value,
+    }
+    response = _post_logbook(client, f"/api/v1/logbooks/{logbook_type}", payload)
+    assert response.status_code == 400
+    assert "Validation error" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("logbook_type", _LOGBOOK_SEQ_NO_TYPES)
+def test_create_trims_logbook_seq_no(client: TestClient, aircraft_id: int, logbook_type: str):
+    """Create trims surrounding whitespace from logbook_seq_no."""
+    payload = {
+        "aircraft_fk": aircraft_id,
+        "date": "2026-01-27",
+        "sequence_no": f"{logbook_type.upper()}-TRIM",
+        "logbook_seq_no": "  ELB-000125  ",
+    }
+    response = _post_logbook(client, f"/api/v1/logbooks/{logbook_type}", payload)
+    assert response.status_code == 201, response.text
+    assert response.json()["logbook_seq_no"] == "ELB-000125"
+
+
+@pytest.mark.parametrize("logbook_type", _LOGBOOK_SEQ_NO_TYPES)
+def test_update_and_filter_logbook_seq_no(client: TestClient, aircraft_id: int, logbook_type: str):
+    """Update logbook_seq_no and filter list by exact/partial value."""
+    create_payload = {
+        "aircraft_fk": aircraft_id,
+        "date": "2026-01-27",
+        "sequence_no": f"{logbook_type.upper()}-SEQ-FILTER",
+        "logbook_seq_no": "ELB-000125",
+    }
+    create_response = _post_logbook(client, f"/api/v1/logbooks/{logbook_type}", create_payload)
+    assert create_response.status_code == 201, create_response.text
+    created = create_response.json()
+    assert created["logbook_seq_no"] == "ELB-000125"
+    logbook_id = created["id"]
+
+    detail = client.get(f"/api/v1/logbooks/{logbook_type}/{logbook_id}")
+    assert detail.status_code == 200
+    assert detail.json()["logbook_seq_no"] == "ELB-000125"
+
+    update_response = _put_logbook(
+        client,
+        f"/api/v1/logbooks/{logbook_type}/{logbook_id}",
+        {"logbook_seq_no": "ELB-000999"},
+    )
+    assert update_response.status_code == 200, update_response.text
+    assert update_response.json()["logbook_seq_no"] == "ELB-000999"
+
+    exact = client.get(
+        f"/api/v1/logbooks/{logbook_type}/paged?logbook_seq_no=ELB-000999&limit=10&page=1"
+    )
+    assert exact.status_code == 200
+    exact_items = exact.json()["items"]
+    assert any(item["id"] == logbook_id for item in exact_items)
+
+    partial = client.get(
+        f"/api/v1/logbooks/{logbook_type}/paged?logbook_seq_no=000999&limit=10&page=1"
+    )
+    assert partial.status_code == 200
+    partial_items = partial.json()["items"]
+    assert any(item["id"] == logbook_id for item in partial_items)
+
+    blank_update = _put_logbook(
+        client,
+        f"/api/v1/logbooks/{logbook_type}/{logbook_id}",
+        {"logbook_seq_no": "   "},
+    )
+    assert blank_update.status_code == 400
+    assert "Validation error" in blank_update.json()["detail"]
+
+
+def test_logbook_seq_no_schema_validators():
+    """Direct schema validation for required/optional logbook_seq_no rules."""
+    from pydantic import ValidationError
+    from app.schemas.logbook_schema import EngineLogbookCreate, EngineLogbookUpdate
+
+    with pytest.raises(ValidationError):
+        EngineLogbookCreate(
+            aircraft_fk=1,
+            date=date(2026, 1, 27),
+            sequence_no="ENG-1",
+            logbook_seq_no="",
+        )
+
+    with pytest.raises(ValidationError):
+        EngineLogbookCreate(
+            aircraft_fk=1,
+            date=date(2026, 1, 27),
+            sequence_no="ENG-1",
+            logbook_seq_no="x" * 51,
+        )
+
+    created = EngineLogbookCreate(
+        aircraft_fk=1,
+        date=date(2026, 1, 27),
+        sequence_no="ENG-1",
+        logbook_seq_no="  ELB-1  ",
+    )
+    assert created.logbook_seq_no == "ELB-1"
+
+    # Optional on update / partial PATCH-style payloads
+    partial = EngineLogbookUpdate(description="only description")
+    assert partial.logbook_seq_no is None
+
+    with pytest.raises(ValidationError):
+        EngineLogbookUpdate(logbook_seq_no="")

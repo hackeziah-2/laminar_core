@@ -10,6 +10,7 @@ async def test():
             aircraft_fk=1,
             date=date.today(),
             sequence_no="AV-001",
+            logbook_seq_no="ALB-000001",
             component_parts=[
                 ComponentRecordCreate(
                     qty=1.0,

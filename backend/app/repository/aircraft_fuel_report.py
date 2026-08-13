@@ -16,12 +16,10 @@ _FUEL_REPORT_STATUSES: Sequence[WorkStatus] = (
     WorkStatus.COMPLETED,
 )
 
-# Month bucket: ORIGIN DATE, with reporting-date fallbacks when origin is null
-_MONTH_DATE = func.coalesce(
-    AircraftTechnicalLog.origin_date,
-    func.date(AircraftTechnicalLog.date_time_reported),
-    func.date(AircraftTechnicalLog.atl_date_time_reported),
-).label("month_date")
+# ATL off-blocks date = origin_date (departure / off-blocks on the ATL form).
+# Null off-blocks dates are excluded from the report.
+_OFF_BLOCKS_DATE = AircraftTechnicalLog.origin_date
+_MONTH_DATE = _OFF_BLOCKS_DATE.label("month_date")
 
 # RUN TIME with practical fallbacks; null → 0
 _RUN_TIME = func.coalesce(
@@ -43,6 +41,7 @@ _FUEL_REPORT_COLUMNS = (
     AircraftTechnicalLog.aircraft_fk,
     Aircraft.registration,
     _MONTH_DATE,
+    _OFF_BLOCKS_DATE.label("off_blocks_date"),
     AircraftTechnicalLog.origin_date,
     _RUN_TIME,
     _nz(AircraftTechnicalLog.fuel_qty_left_uplift_qty, "fuel_qty_left_uplift_qty"),
@@ -139,16 +138,16 @@ async def fetch_fuel_report_available_month_bounds(
     *,
     aircraft_ids: Optional[Sequence[int]] = None,
 ) -> tuple[Optional[date], Optional[date]]:
-    """Earliest / latest month date among approved/completed ATLs (optionally aircraft-scoped)."""
+    """Earliest / latest off_blocks_date among approved/completed ATLs."""
     stmt = (
         select(
-            func.min(_MONTH_DATE),
-            func.max(_MONTH_DATE),
+            func.min(_OFF_BLOCKS_DATE),
+            func.max(_OFF_BLOCKS_DATE),
         )
         .select_from(AircraftTechnicalLog)
         .where(AircraftTechnicalLog.is_deleted.is_(False))
         .where(AircraftTechnicalLog.work_status.in_(_FUEL_REPORT_STATUSES))
-        .where(_MONTH_DATE.is_not(None))
+        .where(_OFF_BLOCKS_DATE.is_not(None))
     )
     if aircraft_ids:
         stmt = stmt.where(AircraftTechnicalLog.aircraft_fk.in_(list(aircraft_ids)))
@@ -162,14 +161,16 @@ async def fetch_fuel_report_atl_rows(
     session: AsyncSession,
     *,
     start_date: date,
-    end_date: date,
+    end_date_exclusive: date,
     aircraft_ids: Optional[Sequence[int]] = None,
 ) -> List[Any]:
     """
-    Load approved/completed ATL rows with month date in [start_date, end_date].
+    Load approved/completed ATL rows with off_blocks_date in
+    ``[start_date, end_date_exclusive)``.
 
-    Numeric fuel/oil/hours/landings fields are COALESCE'd to 0 in SQL.
-    Filter by ``aircraft_fk`` (parameterized IN) when ``aircraft_ids`` is provided.
+    Uses an exclusive upper bound so Date and DateTime columns are handled
+    safely. Null off_blocks_date rows are excluded. Rows are ordered by
+    aircraft then off_blocks_date for aircraft-scoped aggregation downstream.
     """
     stmt = (
         select(*_FUEL_REPORT_COLUMNS)
@@ -177,16 +178,17 @@ async def fetch_fuel_report_atl_rows(
         .where(AircraftTechnicalLog.is_deleted.is_(False))
         .where(Aircraft.is_deleted.is_(False))
         .where(AircraftTechnicalLog.work_status.in_(_FUEL_REPORT_STATUSES))
-        .where(_MONTH_DATE.is_not(None))
+        .where(_OFF_BLOCKS_DATE.is_not(None))
         .where(
             and_(
-                _MONTH_DATE >= start_date,
-                _MONTH_DATE <= end_date,
+                _OFF_BLOCKS_DATE >= start_date,
+                _OFF_BLOCKS_DATE < end_date_exclusive,
             )
         )
         .order_by(
+            AircraftTechnicalLog.aircraft_fk.asc(),
             Aircraft.registration.asc(),
-            _MONTH_DATE.asc(),
+            _OFF_BLOCKS_DATE.asc(),
             AircraftTechnicalLog.id.asc(),
         )
     )

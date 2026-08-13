@@ -5,6 +5,7 @@ Used for API responses (standard fields + auto_*) and aircraft-scoped ATL paged 
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import inspect as sa_inspect
@@ -38,6 +39,10 @@ def float_or_zero(value: Any) -> float:
     """Parse value to float; return 0.0 on error or None."""
     if value is None:
         return 0.0
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, Decimal):
+        return float(value)
     if isinstance(value, (int, float)):
         return float(value) if (value == value) else 0.0  # NaN check
     if isinstance(value, str):
