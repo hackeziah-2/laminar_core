@@ -26,6 +26,7 @@ from .ad_monitoring import ADMonitoring, WorkOrderADMonitoring
 from .tcc_maintenance import TCCMaintenance, MethodOfComplianceEnum
 from .cpcp_monitoring import CPCPMonitoring
 from .aircraft_statutory_certificate import AircraftStatutoryCertificate, CategoryTypeEnum
+from .nature_of_flight_description import NatureOfFlightDescription
 from .certificate_category_type import CertificateCategoryType
 from .organizational_approval import OrganizationalApproval
 from .organizational_approval_history import OrganizationalApprovalHistory

@@ -454,6 +454,81 @@ def test_aircraft_month_zero_hours_burn_null(client: TestClient):
 
 
 @pytest.mark.no_auth
+def test_off_blocks_date_filter_excludes_null_and_uses_exclusive_end(
+    client: TestClient,
+):
+    """Filter by ATL off_blocks_date (origin_date): nulls out, end is exclusive."""
+    invalidate_fuel_report_cache()
+
+    async def seed():
+        async with TestSessionLocal() as session:
+            ac = Aircraft(
+                registration="RP-C77",
+                model="172",
+                msn="MSN-OFFBLK",
+                base="MNL",
+                ownership="Owner",
+                status="Active",
+            )
+            session.add(ac)
+            await session.flush()
+            session.add_all(
+                [
+                    AircraftTechnicalLog(
+                        aircraft_fk=ac.id,
+                        sequence_no="OB-1",
+                        work_status=WorkStatus.APPROVED,
+                        origin_date=date(2023, 1, 15),
+                        airframe_run_time=Decimal("10"),
+                        number_of_landings=1,
+                    ),
+                    # Null off_blocks → excluded
+                    AircraftTechnicalLog(
+                        aircraft_fk=ac.id,
+                        sequence_no="OB-2",
+                        work_status=WorkStatus.APPROVED,
+                        origin_date=None,
+                        airframe_run_time=Decimal("99"),
+                        number_of_landings=1,
+                    ),
+                    # Exactly end exclusive bound (2024-01-01) → excluded for end_month=2023-12
+                    AircraftTechnicalLog(
+                        aircraft_fk=ac.id,
+                        sequence_no="OB-3",
+                        work_status=WorkStatus.APPROVED,
+                        origin_date=date(2024, 1, 1),
+                        airframe_run_time=Decimal("50"),
+                        number_of_landings=1,
+                    ),
+                    # Last day of end_month → included
+                    AircraftTechnicalLog(
+                        aircraft_fk=ac.id,
+                        sequence_no="OB-4",
+                        work_status=WorkStatus.APPROVED,
+                        origin_date=date(2023, 12, 31),
+                        airframe_run_time=Decimal("5"),
+                        number_of_landings=1,
+                    ),
+                ]
+            )
+            await session.commit()
+
+    asyncio.run(seed())
+    response = client.get(
+        ENDPOINT,
+        params={"start_month": "2023-01", "end_month": "2023-12", "aircraft": "RP-C77"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["summary"]["total_hours"] == 15.0  # 10 + 5; not 99 or 50
+    assert body["yoy_flying_hours"]["years"] == [2023]
+    months = {m["month"]: m["hours"] for m in body["monthly"]}
+    assert months["2023-01"] == 10.0
+    assert months["2023-12"] == 5.0
+    assert "2024-01" not in months
+
+
+@pytest.mark.no_auth
 def test_query_validation(client: TestClient):
     assert (
         client.get(ENDPOINT, params={"start_month": "2026-13", "end_month": "2026-01"}).status_code

@@ -1071,3 +1071,225 @@ def test_aircraft_technical_log_paged_sequence_sort_does_not_change_auto_computa
     assert asc_items["010"]["auto_engine_tso"] == 23.5
     assert asc_items["010"]["auto_propeller_tsn"] == 53.5
     assert asc_items["010"]["auto_propeller_tso"] == 13.5
+
+
+def test_aircraft_scoped_atl_search_returns_full_fields_and_component_parts(
+    client_with_atl_auth: TestClient,
+    test_aircraft_data: dict,
+):
+    """GET /aircraft/{id}/atl/ returns full ATL rows including component_parts and auto_comp_*."""
+    from datetime import date as date_cls
+
+    from app.models.aircraft_techinical_log import ComponentPartsRecord, TypeEnum
+
+    aircraft_payload = {
+        **test_aircraft_data,
+        "msn": "TEST-MSN-ATL-SEARCH-FULL",
+        "registration": "TEST-ATL-SEARCH-FULL",
+        "airframe_aftt": 100.0,
+    }
+    aircraft_response = client_with_atl_auth.post(
+        "/api/v1/aircraft/",
+        data={"json_data": json.dumps(aircraft_payload)},
+        files={},
+    )
+    assert aircraft_response.status_code == 200, aircraft_response.text
+    aircraft_id = aircraft_response.json()["id"]
+
+    async def seed_atl() -> None:
+        async with TestSessionLocal() as session:
+            atl = AircraftTechnicalLog(
+                aircraft_fk=aircraft_id,
+                sequence_no="24451",
+                nature_of_flight=TypeEnum.TR,
+                origin_station="MNL",
+                origin_date=date_cls(2025, 3, 1),
+                destination_station="CEB",
+                tachometer_start=10.0,
+                tachometer_end=12.5,
+                fuel_qty_left_uplift_qty=50.0,
+                fuel_qty_right_uplift_qty=45.0,
+                oil_qty_uplift_qty=1.0,
+                remarks="Search full fields",
+                actions_taken="None",
+                work_status=WorkStatus.PENDING,
+                auto_airframe_run_time=2.5,
+                auto_airframe_aftt=102.5,
+                auto_engine_run_time=2.5,
+                auto_run_time=2.5,
+                auto_engine_tsn=2.5,
+                auto_engine_tso=2.5,
+                auto_engine_tbo=2.5,
+                auto_propeller_run_time=2.5,
+                auto_propeller_tsn=2.5,
+                auto_propeller_tso=2.5,
+                auto_propeller_tbo=2.5,
+            )
+            session.add(atl)
+            await session.flush()
+            session.add(
+                ComponentPartsRecord(
+                    atl_fk=atl.id,
+                    qty=1,
+                    unit="EA",
+                    nomenclature="Oil Filter",
+                    removed_part_no="OF-1",
+                    installed_part_no="OF-2",
+                    ata_chapter="79",
+                )
+            )
+            await session.commit()
+
+    asyncio.run(seed_atl())
+
+    empty = client_with_atl_auth.get(f"/api/v1/aircraft/{aircraft_id}/atl/")
+    assert empty.status_code == 200, empty.text
+    assert empty.json() == []
+
+    response = client_with_atl_auth.get(
+        f"/api/v1/aircraft/{aircraft_id}/atl/?sequence_number=24451"
+    )
+    assert response.status_code == 200, response.text
+    items = response.json()
+    assert len(items) == 1
+    row = items[0]
+
+    assert row["sequence_no"] == "24451"
+    assert row["origin_station"] == "MNL"
+    assert row["destination_station"] == "CEB"
+    assert row["fuel_qty_left_uplift_qty"] == 50.0
+    assert row["fuel_qty_right_uplift_qty"] == 45.0
+    assert row["oil_qty_uplift_qty"] == 1.0
+    assert row["remarks"] == "Search full fields"
+    assert row["actions_taken"] == "None"
+    assert row["tachometer_end"] == 12.5
+    assert row["auto_comp_airframe_run_time"] == 2.5
+    assert row["auto_comp_airframe_aftt"] == 102.5
+    assert len(row["component_parts"]) == 1
+    assert row["component_parts"][0]["nomenclature"] == "Oil Filter"
+    assert row["component_parts"][0]["removed_part_no"] == "OF-1"
+    assert row["component_parts"][0]["installed_part_no"] == "OF-2"
+
+
+def test_aircraft_scoped_atl_search_respects_limit(
+    client_with_atl_auth: TestClient,
+    test_aircraft_data: dict,
+):
+    """limit query param caps how many matching ATL rows are returned."""
+    aircraft_payload = {
+        **test_aircraft_data,
+        "msn": "TEST-MSN-ATL-SEARCH-LIMIT",
+        "registration": "TEST-ATL-SEARCH-LIMIT",
+    }
+    aircraft_response = client_with_atl_auth.post(
+        "/api/v1/aircraft/",
+        data={"json_data": json.dumps(aircraft_payload)},
+        files={},
+    )
+    assert aircraft_response.status_code == 200, aircraft_response.text
+    aircraft_id = aircraft_response.json()["id"]
+
+    async def seed_rows() -> None:
+        async with TestSessionLocal() as session:
+            session.add_all(
+                [
+                    AircraftTechnicalLog(
+                        aircraft_fk=aircraft_id,
+                        sequence_no="100",
+                        tachometer_start=1.0,
+                        tachometer_end=2.0,
+                    ),
+                    AircraftTechnicalLog(
+                        aircraft_fk=aircraft_id,
+                        sequence_no="101",
+                        tachometer_start=2.0,
+                        tachometer_end=3.0,
+                    ),
+                    AircraftTechnicalLog(
+                        aircraft_fk=aircraft_id,
+                        sequence_no="102",
+                        tachometer_start=3.0,
+                        tachometer_end=4.0,
+                    ),
+                ]
+            )
+            await session.commit()
+
+    asyncio.run(seed_rows())
+
+    response = client_with_atl_auth.get(
+        f"/api/v1/aircraft/{aircraft_id}/atl/?sequence_number=10&limit=2"
+    )
+    assert response.status_code == 200, response.text
+    items = response.json()
+    assert len(items) == 2
+    assert [item["sequence_no"] for item in items] == ["100", "101"]
+    assert all("component_parts" in item for item in items)
+    assert all("auto_comp_airframe_aftt" in item for item in items)
+
+
+def test_aircraft_scoped_atl_search_exact_sequence_returns_one(
+    client_with_atl_auth: TestClient,
+    test_aircraft_data: dict,
+):
+    """Exact sequence_no match returns a single full ATL row even when prefix matches exist."""
+    aircraft_payload = {
+        **test_aircraft_data,
+        "msn": "TEST-MSN-ATL-SEARCH-EXACT",
+        "registration": "TEST-ATL-SEARCH-EXACT",
+    }
+    aircraft_response = client_with_atl_auth.post(
+        "/api/v1/aircraft/",
+        data={"json_data": json.dumps(aircraft_payload)},
+        files={},
+    )
+    assert aircraft_response.status_code == 200, aircraft_response.text
+    aircraft_id = aircraft_response.json()["id"]
+
+    async def seed_rows() -> None:
+        async with TestSessionLocal() as session:
+            session.add_all(
+                [
+                    AircraftTechnicalLog(
+                        aircraft_fk=aircraft_id,
+                        sequence_no="100",
+                        tachometer_start=1.0,
+                        tachometer_end=2.0,
+                        remarks="exact-100",
+                    ),
+                    AircraftTechnicalLog(
+                        aircraft_fk=aircraft_id,
+                        sequence_no="1001",
+                        tachometer_start=2.0,
+                        tachometer_end=3.0,
+                        remarks="prefix-1001",
+                    ),
+                    AircraftTechnicalLog(
+                        aircraft_fk=aircraft_id,
+                        sequence_no="1002",
+                        tachometer_start=3.0,
+                        tachometer_end=4.0,
+                        remarks="prefix-1002",
+                    ),
+                ]
+            )
+            await session.commit()
+
+    asyncio.run(seed_rows())
+
+    response = client_with_atl_auth.get(
+        f"/api/v1/aircraft/{aircraft_id}/atl/?sequence_number=100&limit=10"
+    )
+    assert response.status_code == 200, response.text
+    items = response.json()
+    assert len(items) == 1
+    assert items[0]["sequence_no"] == "100"
+    assert items[0]["remarks"] == "exact-100"
+
+    prefixed = client_with_atl_auth.get(
+        f"/api/v1/aircraft/{aircraft_id}/atl/?sequence_number=ATL-100&limit=10"
+    )
+    assert prefixed.status_code == 200, prefixed.text
+    prefixed_items = prefixed.json()
+    assert len(prefixed_items) == 1
+    assert prefixed_items[0]["sequence_no"] == "100"

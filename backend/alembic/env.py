@@ -30,6 +30,7 @@ from app.models.ad_monitoring import ADMonitoring, WorkOrderADMonitoring
 from app.models.audit_log import AuditLog
 from app.models.notification import Notification
 from app.models.advisory_notification_log import AdvisoryNotificationLog
+from app.models.nature_of_flight_description import NatureOfFlightDescription
 
 target_metadata = Base.metadata
 

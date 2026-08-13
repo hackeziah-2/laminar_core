@@ -146,9 +146,10 @@ def _parse_aircraft_fk(value: Optional[str]) -> Optional[int]:
 async def api_list_engine_logbooks_paged(
     limit: int = Query(10, ge=1, le=100, description="Number of items per page"),
     page: int = Query(1, ge=1, description="Page number (1-indexed)"),
-    search: Optional[str] = Query(None, description="Search in sequence_no and description fields"),
-    sort: Optional[str] = Query("", description="Sort fields (comma-separated). Prefix with '-' for descending. Example: -created_at,sequence_no"),
+    search: Optional[str] = Query(None, description="Search in sequence_no, logbook_seq_no and description fields"),
+    sort: Optional[str] = Query("", description="Sort fields (comma-separated). Prefix with '-' for descending. Example: -created_at,logbook_seq_no"),
     aircraft_fk: Optional[str] = Query(None, description="Filter by aircraft ID"),
+    logbook_seq_no: Optional[str] = Query(None, description="Filter by logbook_seq_no (exact or partial match)"),
     session: AsyncSession = Depends(get_session)
 ):
     """Get paginated list of Engine Logbook entries."""
@@ -160,6 +161,7 @@ async def api_list_engine_logbooks_paged(
         search=search,
         sort=sort,
         aircraft_fk=_parse_aircraft_fk(aircraft_fk),
+        logbook_seq_no=logbook_seq_no,
     )
     pages = ceil(total / limit) if total else 0
     
@@ -202,7 +204,7 @@ async def api_get_engine_logbook(
     response_model=logbook_schema.EngineLogbookRead,
     status_code=status.HTTP_201_CREATED,
     summary="Create Engine Logbook entry",
-    description="Create a new Engine Logbook entry. Required fields: date, sequence_no. "
+    description="Create a new Engine Logbook entry. Required fields: date, sequence_no, logbook_seq_no. "
                 "Optional fields: engine_tsn, tach_time, engine_tso, engine_tbo, description, "
                 "mechanic_fk, signature, upload_file.",
     response_description="Created Engine Logbook entry"
@@ -321,8 +323,9 @@ async def api_list_airframe_logbooks_paged(
     limit: int = Query(10, ge=1, le=100),
     page: int = Query(1, ge=1),
     search: Optional[str] = None,
-    sort: Optional[str] = Query("", description="Example: -created_at,sequence_no"),
+    sort: Optional[str] = Query("", description="Example: -created_at,logbook_seq_no"),
     aircraft_fk: Optional[str] = Query(None, description="Filter by aircraft ID"),
+    logbook_seq_no: Optional[str] = Query(None, description="Filter by logbook_seq_no (exact or partial match)"),
     session: AsyncSession = Depends(get_session)
 ):
     """Get paginated list of Airframe Logbook entries."""
@@ -334,6 +337,7 @@ async def api_list_airframe_logbooks_paged(
         search=search,
         sort=sort,
         aircraft_fk=_parse_aircraft_fk(aircraft_fk),
+        logbook_seq_no=logbook_seq_no,
     )
     pages = ceil(total / limit) if total else 0
     
@@ -481,8 +485,9 @@ async def api_list_avionics_logbooks_paged(
     limit: int = Query(10, ge=1, le=100),
     page: int = Query(1, ge=1),
     search: Optional[str] = None,
-    sort: Optional[str] = Query("", description="Example: -created_at,sequence_no"),
+    sort: Optional[str] = Query("", description="Example: -created_at,logbook_seq_no"),
     aircraft_fk: Optional[str] = Query(None, description="Filter by aircraft ID"),
+    logbook_seq_no: Optional[str] = Query(None, description="Filter by logbook_seq_no (exact or partial match)"),
     session: AsyncSession = Depends(get_session)
 ):
     """Get paginated list of Avionics Logbook entries."""
@@ -494,6 +499,7 @@ async def api_list_avionics_logbooks_paged(
         search=search,
         sort=sort,
         aircraft_fk=_parse_aircraft_fk(aircraft_fk),
+        logbook_seq_no=logbook_seq_no,
     )
     pages = ceil(total / limit) if total else 0
     
@@ -641,8 +647,9 @@ async def api_list_propeller_logbooks_paged(
     limit: int = Query(10, ge=1, le=100),
     page: int = Query(1, ge=1),
     search: Optional[str] = None,
-    sort: Optional[str] = Query("", description="Example: -created_at,sequence_no"),
+    sort: Optional[str] = Query("", description="Example: -created_at,logbook_seq_no"),
     aircraft_fk: Optional[str] = Query(None, description="Filter by aircraft ID"),
+    logbook_seq_no: Optional[str] = Query(None, description="Filter by logbook_seq_no (exact or partial match)"),
     session: AsyncSession = Depends(get_session)
 ):
     """Get paginated list of Propeller Logbook entries."""
@@ -654,6 +661,7 @@ async def api_list_propeller_logbooks_paged(
         search=search,
         sort=sort,
         aircraft_fk=_parse_aircraft_fk(aircraft_fk),
+        logbook_seq_no=logbook_seq_no,
     )
     pages = ceil(total / limit) if total else 0
     

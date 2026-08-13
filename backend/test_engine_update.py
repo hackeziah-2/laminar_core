@@ -14,6 +14,7 @@ async def test():
             aircraft_fk=1,
             date=date.today(),
             sequence_no="ENG-TEST-123",
+            logbook_seq_no="ELB-000123",
             componentParts=[
                 ComponentRecordCreate(qty=1.0, unit="EA", nomenclature="Spark Plug", removedPartNo="1", removedSerialNo="A", installedPartNo="2", installedSerialNo="B", ataChapter="23")
             ],

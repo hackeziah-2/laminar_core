@@ -102,7 +102,8 @@ def test_run_time_falls_back_to_tachometer_total():
     assert state.grand.hours == Decimal("1.75")
 
 
-def test_month_date_fallback_when_origin_missing():
+def test_null_off_blocks_date_excluded_from_report():
+    """Rows without off_blocks_date (origin_date) are skipped."""
     rows = [
         _row(
             origin_date=None,
@@ -111,8 +112,21 @@ def test_month_date_fallback_when_origin_missing():
         )
     ]
     report = build_fuel_report(rows, start_month="2026-03", end_month="2026-03")
-    assert report.monthly[0].month == "2026-03"
-    assert report.monthly[0].hours == 1.0
+    assert report.monthly == []
+    assert report.summary.total_hours == 0.0
+
+
+def test_ym_to_exclusive_range_half_open():
+    from app.services.aircraft_fuel_report_service import (
+        exclusive_month_end,
+        ym_to_exclusive_range,
+    )
+
+    start, end_excl = ym_to_exclusive_range("2023-01", "2026-12")
+    assert start == date(2023, 1, 1)
+    assert end_excl == date(2027, 1, 1)
+    assert exclusive_month_end(2026, 12) == date(2027, 1, 1)
+    assert exclusive_month_end(2026, 7) == date(2026, 8, 1)
 
 
 def test_null_fuel_fields_treated_as_zero():

@@ -17,6 +17,7 @@ async def test_engine_logbook_create_and_update_component_parts_without_preloade
             aircraft_fk=1,
             date=date(2026, 4, 15),
             sequence_no="ENG-REPO-COMP-API-001",
+            logbook_seq_no="ENG-REPO-COMP-API-001",
             description="Removed damaged fuel nozzle and installed serviceable replacement.",
             component_parts=[
                 ComponentRecordCreate(

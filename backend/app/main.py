@@ -47,6 +47,7 @@ from app.api.v1 import (
     report_generator as report_generator_router,
     audit_log as audit_log_router,
     notification as notification_router,
+    nature_of_flight_description as nature_of_flight_description_router,
 )
 from app.database import engine, Base, PH_TZ
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
@@ -276,6 +277,7 @@ app.include_router(notification_router.router)
 app.include_router(audit_log_router.router)
 # Aircraft-scoped sub-routes first (longer paths) so /api/v1/aircraft/{id}/.../ is matched correctly
 app.include_router(aircraft_statutory_certificate_router.router_aircraft_scoped)
+app.include_router(nature_of_flight_description_router.router_aircraft_scoped)
 app.include_router(document_on_board_router.router_aircraft_scoped)
 app.include_router(ldnd_monitoring_router.router_aircraft_scoped)
 app.include_router(ad_monitoring_router.router_aircraft_scoped)
@@ -300,6 +302,7 @@ app.include_router(cpcp_monitoring_router.router)
 app.include_router(cpcp_monitoring_router.router_maintenance_cpcp)
 app.include_router(fleet_daily_update_router.router)
 app.include_router(aircraft_statutory_certificate_router.router)
+app.include_router(nature_of_flight_description_router.router)
 app.include_router(certificate_category_type_router.router)
 app.include_router(atl_batch_router.router)
 app.include_router(atl_excel_import_router.router)

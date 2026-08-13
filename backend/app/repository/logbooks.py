@@ -254,6 +254,7 @@ async def list_engine_logbooks(
     search: Optional[str] = None,
     sort: Optional[str] = "",
     aircraft_fk: Optional[int] = None,
+    logbook_seq_no: Optional[str] = None,
 ) -> Tuple[List[EngineLogbook], int]:
     """List Engine Logbook entries with pagination (with component_records)."""
     stmt = (
@@ -268,11 +269,16 @@ async def list_engine_logbooks(
     if aircraft_fk is not None:
         stmt = stmt.where(EngineLogbook.aircraft_fk == aircraft_fk)
 
+    if logbook_seq_no:
+        seq_q = f"%{logbook_seq_no.strip()}%"
+        stmt = stmt.where(EngineLogbook.logbook_seq_no.ilike(seq_q))
+
     if search:
         q = f"%{search}%"
         stmt = stmt.where(
             or_(
                 EngineLogbook.sequence_no.ilike(q),
+                EngineLogbook.logbook_seq_no.ilike(q),
                 cast(EngineLogbook.description, String).ilike(q),
             )
         )
@@ -282,6 +288,7 @@ async def list_engine_logbooks(
         "updated_at": EngineLogbook.updated_at,
         "date": EngineLogbook.date,
         "sequence_no": EngineLogbook.sequence_no,
+        "logbook_seq_no": EngineLogbook.logbook_seq_no,
     }
 
     if sort:
@@ -298,11 +305,15 @@ async def list_engine_logbooks(
     count_stmt = select(func.count()).select_from(EngineLogbook).where(EngineLogbook.is_deleted == False)
     if aircraft_fk is not None:
         count_stmt = count_stmt.where(EngineLogbook.aircraft_fk == aircraft_fk)
+    if logbook_seq_no:
+        seq_q = f"%{logbook_seq_no.strip()}%"
+        count_stmt = count_stmt.where(EngineLogbook.logbook_seq_no.ilike(seq_q))
     if search:
         q = f"%{search}%"
         count_stmt = count_stmt.where(
             or_(
                 EngineLogbook.sequence_no.ilike(q),
+                EngineLogbook.logbook_seq_no.ilike(q),
                 cast(EngineLogbook.description, String).ilike(q),
             )
         )
@@ -531,6 +542,7 @@ async def list_airframe_logbooks(
     search: Optional[str] = None,
     sort: Optional[str] = "",
     aircraft_fk: Optional[int] = None,
+    logbook_seq_no: Optional[str] = None,
 ) -> Tuple[List[AirframeLogbook], int]:
     """List Airframe Logbook entries with pagination (with component_records)."""
     stmt = (
@@ -545,11 +557,16 @@ async def list_airframe_logbooks(
     if aircraft_fk is not None:
         stmt = stmt.where(AirframeLogbook.aircraft_fk == aircraft_fk)
 
+    if logbook_seq_no:
+        seq_q = f"%{logbook_seq_no.strip()}%"
+        stmt = stmt.where(AirframeLogbook.logbook_seq_no.ilike(seq_q))
+
     if search:
         q = f"%{search}%"
         stmt = stmt.where(
             or_(
                 AirframeLogbook.sequence_no.ilike(q),
+                AirframeLogbook.logbook_seq_no.ilike(q),
                 cast(AirframeLogbook.description, String).ilike(q),
             )
         )
@@ -559,6 +576,7 @@ async def list_airframe_logbooks(
         "updated_at": AirframeLogbook.updated_at,
         "date": AirframeLogbook.date,
         "sequence_no": AirframeLogbook.sequence_no,
+        "logbook_seq_no": AirframeLogbook.logbook_seq_no,
     }
 
     if sort:
@@ -575,11 +593,15 @@ async def list_airframe_logbooks(
     count_stmt = select(func.count()).select_from(AirframeLogbook).where(AirframeLogbook.is_deleted == False)
     if aircraft_fk is not None:
         count_stmt = count_stmt.where(AirframeLogbook.aircraft_fk == aircraft_fk)
+    if logbook_seq_no:
+        seq_q = f"%{logbook_seq_no.strip()}%"
+        count_stmt = count_stmt.where(AirframeLogbook.logbook_seq_no.ilike(seq_q))
     if search:
         q = f"%{search}%"
         count_stmt = count_stmt.where(
             or_(
                 AirframeLogbook.sequence_no.ilike(q),
+                AirframeLogbook.logbook_seq_no.ilike(q),
                 cast(AirframeLogbook.description, String).ilike(q),
             )
         )
@@ -808,6 +830,7 @@ async def list_avionics_logbooks(
     search: Optional[str] = None,
     sort: Optional[str] = "",
     aircraft_fk: Optional[int] = None,
+    logbook_seq_no: Optional[str] = None,
 ) -> Tuple[List[AvionicsLogbook], int]:
     """List Avionics Logbook entries with pagination (with component_records)."""
     stmt = (
@@ -822,11 +845,16 @@ async def list_avionics_logbooks(
     if aircraft_fk is not None:
         stmt = stmt.where(AvionicsLogbook.aircraft_fk == aircraft_fk)
 
+    if logbook_seq_no:
+        seq_q = f"%{logbook_seq_no.strip()}%"
+        stmt = stmt.where(AvionicsLogbook.logbook_seq_no.ilike(seq_q))
+
     if search:
         q = f"%{search}%"
         stmt = stmt.where(
             or_(
                 AvionicsLogbook.sequence_no.ilike(q),
+                AvionicsLogbook.logbook_seq_no.ilike(q),
                 AvionicsLogbook.component.ilike(q),
                 AvionicsLogbook.part_no.ilike(q),
                 AvionicsLogbook.serial_no.ilike(q),
@@ -839,6 +867,7 @@ async def list_avionics_logbooks(
         "updated_at": AvionicsLogbook.updated_at,
         "date": AvionicsLogbook.date,
         "sequence_no": AvionicsLogbook.sequence_no,
+        "logbook_seq_no": AvionicsLogbook.logbook_seq_no,
     }
 
     if sort:
@@ -855,11 +884,15 @@ async def list_avionics_logbooks(
     count_stmt = select(func.count()).select_from(AvionicsLogbook).where(AvionicsLogbook.is_deleted == False)
     if aircraft_fk is not None:
         count_stmt = count_stmt.where(AvionicsLogbook.aircraft_fk == aircraft_fk)
+    if logbook_seq_no:
+        seq_q = f"%{logbook_seq_no.strip()}%"
+        count_stmt = count_stmt.where(AvionicsLogbook.logbook_seq_no.ilike(seq_q))
     if search:
         q = f"%{search}%"
         count_stmt = count_stmt.where(
             or_(
                 AvionicsLogbook.sequence_no.ilike(q),
+                AvionicsLogbook.logbook_seq_no.ilike(q),
                 AvionicsLogbook.component.ilike(q),
                 AvionicsLogbook.part_no.ilike(q),
                 AvionicsLogbook.serial_no.ilike(q),
@@ -1068,6 +1101,7 @@ async def list_propeller_logbooks(
     search: Optional[str] = None,
     sort: Optional[str] = "",
     aircraft_fk: Optional[int] = None,
+    logbook_seq_no: Optional[str] = None,
 ) -> Tuple[List[PropellerLogbook], int]:
     """List Propeller Logbook entries with pagination."""
     stmt = (
@@ -1079,11 +1113,16 @@ async def list_propeller_logbooks(
     if aircraft_fk is not None:
         stmt = stmt.where(PropellerLogbook.aircraft_fk == aircraft_fk)
 
+    if logbook_seq_no:
+        seq_q = f"%{logbook_seq_no.strip()}%"
+        stmt = stmt.where(PropellerLogbook.logbook_seq_no.ilike(seq_q))
+
     if search:
         q = f"%{search}%"
         stmt = stmt.where(
             or_(
                 PropellerLogbook.sequence_no.ilike(q),
+                PropellerLogbook.logbook_seq_no.ilike(q),
                 cast(PropellerLogbook.description, String).ilike(q),
             )
         )
@@ -1093,6 +1132,7 @@ async def list_propeller_logbooks(
         "updated_at": PropellerLogbook.updated_at,
         "date": PropellerLogbook.date,
         "sequence_no": PropellerLogbook.sequence_no,
+        "logbook_seq_no": PropellerLogbook.logbook_seq_no,
     }
 
     if sort:
@@ -1109,11 +1149,15 @@ async def list_propeller_logbooks(
     count_stmt = select(func.count()).select_from(PropellerLogbook).where(PropellerLogbook.is_deleted == False)
     if aircraft_fk is not None:
         count_stmt = count_stmt.where(PropellerLogbook.aircraft_fk == aircraft_fk)
+    if logbook_seq_no:
+        seq_q = f"%{logbook_seq_no.strip()}%"
+        count_stmt = count_stmt.where(PropellerLogbook.logbook_seq_no.ilike(seq_q))
     if search:
         q = f"%{search}%"
         count_stmt = count_stmt.where(
             or_(
                 PropellerLogbook.sequence_no.ilike(q),
+                PropellerLogbook.logbook_seq_no.ilike(q),
                 cast(PropellerLogbook.description, String).ilike(q),
             )
         )

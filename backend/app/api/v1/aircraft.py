@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from math import ceil
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 from fastapi import (
     APIRouter,
     Depends,
@@ -36,10 +36,14 @@ from app.services.aircraft_history_service import (
     update_aircraft_with_history as update_aircraft_with_history_service,
 )
 from app.repository.aircraft_technical_log import (
-    search_atl_by_sequence_no,
+    search_atl_full_by_sequence_no,
     get_latest_aircraft_technical_log,
 )
-from app.core.atl_derived_times import resolve_auto_fields
+from app.core.atl_derived_times import (
+    canonical_time_fields_from_auto,
+    map_auto_fields_to_comp,
+    resolve_auto_fields,
+)
 from app.database import get_session
 from app.api.deps import get_current_active_account
 from app.constants.audit import AIRCRAFT_MODULE_NAME, AIRCRAFT_TABLE_NAME
@@ -47,6 +51,17 @@ from app.models.account import AccountInformation
 from app.upload_config import UPLOAD_DIR
 from app.services.generate_report_excel import generate_excel
 from app.services.generate_report_pdf import generate_pdf_report
+
+
+def _round_floats_2(obj: Union[Dict, List, Any]) -> Union[Dict, List, Any]:
+    """Recursively round all float values to 2 decimal places (n.2f)."""
+    if isinstance(obj, dict):
+        return {k: _round_floats_2(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_round_floats_2(v) for v in obj]
+    if isinstance(obj, float):
+        return round(obj, 2)
+    return obj
 
 router = APIRouter(prefix="/api/v1/aircraft", tags=["aircrafts"])
 
@@ -113,39 +128,44 @@ async def api_reorder_aircraft(
 
 @router.get(
     "/{aircraft_id}/atl/",
-    response_model=List[aircraft_technical_log_schema.ATLAircraftScopedSearchItem],
+    response_model=List[aircraft_technical_log_schema.ATLPagedItem],
     summary="Search ATL by sequence number (aircraft-scoped)",
     description=(
-        "Returns matching rows for this aircraft: id (atl_ref), sequence_no, tachometer_end, "
-        "auto_airframe_aftt (cumulative, same rules as GET …/atl/paged), origin_date. "
+        "Returns matching full ATL rows for this aircraft (same shape as GET …/atl/paged items): "
+        "all ATL fields, nested component_parts, and auto_comp_* computed fields. "
+        "Exact sequence_no match (ATL- prefix optional) returns one row; otherwise partial match "
+        "up to limit (default 50, max 100). "
         "For dropdown label + aircraft only, use GET /api/v1/aircraft-technical-log/search."
     ),
 )
 async def api_aircraft_atl_search(
     aircraft_id: int,
     sequence_number: Optional[str] = Query(None, description="Search by ATL sequence number"),
+    limit: int = Query(50, ge=1, le=100, description="Max matching rows to return"),
     session: AsyncSession = Depends(get_session),
 ):
-    """Search ATL by sequence number for this aircraft; each hit includes tach end, computed AFTT, and origin date."""
+    """Search ATL by sequence number for this aircraft; each hit is a full ATL + component_parts + auto_comp_*."""
     if not sequence_number or not str(sequence_number).strip():
         return []
-    items = await search_atl_by_sequence_no(
-        session, search=sequence_number.strip(), aircraft_fk=aircraft_id
+    items = await search_atl_full_by_sequence_no(
+        session,
+        search=sequence_number.strip(),
+        aircraft_fk=aircraft_id,
+        limit=limit,
     )
     memo: Dict[Tuple[int, str, Optional[int]], Dict[str, float]] = {}
-    out: List[aircraft_technical_log_schema.ATLAircraftScopedSearchItem] = []
+    out: List[Dict[str, Any]] = []
     for item in items:
+        base = aircraft_technical_log_schema.AircraftTechnicalLogRead.from_orm(item)
         aircraft_obj = getattr(item, "aircraft", None)
-        auto = await resolve_auto_fields(session, item, aircraft_obj, memo)
-        out.append(
-            aircraft_technical_log_schema.ATLAircraftScopedSearchItem(
-                id=item.id,
-                sequence_no=str(item.sequence_no).strip() if item.sequence_no is not None else "",
-                tachometer_end=_round_optional_float_2(item.tachometer_end),
-                auto_airframe_aftt=_round_optional_float_2(auto.get("auto_airframe_aftt")),
-                origin_date=item.origin_date,
-            )
+        auto_base = await resolve_auto_fields(session, item, aircraft_obj, memo)
+        auto_rounded = {k: round(v, 2) for k, v in auto_base.items()}
+        auto_comp = {k: round(v, 2) for k, v in map_auto_fields_to_comp(auto_rounded).items()}
+        canonical = canonical_time_fields_from_auto(auto_rounded)
+        paged_item = aircraft_technical_log_schema.ATLPagedItem.parse_obj(
+            {**base.dict(), **canonical, **auto_comp},
         )
+        out.append(_round_floats_2(paged_item.dict()))
     return out
 
 
