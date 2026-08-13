@@ -164,8 +164,27 @@ def month_key(year: int, month: int) -> str:
 
 
 def ym_to_date_bounds(year: int, month: int) -> Tuple[date, date]:
+    """Inclusive first/last calendar day of YYYY-MM."""
     last = monthrange(year, month)[1]
     return date(year, month, 1), date(year, month, last)
+
+
+def exclusive_month_end(year: int, month: int) -> date:
+    """First day of the month after ``year-month`` (exclusive upper bound)."""
+    if month == 12:
+        return date(year + 1, 1, 1)
+    return date(year, month + 1, 1)
+
+
+def ym_to_exclusive_range(start_month: str, end_month: str) -> Tuple[date, date]:
+    """
+    Convert YYYY-MM..YYYY-MM to ``[start, end_exclusive)``.
+
+    Example: 2023-01..2026-12 → 2023-01-01 .. 2027-01-01
+    """
+    sy, sm = parse_year_month(start_month)
+    ey, em = parse_year_month(end_month)
+    return date(sy, sm, 1), exclusive_month_end(ey, em)
 
 
 def years_from_month_range(start_month: str, end_month: str) -> List[int]:
@@ -281,8 +300,8 @@ def _normalize_tail(registration: Optional[str]) -> str:
 
 
 def _row_month_date(row: Any) -> Optional[date]:
-    """Prefer SQL month_date; fall back to origin_date."""
-    for attr in ("month_date", "origin_date"):
+    """ATL off-blocks date (origin_date); nulls are skipped by callers."""
+    for attr in ("off_blocks_date", "origin_date"):
         value = getattr(row, attr, None)
         if value is None:
             continue
@@ -557,13 +576,11 @@ def build_fuel_report(
     Build monthly series + YoY + month breakdown + data_quality_flags.
 
     ``rows`` may span a widened fetch (YoY years / slicer). Monthly series and
-    summary are scoped to ``[start_month, end_month]`` only; YoY and the
-    aircraft month breakdown read from the full aggregated state.
+    summary are scoped to ``[start_month, end_month]`` via half-open
+    off_blocks_date bounds; YoY and the aircraft month breakdown read from the
+    full aggregated state.
     """
-    sy, sm = parse_year_month(start_month)
-    ey, em = parse_year_month(end_month)
-    range_start, _ = ym_to_date_bounds(sy, sm)
-    _, range_end = ym_to_date_bounds(ey, em)
+    range_start, range_end_exclusive = ym_to_exclusive_range(start_month, end_month)
     resolved_years = (
         list(years) if years else years_from_month_range(start_month, end_month)
     )
@@ -574,13 +591,16 @@ def build_fuel_report(
         row
         for row in rows
         if (origin := _row_month_date(row)) is not None
-        and range_start <= origin <= range_end
+        and range_start <= origin < range_end_exclusive
     ]
     state_window = process_atl_rows(window_rows) if window_rows else _BuildState()
 
+    # Inclusive last day only for iterating month buckets in the response
+    _, range_end_inclusive = ym_to_date_bounds(*parse_year_month(end_month))
+
     monthly: List[MonthlyFuelRow] = []
     if window_rows:
-        for y, m in _iter_months(range_start, range_end):
+        for y, m in _iter_months(range_start, range_end_inclusive):
             mk = month_key(y, m)
             acc = state_window.by_month.get(mk, _Acc())
             breakdown: List[AircraftFuelBreakdown] = []
@@ -722,22 +742,27 @@ async def resolve_query_month_bounds(
 def _union_fetch_bounds(
     *,
     start_d: date,
-    end_d: date,
+    end_d_exclusive: date,
     years: Sequence[int],
     month_year: Optional[str],
 ) -> Tuple[date, date]:
-    """Widen the ATL fetch window to cover monthly range + YoY years + slicer month."""
-    fetch_start, fetch_end = start_d, end_d
+    """
+    Widen the ATL fetch window to cover monthly range + YoY years + slicer month.
+
+    Returns ``(fetch_start, fetch_end_exclusive)`` half-open bounds.
+    """
+    fetch_start, fetch_end_excl = start_d, end_d_exclusive
     if years:
         y_min, y_max = min(years), max(years)
         fetch_start = min(fetch_start, date(y_min, 1, 1))
-        fetch_end = max(fetch_end, date(y_max, 12, 31))
+        fetch_end_excl = max(fetch_end_excl, date(y_max + 1, 1, 1))
     if month_year:
         my, mm = parse_year_month(month_year)
-        m_start, m_end = ym_to_date_bounds(my, mm)
+        m_start = date(my, mm, 1)
+        m_end_excl = exclusive_month_end(my, mm)
         fetch_start = min(fetch_start, m_start)
-        fetch_end = max(fetch_end, m_end)
-    return fetch_start, fetch_end
+        fetch_end_excl = max(fetch_end_excl, m_end_excl)
+    return fetch_start, fetch_end_excl
 
 
 async def get_aircraft_fuel_report(
@@ -774,6 +799,8 @@ async def get_aircraft_fuel_report(
         query,
         aircraft_ids=filter_ids,
     )
+    # resolve_query_month_bounds returns inclusive last day; convert to exclusive
+    end_d_exclusive = exclusive_month_end(end_d.year, end_d.month)
 
     years = (
         list(query.years)
@@ -787,9 +814,9 @@ async def get_aircraft_fuel_report(
     if cached is not None:
         return cached
 
-    fetch_start, fetch_end = _union_fetch_bounds(
+    fetch_start, fetch_end_exclusive = _union_fetch_bounds(
         start_d=start_d,
-        end_d=end_d,
+        end_d_exclusive=end_d_exclusive,
         years=years,
         month_year=month_year,
     )
@@ -797,7 +824,7 @@ async def get_aircraft_fuel_report(
     rows = await fetch_fuel_report_atl_rows(
         session,
         start_date=fetch_start,
-        end_date=fetch_end,
+        end_date_exclusive=fetch_end_exclusive,
         aircraft_ids=filter_ids,
     )
     response = build_fuel_report(

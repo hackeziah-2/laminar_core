@@ -13,6 +13,7 @@ async def test():
             aircraft_fk=1,
             date=date.today(),
             sequence_no="AV-TEST-123",
+            logbook_seq_no="ALB-000123",
             component_parts=[
                 ComponentRecordCreate(qty=1.0, unit="EA", nomenclature="Radio", removedPartNo="1", removedSerialNo="A", installedPartNo="2", installedSerialNo="B", ataChapter="23")
             ]

@@ -3,9 +3,11 @@ from datetime import date, time
 from decimal import Decimal, ROUND_HALF_UP
 
 from fastapi import HTTPException, Request
-from sqlalchemy import select, or_, cast, case, String, Numeric, func
+from sqlalchemy import select, or_, cast, String, Numeric, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import selectinload, joinedload
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.database import set_audit_fields
 from app.core.atl_derived_times import (
@@ -53,13 +55,42 @@ def _sequence_no_digits_only(sequence_no: str) -> str:
 _SEQUENCE_NO_NUMERIC_RE = r"^[0-9]+(\.[0-9]+)?$"
 
 
-def _sequence_no_as_numeric():
-    """SQL: numeric sequence_no for ORDER BY / comparisons; NULL when not a number (string values allowed)."""
-    seq = AircraftTechnicalLog.sequence_no
-    return case(
-        (seq.op("~")(_SEQUENCE_NO_NUMERIC_RE), cast(seq, Numeric)),
-        else_=None,
+class _SequenceNoAsNumeric(ColumnElement):
+    """Dialect-aware numeric projection of sequence_no for ORDER BY / comparisons."""
+
+    inherit_cache = True
+    type = Numeric()
+
+    def __init__(self):
+        super().__init__()
+        self.seq = AircraftTechnicalLog.sequence_no
+
+
+@compiles(_SequenceNoAsNumeric, "postgresql")
+def _compile_sequence_no_as_numeric_pg(element, compiler, **kw):
+    seq = compiler.process(element.seq, **kw)
+    return (
+        f"CASE WHEN ({seq} ~ '{_SEQUENCE_NO_NUMERIC_RE}') "
+        f"THEN CAST({seq} AS NUMERIC) END"
     )
+
+
+@compiles(_SequenceNoAsNumeric, "sqlite")
+def _compile_sequence_no_as_numeric_sqlite(element, compiler, **kw):
+    """SQLite has no ~; CAST is enough for numeric-like sequence_no used in tests."""
+    seq = compiler.process(element.seq, **kw)
+    return f"CAST({seq} AS NUMERIC)"
+
+
+@compiles(_SequenceNoAsNumeric)
+def _compile_sequence_no_as_numeric_default(element, compiler, **kw):
+    seq = compiler.process(element.seq, **kw)
+    return f"CAST({seq} AS NUMERIC)"
+
+
+def _sequence_no_as_numeric():
+    """SQL: numeric sequence_no for ORDER BY / comparisons; NULL when not a number on Postgres."""
+    return _SequenceNoAsNumeric()
 
 
 def _active_atl_rows_clause():
@@ -720,6 +751,62 @@ async def search_atl_by_sequence_no(
         stmt = stmt.where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
     result = await session.execute(stmt)
     return list(result.scalars().all())
+
+
+async def search_atl_full_by_sequence_no(
+    session: AsyncSession,
+    *,
+    search: str,
+    aircraft_fk: int,
+    limit: int = 50,
+) -> List[AircraftTechnicalLog]:
+    """Aircraft-scoped ATL sequence search returning full rows (incl. component_parts).
+
+    Distinct from :func:`search_atl_by_sequence_no` (slim dropdown/reference search).
+    Exact sequence_no match (after ATL- normalize) returns at most one row; otherwise
+    falls back to partial ILIKE search capped by limit.
+    """
+    if not search or not str(search).strip():
+        return []
+    normalized = _normalize_atl_search(search)
+    if not normalized:
+        return []
+
+    eager = (
+        selectinload(AircraftTechnicalLog.aircraft),
+        selectinload(AircraftTechnicalLog.atl_batch),
+        selectinload(AircraftTechnicalLog.component_parts),
+    )
+    base_where = (
+        AircraftTechnicalLog.is_deleted == False,
+        AircraftTechnicalLog.aircraft_fk == aircraft_fk,
+    )
+
+    exact_stmt = (
+        select(AircraftTechnicalLog)
+        .options(*eager)
+        .where(*base_where)
+        .where(AircraftTechnicalLog.sequence_no == normalized)
+        .order_by(AircraftTechnicalLog.id.asc())
+        .limit(1)
+    )
+    exact_result = await session.execute(exact_stmt)
+    exact_row = exact_result.scalar_one_or_none()
+    if exact_row is not None:
+        return [exact_row]
+
+    seq_num = _sequence_no_as_numeric().label("seq_num")
+    partial_stmt = (
+        select(AircraftTechnicalLog, seq_num)
+        .options(*eager)
+        .where(*base_where)
+        .where(AircraftTechnicalLog.sequence_no.ilike(f"%{normalized}%"))
+        .order_by(seq_num.asc(), AircraftTechnicalLog.id.asc())
+        .distinct()
+        .limit(limit)
+    )
+    result = await session.execute(partial_stmt)
+    return [row[0] for row in result.unique().all()]
 
 
 async def get_aircraft_technical_log(

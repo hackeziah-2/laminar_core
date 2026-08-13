@@ -84,6 +84,11 @@ class Aircraft(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
         foreign_keys="AircraftStatutoryCertificate.aircraft_fk",
         back_populates="aircraft",
     )
+    nature_of_flight_descriptions = relationship(
+        "NatureOfFlightDescription",
+        foreign_keys="NatureOfFlightDescription.aircraft_fk",
+        back_populates="aircraft",
+    )
 
     def __repr__(self):
         return f"<Aircraft(reg='{self.registration}', model='{self.model}')>"

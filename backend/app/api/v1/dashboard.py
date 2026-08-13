@@ -42,7 +42,10 @@ async def api_dashboard(
     summary="Monthly aircraft fuel consumption report",
     description=(
         "Monthly fleet fuel/hours rollup from approved/completed ATL Logbook rows. "
-        "Month bucket = ORIGIN DATE (fallback: reporting date). "
+        "Month bucket / date-range filter = ATL off_blocks_date (origin_date). "
+        "Range is half-open: off_blocks_date >= start_month-01 and "
+        "off_blocks_date < first day of the month after end_month. "
+        "Rows with null off_blocks_date are excluded. "
         "Hours = RUN TIME (airframe_run_time, with auto/tach fallbacks; null→0). "
         "Fuel = (PRIOR DEP L+R) − (AFTER ON-BLKS L+R); null fuel/oil/landings→0. "
         "Fuel burn / hour = SUM(fuel) / SUM(hours) (null when hours are zero). "
@@ -58,12 +61,19 @@ async def api_dashboard(
 async def api_aircraft_fuel_report(
     start_month: Optional[str] = Query(
         None,
-        description="Inclusive start month YYYY-MM (default: earliest available)",
+        description=(
+            "Inclusive start month YYYY-MM for off_blocks_date "
+            "(default: earliest available)"
+        ),
         pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
     ),
     end_month: Optional[str] = Query(
         None,
-        description="Inclusive end month YYYY-MM (default: latest available)",
+        description=(
+            "Inclusive end month YYYY-MM for off_blocks_date "
+            "(default: latest available); upper bound is exclusive "
+            "first-of-next-month in SQL"
+        ),
         pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
     ),
     aircraft: Optional[str] = Query(

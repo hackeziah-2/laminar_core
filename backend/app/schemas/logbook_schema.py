@@ -1,6 +1,23 @@
 from datetime import date, datetime
 from typing import Optional, List, Any
-from pydantic import BaseModel, Field, root_validator
+from pydantic import BaseModel, Field, root_validator, validator
+
+
+def _normalize_required_logbook_seq_no(value: Any) -> str:
+    if value is None:
+        raise ValueError("logbook_seq_no is required")
+    text = str(value).strip()
+    if not text:
+        raise ValueError("logbook_seq_no cannot be blank")
+    if len(text) > 50:
+        raise ValueError("logbook_seq_no must be at most 50 characters")
+    return text
+
+
+def _normalize_optional_logbook_seq_no(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    return _normalize_required_logbook_seq_no(value)
 
 
 # ---------- Component Record Schemas (one-to-many with Engine/Airframe/Avionics logbooks) ----------
@@ -43,6 +60,7 @@ class EngineLogbookBase(BaseModel):
     date: date
     engine_tsn: Optional[float] = None
     sequence_no: str = Field(..., max_length=50)
+    logbook_seq_no: str = Field(..., max_length=50)
     tach_time: Optional[float] = None
     engine_tso: Optional[float] = None
     engine_tbo: Optional[float] = None
@@ -51,6 +69,10 @@ class EngineLogbookBase(BaseModel):
     signature: Optional[str] = Field(None, max_length=255)
     upload_file: Optional[str] = Field(None, max_length=500)
     web_link: Optional[str] = Field(None, max_length=2048)
+
+    @validator("logbook_seq_no", pre=True)
+    def validate_logbook_seq_no(cls, v):
+        return _normalize_required_logbook_seq_no(v)
 
 
 class EngineLogbookCreate(EngineLogbookBase):
@@ -65,6 +87,7 @@ class EngineLogbookUpdate(BaseModel):
     date: Optional[date] = None
     engine_tsn: Optional[float] = None
     sequence_no: Optional[str] = Field(None, max_length=50)
+    logbook_seq_no: Optional[str] = Field(None, max_length=50)
     tach_time: Optional[float] = None
     engine_tso: Optional[float] = None
     engine_tbo: Optional[float] = None
@@ -74,6 +97,10 @@ class EngineLogbookUpdate(BaseModel):
     upload_file: Optional[str] = Field(None, max_length=500)
     web_link: Optional[str] = Field(None, max_length=2048)
     component_parts: Optional[List[ComponentRecordCreate]] = Field(None, alias="componentParts")
+
+    @validator("logbook_seq_no", pre=True)
+    def validate_logbook_seq_no(cls, v):
+        return _normalize_optional_logbook_seq_no(v)
 
     class Config:
         allow_population_by_field_name = True
@@ -95,6 +122,7 @@ class EngineLogbookRead(BaseModel):
     date: date
     engine_tsn: Optional[float] = None
     sequence_no: str
+    logbook_seq_no: str
     tach_time: Optional[float] = None
     engine_tso: Optional[float] = None
     engine_tbo: Optional[float] = None
@@ -126,6 +154,7 @@ class EngineLogbookRead(BaseModel):
                 "date": orm_state.get("date"),
                 "engine_tsn": orm_state.get("engine_tsn"),
                 "sequence_no": orm_state.get("sequence_no"),
+                "logbook_seq_no": orm_state.get("logbook_seq_no"),
                 "tach_time": orm_state.get("tach_time"),
                 "engine_tso": orm_state.get("engine_tso"),
                 "engine_tbo": orm_state.get("engine_tbo"),
@@ -150,6 +179,7 @@ class AirframeLogbookBase(BaseModel):
     aircraft_fk: int
     date: date
     sequence_no: str = Field(..., max_length=50)
+    logbook_seq_no: str = Field(..., max_length=50)
     tach_time: Optional[float] = None
     airframe_time: Optional[float] = None
     description: Optional[str] = None
@@ -157,6 +187,10 @@ class AirframeLogbookBase(BaseModel):
     signature: Optional[str] = Field(None, max_length=255)
     upload_file: Optional[str] = Field(None, max_length=500)
     web_link: Optional[str] = Field(None, max_length=2048)
+
+    @validator("logbook_seq_no", pre=True)
+    def validate_logbook_seq_no(cls, v):
+        return _normalize_required_logbook_seq_no(v)
 
 
 class AirframeLogbookCreate(AirframeLogbookBase):
@@ -170,6 +204,7 @@ class AirframeLogbookUpdate(BaseModel):
     aircraft_fk: Optional[int] = None
     date: Optional[date] = None
     sequence_no: Optional[str] = Field(None, max_length=50)
+    logbook_seq_no: Optional[str] = Field(None, max_length=50)
     tach_time: Optional[float] = None
     airframe_time: Optional[float] = None
     description: Optional[str] = None
@@ -178,6 +213,10 @@ class AirframeLogbookUpdate(BaseModel):
     upload_file: Optional[str] = Field(None, max_length=500)
     web_link: Optional[str] = Field(None, max_length=2048)
     component_parts: Optional[List[ComponentRecordCreate]] = Field(None, alias="componentParts")
+
+    @validator("logbook_seq_no", pre=True)
+    def validate_logbook_seq_no(cls, v):
+        return _normalize_optional_logbook_seq_no(v)
 
     class Config:
         allow_population_by_field_name = True
@@ -198,6 +237,7 @@ class AirframeLogbookRead(BaseModel):
     aircraft_fk: int
     date: date
     sequence_no: str
+    logbook_seq_no: str
     tach_time: Optional[float] = None
     airframe_time: Optional[float] = None
     description: Optional[str] = None
@@ -227,6 +267,7 @@ class AirframeLogbookRead(BaseModel):
                 "aircraft_fk": orm_state.get("aircraft_fk"),
                 "date": orm_state.get("date"),
                 "sequence_no": orm_state.get("sequence_no"),
+                "logbook_seq_no": orm_state.get("logbook_seq_no"),
                 "tach_time": orm_state.get("tach_time"),
                 "airframe_time": orm_state.get("airframe_time"),
                 "description": orm_state.get("description"),
@@ -251,6 +292,7 @@ class AvionicsLogbookBase(BaseModel):
     date: date
     airframe_tsn: Optional[float] = None
     sequence_no: str = Field(..., max_length=50)
+    logbook_seq_no: str = Field(..., max_length=50)
     component: Optional[str] = Field(None, max_length=255)
     part_no: Optional[str] = Field(None, max_length=100)
     serial_no: Optional[str] = Field(None, max_length=100)
@@ -259,6 +301,10 @@ class AvionicsLogbookBase(BaseModel):
     signature: Optional[str] = Field(None, max_length=255)
     upload_file: Optional[str] = Field(None, max_length=500)
     web_link: Optional[str] = Field(None, max_length=2048)
+
+    @validator("logbook_seq_no", pre=True)
+    def validate_logbook_seq_no(cls, v):
+        return _normalize_required_logbook_seq_no(v)
 
 
 class AvionicsLogbookCreate(AvionicsLogbookBase):
@@ -273,6 +319,7 @@ class AvionicsLogbookUpdate(BaseModel):
     date: Optional[date] = None
     airframe_tsn: Optional[float] = None
     sequence_no: Optional[str] = Field(None, max_length=50)
+    logbook_seq_no: Optional[str] = Field(None, max_length=50)
     component: Optional[str] = Field(None, max_length=255)
     part_no: Optional[str] = Field(None, max_length=100)
     serial_no: Optional[str] = Field(None, max_length=100)
@@ -282,6 +329,10 @@ class AvionicsLogbookUpdate(BaseModel):
     upload_file: Optional[str] = Field(None, max_length=500)
     web_link: Optional[str] = Field(None, max_length=2048)
     component_parts: Optional[List[ComponentRecordCreate]] = Field(None, alias="componentParts")
+
+    @validator("logbook_seq_no", pre=True)
+    def validate_logbook_seq_no(cls, v):
+        return _normalize_optional_logbook_seq_no(v)
 
     class Config:
         allow_population_by_field_name = True
@@ -303,6 +354,7 @@ class AvionicsLogbookRead(BaseModel):
     date: date
     airframe_tsn: Optional[float] = None
     sequence_no: str
+    logbook_seq_no: str
     component: Optional[str] = None
     part_no: Optional[str] = None
     serial_no: Optional[str] = None
@@ -334,6 +386,7 @@ class AvionicsLogbookRead(BaseModel):
                 "date": orm_state.get("date"),
                 "airframe_tsn": orm_state.get("airframe_tsn"),
                 "sequence_no": orm_state.get("sequence_no"),
+                "logbook_seq_no": orm_state.get("logbook_seq_no"),
                 "component": orm_state.get("component"),
                 "part_no": orm_state.get("part_no"),
                 "serial_no": orm_state.get("serial_no"),
@@ -360,6 +413,7 @@ class PropellerLogbookBase(BaseModel):
     date: date
     propeller_tsn: Optional[float] = None
     sequence_no: str = Field(..., max_length=50)
+    logbook_seq_no: str = Field(..., max_length=50)
     tach_time: Optional[float] = None
     propeller_tso: Optional[float] = None
     propeller_tbo: Optional[float] = None
@@ -368,6 +422,10 @@ class PropellerLogbookBase(BaseModel):
     signature: Optional[str] = Field(None, max_length=255)
     upload_file: Optional[str] = Field(None, max_length=500)
     web_link: Optional[str] = Field(None, max_length=2048)
+
+    @validator("logbook_seq_no", pre=True)
+    def validate_logbook_seq_no(cls, v):
+        return _normalize_required_logbook_seq_no(v)
 
 
 class PropellerLogbookCreate(PropellerLogbookBase):
@@ -379,6 +437,7 @@ class PropellerLogbookUpdate(BaseModel):
     date: Optional[date] = None
     propeller_tsn: Optional[float] = None
     sequence_no: Optional[str] = Field(None, max_length=50)
+    logbook_seq_no: Optional[str] = Field(None, max_length=50)
     tach_time: Optional[float] = None
     propeller_tso: Optional[float] = None
     propeller_tbo: Optional[float] = None
@@ -388,6 +447,10 @@ class PropellerLogbookUpdate(BaseModel):
     upload_file: Optional[str] = Field(None, max_length=500)
     web_link: Optional[str] = Field(None, max_length=2048)
 
+    @validator("logbook_seq_no", pre=True)
+    def validate_logbook_seq_no(cls, v):
+        return _normalize_optional_logbook_seq_no(v)
+
 
 class PropellerLogbookRead(BaseModel):
     id: int
@@ -395,6 +458,7 @@ class PropellerLogbookRead(BaseModel):
     date: date
     propeller_tsn: Optional[float] = None
     sequence_no: str
+    logbook_seq_no: str
     tach_time: Optional[float] = None
     propeller_tso: Optional[float] = None
     propeller_tbo: Optional[float] = None
