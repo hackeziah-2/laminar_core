@@ -37,6 +37,7 @@ from app.repository.aircraft_technical_log import (
     soft_delete_aircraft_technical_log,
     bulk_soft_delete_aircraft_technical_logs,
     apply_uppercase_signer_names_to_atl_dicts,
+    serialize_atl_paged_api_items,
 )
 from app.api.deps import get_current_active_account
 from app.constants.audit import ATL_MODULE_NAME, ATL_TABLE_NAME
@@ -131,7 +132,11 @@ async def api_list_paged(
     limit: int = Query(10, ge=1, le=100),
     page: int = Query(1, ge=1),
     search: Optional[str] = None,
-    aircraft_fk: Optional[int] = Query(None, description="Filter by aircraft ID"),
+    aircraft_id: Optional[int] = Query(None, description="Filter by aircraft ID"),
+    aircraft_fk: Optional[int] = Query(
+        None,
+        description="Alias for aircraft_id.",
+    ),
     work_status: Optional[WorkStatus] = Query(
         None,
         description=(
@@ -161,23 +166,20 @@ async def api_list_paged(
     """Get paginated list of Aircraft Technical Log entries. auto_* fields are read from persisted columns."""
     offset = (page - 1) * limit
     batch_filter = atl_batch_fk if atl_batch_fk is not None else atl_batch
+    filter_aircraft = _resolve_aircraft_id_filter(aircraft_id, aircraft_fk)
     items, total = await list_aircraft_technical_logs(
         session=session,
         limit=limit,
         offset=offset,
         search=search,
-        aircraft_fk=aircraft_fk,
+        aircraft_fk=filter_aircraft,
         atl_batch_fk=batch_filter,
         work_status=work_status,
         sort=sort,
     )
     pages = ceil(total / limit) if total else 0
 
-    result_items = [
-        aircraft_technical_log_schema.ATLPagedItemWithAutoApiRead.from_orm(item).dict()
-        for item in items
-    ]
-    result_items = await apply_uppercase_signer_names_to_atl_dicts(session, result_items)
+    result_items = await serialize_atl_paged_api_items(session, items)
 
     return {
         "items": result_items,

@@ -1077,7 +1077,7 @@ def test_aircraft_scoped_atl_search_returns_full_fields_and_component_parts(
     client_with_atl_auth: TestClient,
     test_aircraft_data: dict,
 ):
-    """GET /aircraft/{id}/atl/ returns full ATL rows including component_parts and auto_comp_*."""
+    """GET /aircraft/{id}/atl/ returns full ATL rows including component_parts and auto_*."""
     from datetime import date as date_cls
 
     from app.models.aircraft_techinical_log import ComponentPartsRecord, TypeEnum
@@ -1163,8 +1163,8 @@ def test_aircraft_scoped_atl_search_returns_full_fields_and_component_parts(
     assert row["remarks"] == "Search full fields"
     assert row["actions_taken"] == "None"
     assert row["tachometer_end"] == 12.5
-    assert row["auto_comp_airframe_run_time"] == 2.5
-    assert row["auto_comp_airframe_aftt"] == 102.5
+    assert row["auto_airframe_run_time"] == 2.5
+    assert row["auto_airframe_aftt"] == 102.5
     assert len(row["component_parts"]) == 1
     assert row["component_parts"][0]["nomenclature"] == "Oil Filter"
     assert row["component_parts"][0]["removed_part_no"] == "OF-1"
@@ -1223,20 +1223,20 @@ def test_aircraft_scoped_atl_search_respects_limit(
     assert response.status_code == 200, response.text
     items = response.json()
     assert len(items) == 2
-    assert [item["sequence_no"] for item in items] == ["100", "101"]
+    assert [item["sequence_no"] for item in items] == ["102", "101"]
     assert all("component_parts" in item for item in items)
-    assert all("auto_comp_airframe_aftt" in item for item in items)
+    assert all("auto_airframe_aftt" in item for item in items)
 
 
-def test_aircraft_scoped_atl_search_exact_sequence_returns_one(
+def test_aircraft_scoped_atl_search_matches_paged_latest_record(
     client_with_atl_auth: TestClient,
     test_aircraft_data: dict,
 ):
-    """Exact sequence_no match returns a single full ATL row even when prefix matches exist."""
+    """Aircraft-scoped ATL search returns the same latest record as /aircraft-technical-log/paged."""
     aircraft_payload = {
         **test_aircraft_data,
-        "msn": "TEST-MSN-ATL-SEARCH-EXACT",
-        "registration": "TEST-ATL-SEARCH-EXACT",
+        "msn": "TEST-MSN-ATL-SEARCH-PAGED-MATCH",
+        "registration": "TEST-ATL-SEARCH-PAGED-MATCH",
     }
     aircraft_response = client_with_atl_auth.post(
         "/api/v1/aircraft/",
@@ -1255,21 +1255,24 @@ def test_aircraft_scoped_atl_search_exact_sequence_returns_one(
                         sequence_no="100",
                         tachometer_start=1.0,
                         tachometer_end=2.0,
-                        remarks="exact-100",
+                        remarks="seq-100",
+                        auto_airframe_aftt=10.0,
                     ),
                     AircraftTechnicalLog(
                         aircraft_fk=aircraft_id,
                         sequence_no="1001",
                         tachometer_start=2.0,
                         tachometer_end=3.0,
-                        remarks="prefix-1001",
+                        remarks="seq-1001",
+                        auto_airframe_aftt=20.0,
                     ),
                     AircraftTechnicalLog(
                         aircraft_fk=aircraft_id,
                         sequence_no="1002",
                         tachometer_start=3.0,
                         tachometer_end=4.0,
-                        remarks="prefix-1002",
+                        remarks="seq-1002",
+                        auto_airframe_aftt=30.0,
                     ),
                 ]
             )
@@ -1277,19 +1280,31 @@ def test_aircraft_scoped_atl_search_exact_sequence_returns_one(
 
     asyncio.run(seed_rows())
 
-    response = client_with_atl_auth.get(
-        f"/api/v1/aircraft/{aircraft_id}/atl/?sequence_number=100&limit=10"
+    search_id = "100"
+    scoped = client_with_atl_auth.get(
+        f"/api/v1/aircraft/{aircraft_id}/atl/?sequence_number={search_id}&limit=10"
     )
-    assert response.status_code == 200, response.text
-    items = response.json()
-    assert len(items) == 1
-    assert items[0]["sequence_no"] == "100"
-    assert items[0]["remarks"] == "exact-100"
+    paged = client_with_atl_auth.get(
+        "/api/v1/aircraft-technical-log/paged"
+        f"?page=1&limit=10&aircraft_id={aircraft_id}&aircraft_fk={aircraft_id}"
+        f"&sort=-sequence_no&search={search_id}"
+    )
+    assert scoped.status_code == 200, scoped.text
+    assert paged.status_code == 200, paged.text
+
+    scoped_items = scoped.json()
+    paged_items = paged.json()["items"]
+    assert scoped_items
+    assert paged_items
+    assert [item["sequence_no"] for item in scoped_items] == ["1002", "1001", "100"]
+    assert scoped_items[0]["sequence_no"] == "1002"
+    assert scoped_items[0]["id"] == paged_items[0]["id"]
+    assert scoped_items[0] == paged_items[0]
 
     prefixed = client_with_atl_auth.get(
-        f"/api/v1/aircraft/{aircraft_id}/atl/?sequence_number=ATL-100&limit=10"
+        f"/api/v1/aircraft/{aircraft_id}/atl/?sequence_number=ATL-{search_id}&limit=10"
     )
     assert prefixed.status_code == 200, prefixed.text
     prefixed_items = prefixed.json()
-    assert len(prefixed_items) == 1
-    assert prefixed_items[0]["sequence_no"] == "100"
+    assert prefixed_items[0]["id"] == paged_items[0]["id"]
+    assert prefixed_items[0] == paged_items[0]

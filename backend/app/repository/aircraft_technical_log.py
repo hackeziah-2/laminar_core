@@ -32,6 +32,7 @@ from app.core.atl_edit_rbac import validate_atl_edit_allowed_for_account
 from app.core.atl_workflow_rbac import is_atl_work_status_transition_allowed
 from app.models.role import Role
 from app.schemas.aircraft_technical_log_schema import (
+    ATLPagedItemWithAutoApiRead,
     AircraftTechnicalLogCreate,
     AircraftTechnicalLogUpdate,
     AircraftTechnicalLogBulkWorkStatusUpdateResponse,
@@ -760,53 +761,23 @@ async def search_atl_full_by_sequence_no(
     aircraft_fk: int,
     limit: int = 50,
 ) -> List[AircraftTechnicalLog]:
-    """Aircraft-scoped ATL sequence search returning full rows (incl. component_parts).
+    """Aircraft-scoped ATL search matching GET /aircraft-technical-log/paged.
 
+    Uses the same sequence search, aircraft filter, and sequence_no-desc sort as
+    ``list_aircraft_technical_logs`` so the first row is the latest match.
     Distinct from :func:`search_atl_by_sequence_no` (slim dropdown/reference search).
-    Exact sequence_no match (after ATL- normalize) returns at most one row; otherwise
-    falls back to partial ILIKE search capped by limit.
     """
     if not search or not str(search).strip():
         return []
-    normalized = _normalize_atl_search(search)
-    if not normalized:
-        return []
-
-    eager = (
-        selectinload(AircraftTechnicalLog.aircraft),
-        selectinload(AircraftTechnicalLog.atl_batch),
-        selectinload(AircraftTechnicalLog.component_parts),
+    items, _total = await list_aircraft_technical_logs(
+        session=session,
+        limit=limit,
+        offset=0,
+        search=search.strip(),
+        aircraft_fk=aircraft_fk,
+        sort="-sequence_no",
     )
-    base_where = (
-        AircraftTechnicalLog.is_deleted == False,
-        AircraftTechnicalLog.aircraft_fk == aircraft_fk,
-    )
-
-    exact_stmt = (
-        select(AircraftTechnicalLog)
-        .options(*eager)
-        .where(*base_where)
-        .where(AircraftTechnicalLog.sequence_no == normalized)
-        .order_by(AircraftTechnicalLog.id.asc())
-        .limit(1)
-    )
-    exact_result = await session.execute(exact_stmt)
-    exact_row = exact_result.scalar_one_or_none()
-    if exact_row is not None:
-        return [exact_row]
-
-    seq_num = _sequence_no_as_numeric().label("seq_num")
-    partial_stmt = (
-        select(AircraftTechnicalLog, seq_num)
-        .options(*eager)
-        .where(*base_where)
-        .where(AircraftTechnicalLog.sequence_no.ilike(f"%{normalized}%"))
-        .order_by(seq_num.asc(), AircraftTechnicalLog.id.asc())
-        .distinct()
-        .limit(limit)
-    )
-    result = await session.execute(partial_stmt)
-    return [row[0] for row in result.unique().all()]
+    return items
 
 
 async def get_aircraft_technical_log(
@@ -1329,6 +1300,18 @@ async def apply_uppercase_signer_names_to_atl_dicts(
             )
             item[field] = name or None
     return items
+
+
+async def serialize_atl_paged_api_items(
+    session: AsyncSession,
+    items: List[AircraftTechnicalLog],
+) -> List[Dict[str, Any]]:
+    """Serialize ATL rows to the GET /aircraft-technical-log/paged item shape."""
+    result_items = [
+        ATLPagedItemWithAutoApiRead.from_orm(item).dict()
+        for item in items
+    ]
+    return await apply_uppercase_signer_names_to_atl_dicts(session, result_items)
 
 
 async def list_aircraft_technical_logs(
