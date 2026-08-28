@@ -253,3 +253,100 @@ def test_personnel_compliance_read_dict_roundtrip_keeps_account_full_name():
     again = PersonnelComplianceRead.parse_obj(read.dict())
     assert again.account_information is not None
     assert again.account_information.full_name == "Pilot, Jane"
+
+
+def test_personnel_compliance_piper_pa34_crud_filter_and_existing_types(
+    client_with_regulatory_compliance_auth: TestClient,
+):
+    client = client_with_regulatory_compliance_auth
+    account_data = {
+        "first_name": "Piper",
+        "last_name": "Pa34User",
+        "username": "piper_pa34_pc",
+        "password": "securepassword123",
+        "status": True,
+    }
+    r = client.post("/api/v1/account-information/", json=account_data)
+    assert r.status_code == 201, r.text
+    account_id = r.json()["id"]
+
+    piper_payload = {
+        "account_information_id": account_id,
+        "item_type": PersonnelComplianceItemType.PIPER_PA_34.value,
+        "expiry_date": "2028-04-15",
+        "is_withhold": False,
+    }
+    created = client.post("/api/v1/personnel-compliance/", json=piper_payload)
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["item_type"] == "PIPER PA-34"
+    created_id = body["id"]
+
+    fetched = client.get(f"/api/v1/personnel-compliance/{created_id}")
+    assert fetched.status_code == 200, fetched.text
+    assert fetched.json()["item_type"] == "PIPER PA-34"
+
+    paged = client.get("/api/v1/personnel-compliance/paged?page=1&limit=50")
+    assert paged.status_code == 200, paged.text
+    paged_item = next(i for i in paged.json()["items"] if i["id"] == created_id)
+    assert paged_item["item_type"] == "PIPER PA-34"
+
+    updated = client.put(
+        f"/api/v1/personnel-compliance/{created_id}",
+        json={
+            "item_type": "PIPER PA-34",
+            "expiry_date": "2029-01-31",
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["item_type"] == "PIPER PA-34"
+    assert updated.json()["expiry_date"] == "2029-01-31"
+
+    filtered = client.get(
+        "/api/v1/personnel-compliance/",
+        params={"item_type": "PIPER PA-34", "page": 1, "limit": 50},
+    )
+    assert filtered.status_code == 200, filtered.text
+    filtered_ids = {i["id"] for i in filtered.json()["items"]}
+    assert created_id in filtered_ids
+    assert all(i["item_type"] == "PIPER PA-34" for i in filtered.json()["items"])
+
+    cessna_account = {
+        "first_name": "Cessna",
+        "last_name": "StillWorks",
+        "username": "cessna_still_pc",
+        "password": "securepassword123",
+        "status": True,
+    }
+    r_c = client.post("/api/v1/account-information/", json=cessna_account)
+    assert r_c.status_code == 201, r_c.text
+    cessna = client.post(
+        "/api/v1/personnel-compliance/",
+        json={
+            "account_information_id": r_c.json()["id"],
+            "item_type": PersonnelComplianceItemType.CESSNA.value,
+            "is_withhold": False,
+        },
+    )
+    assert cessna.status_code == 201, cessna.text
+    assert cessna.json()["item_type"] == "CESSNA"
+
+    baron_account = {
+        "first_name": "Baron",
+        "last_name": "StillWorks",
+        "username": "baron_still_pc",
+        "password": "securepassword123",
+        "status": True,
+    }
+    r_b = client.post("/api/v1/account-information/", json=baron_account)
+    assert r_b.status_code == 201, r_b.text
+    baron = client.post(
+        "/api/v1/personnel-compliance/",
+        json={
+            "account_information_id": r_b.json()["id"],
+            "item_type": PersonnelComplianceItemType.BARON.value,
+            "is_withhold": False,
+        },
+    )
+    assert baron.status_code == 201, baron.text
+    assert baron.json()["item_type"] == "BARON"
