@@ -16,6 +16,7 @@ class PersonnelComplianceItemType(str, enum.Enum):
     HF_TRAINING = "HF_TRAINING"
     CESSNA = "CESSNA"
     BARON = "BARON"
+    PIPER_PA_34 = "PIPER PA-34"
     OTHERS = "OTHERS"
 
 
@@ -34,6 +35,7 @@ class PersonnelCompliance(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
             PersonnelComplianceItemType,
             name="personnel_compliance_item_type",
             create_type=True,
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
         ),
         nullable=False,
         index=True,

@@ -146,6 +146,43 @@ def test_personnel_compliance_matrix_2_paged_others_expiry_from_compliance_other
     assert row["others_expiry_date"] == "2028-03-01"
 
 
+def test_personnel_compliance_matrix_2_paged_piper_expiry_from_compliance(
+    client_with_regulatory_compliance_auth: TestClient,
+):
+    client = client_with_regulatory_compliance_auth
+    account_data = {
+        "first_name": "P",
+        "last_name": "PiperExpiryMatrix",
+        "username": "m2_piper_exp",
+        "password": "securepassword123",
+        "status": True,
+        "designation": "FO",
+        "license_no": "CPL-P34",
+        "auth_stamp": "AUTH-M2-P34",
+    }
+    r = client.post("/api/v1/account-information/", json=account_data)
+    assert r.status_code == 201, r.text
+    account_id = r.json()["id"]
+
+    pc = {
+        "account_information_id": account_id,
+        "item_type": "PIPER PA-34",
+        "expiry_date": "2028-07-20",
+        "is_withhold": False,
+    }
+    r_pc = client.post("/api/v1/personnel-compliance/", json=pc)
+    assert r_pc.status_code == 201, r_pc.text
+
+    r3 = client.get(
+        "/api/v1/personnel-compliance-matrix-2/paged?page=1&limit=50&search=PiperExpiryMatrix"
+    )
+    assert r3.status_code == 200, r3.text
+    body = r3.json()
+    match = [it for it in body["items"] if it["account_information_id"] == account_id]
+    assert len(match) == 1
+    assert match[0]["type_training_expiry_piper"] == "2028-07-20"
+
+
 def test_personnel_compliance_matrix_2_paged_auth_issue_date_from_compliance_when_no_pa_issue(
     client_with_regulatory_compliance_auth: TestClient,
 ):
