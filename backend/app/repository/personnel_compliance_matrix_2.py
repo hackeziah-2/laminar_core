@@ -15,6 +15,7 @@ _MATRIX_COMPLIANCE_TYPES = (
     PersonnelComplianceItemType.HF_TRAINING,
     PersonnelComplianceItemType.CESSNA,
     PersonnelComplianceItemType.BARON,
+    PersonnelComplianceItemType.PIPER_PA_34,
     PersonnelComplianceItemType.OTHERS,
 )
 

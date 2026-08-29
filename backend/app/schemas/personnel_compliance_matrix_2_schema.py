@@ -53,6 +53,7 @@ class PersonnelComplianceMatrix2Item(BaseModel):
     hf_training_expiry: Optional[date] = None
     type_training_expiry_cessna: Optional[date] = None
     type_training_expiry_baron: Optional[date] = None
+    type_training_expiry_piper: Optional[date] = None
     others_expiry_date: Optional[date] = None
 
     class Config:
@@ -81,6 +82,7 @@ class PersonnelComplianceMatrix2Item(BaseModel):
         pc_hf = pc_map.get(PersonnelComplianceItemType.HF_TRAINING)
         pc_cessna = pc_map.get(PersonnelComplianceItemType.CESSNA)
         pc_baron = pc_map.get(PersonnelComplianceItemType.BARON)
+        pc_piper = pc_map.get(PersonnelComplianceItemType.PIPER_PA_34)
         pc_others = pc_map.get(PersonnelComplianceItemType.OTHERS)
 
         scope_cessna = (
@@ -136,6 +138,7 @@ class PersonnelComplianceMatrix2Item(BaseModel):
             hf_training_expiry=_coalesce_compliance_then_auth(pc_hf, pa_hf),
             type_training_expiry_cessna=_coalesce_compliance_then_auth(pc_cessna, pa_tc),
             type_training_expiry_baron=_coalesce_compliance_then_auth(pc_baron, pa_tb),
+            type_training_expiry_piper=_coalesce_compliance_then_auth(pc_piper, None),
             others_expiry_date=others_exp,
         )
 
