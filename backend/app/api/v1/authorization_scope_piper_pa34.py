@@ -1,4 +1,3 @@
-from math import ceil
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, Query, HTTPException, Request, status
@@ -23,12 +22,13 @@ from app.repository.authorization_scope_piper_pa34 import (
     get_all_authorization_scope_piper_pa34_list,
 )
 from app.api.deps import get_current_active_account
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.database import get_session
 from app.models.account import AccountInformation
 
 router = APIRouter(
-    prefix="/api/v1/authorization-scope-piper-pa34",
-    tags=["authorization-scope-piper-pa34"],
+    prefix="/api/v1/authorization-scope-piper",
+    tags=["authorization-scope-piper"],
 )
 
 
@@ -41,28 +41,25 @@ async def api_list_all(session: AsyncSession = Depends(get_session)):
 
 @router.get("/paged")
 async def api_list_paged(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = Query(None),
     sort: Optional[str] = Query("", description="Example: -created_at,name"),
     session: AsyncSession = Depends(get_session),
 ):
     """Paginated list of Authorization Scope Piper PA-34."""
-    offset = (page - 1) * limit
     items, total = await list_authorization_scope_piper_pa34(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         search=search,
         sort=sort,
     )
-    pages = ceil(total / limit) if total else 0
-    return {
-        "items": [AuthorizationScopePiperPa34Read.from_orm(i) for i in items],
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+    return paged_payload(
+        [AuthorizationScopePiperPa34Read.from_orm(i) for i in items],
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router.get("/{scope_id}", response_model=AuthorizationScopePiperPa34Read)

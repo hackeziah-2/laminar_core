@@ -1,4 +1,3 @@
-from math import ceil
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException, Request, status
@@ -20,6 +19,7 @@ from app.repository.organizational_approval import (
     soft_delete_organizational_approval,
 )
 from app.api.deps import get_current_active_account
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.constants.audit import (
     ORGANIZATIONAL_APPROVAL_MODULE_NAME,
     ORGANIZATIONAL_APPROVAL_TABLE_NAME,
@@ -35,8 +35,7 @@ router = APIRouter(
 
 @router.get("/paged")
 async def api_list_paged(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     certificate_fk: Optional[int] = Query(None, description="Filter by certificate category type ID"),
     search: Optional[str] = Query(None, description="Search in number, web_link, certificate category name"),
     sort: Optional[str] = Query(
@@ -54,26 +53,24 @@ async def api_list_paged(
     session: AsyncSession = Depends(get_session),
 ):
     """List organizational approvals with pagination. Sort by certificate_category_types__name (category name), date_of_expiration; search on number, web_link, and certificate name."""
-    offset = (page - 1) * limit
     effective_sort = (sort or "").strip()
     if not effective_sort and sort_by and sort_by.strip():
         col = sort_by.strip()
         effective_sort = f"-{col}" if order == "desc" else col
     items, total = await list_organizational_approvals(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         certificate_fk=certificate_fk,
         search=search,
         sort=effective_sort,
     )
-    pages = ceil(total / limit) if total else 0
-    return {
-        "items": [OrganizationalApprovalRead.from_orm(i) for i in items],
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+    return paged_payload(
+        [OrganizationalApprovalRead.from_orm(i) for i in items],
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router.get("/{approval_id}", response_model=OrganizationalApprovalRead)

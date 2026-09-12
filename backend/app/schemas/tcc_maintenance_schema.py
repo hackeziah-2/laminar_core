@@ -333,6 +333,7 @@ class TCCMaintenancePagedResponse(BaseModel):
     items: List[TCCMaintenanceRead] = Field(default_factory=list)
     total: int = Field(..., description="Total matching rows (not just this page)")
     page: int = Field(..., description="Current page (1-based)")
+    page_size: int = Field(..., description="Rows per page: 50, 100, or 500")
     pages: int = Field(..., description="Total pages for this page size")
 
     class Config:

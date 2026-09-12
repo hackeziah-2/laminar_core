@@ -4,12 +4,13 @@ from typing import Optional, List, Tuple
 from fastapi import HTTPException, Request, UploadFile
 from sqlalchemy import select, func, or_, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import load_only, noload, selectinload
 
 from app.database import set_audit_fields
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 from app.models.account import AccountInformation
 from app.models.ad_monitoring import ADMonitoring, WorkOrderADMonitoring
+from app.models.aircraft import Aircraft
 from app.models.audit_log import AuditAction
 from app.services.audit_trail_service import create_audit_log, serialize_audit_data
 
@@ -64,6 +65,75 @@ async def get_ad_monitoring_by_aircraft(
     return ADMonitoringRead.from_orm(row)
 
 
+def _ad_monitoring_filters(
+    aircraft_fk: Optional[int] = None,
+    search: Optional[str] = None,
+    compli_date: Optional[str] = None,
+    inspection_interval: Optional[str] = None,
+):
+    """Shared WHERE clauses for list + COUNT (search/filter preserved)."""
+    filters = [ADMonitoring.is_deleted.is_(False)]
+    if aircraft_fk is not None:
+        filters.append(ADMonitoring.aircraft_fk == aircraft_fk)
+    if inspection_interval and inspection_interval.strip():
+        filters.append(
+            ADMonitoring.inspection_interval.ilike(
+                f"%{inspection_interval.strip()}%"
+            )
+        )
+    if compli_date and compli_date.strip():
+        filters.append(
+            cast(ADMonitoring.compli_date, String).ilike(
+                f"%{compli_date.strip()}%"
+            )
+        )
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        filters.append(
+            or_(
+                ADMonitoring.ad_number.ilike(pattern),
+                ADMonitoring.subject.ilike(pattern),
+                ADMonitoring.inspection_interval.ilike(pattern),
+                cast(ADMonitoring.compli_date, String).ilike(pattern),
+            )
+        )
+    return filters
+
+
+def _ad_monitoring_list_options():
+    """Load only response columns/relations; avoid audit N+1 and wide aircraft rows."""
+    return (
+        load_only(
+            ADMonitoring.id,
+            ADMonitoring.aircraft_fk,
+            ADMonitoring.ad_number,
+            ADMonitoring.subject,
+            ADMonitoring.inspection_interval,
+            ADMonitoring.compli_date,
+            ADMonitoring.file_path,
+            ADMonitoring.web_link,
+            ADMonitoring.created_at,
+            ADMonitoring.updated_at,
+        ),
+        selectinload(ADMonitoring.aircraft).load_only(
+            Aircraft.id,
+            Aircraft.registration,
+        ),
+        selectinload(ADMonitoring.ad_works).load_only(
+            WorkOrderADMonitoring.id,
+            WorkOrderADMonitoring.ad_monitoring_fk,
+            WorkOrderADMonitoring.work_order_number,
+            WorkOrderADMonitoring.atl_ref,
+            WorkOrderADMonitoring.last_done_date,
+            WorkOrderADMonitoring.last_done_tach,
+            WorkOrderADMonitoring.next_due_aftt,
+            WorkOrderADMonitoring.next_due_tach,
+        ),
+        noload(ADMonitoring.created_by_user),
+        noload(ADMonitoring.updated_by_user),
+    )
+
+
 async def list_ad_monitoring(
     session: AsyncSession,
     limit: int = 0,
@@ -82,37 +152,25 @@ async def list_ad_monitoring(
     - compli_date: case-insensitive partial match on compli_date (cast to text,
       e.g. "2024", "2024-01", "2024-01-15").
     - inspection_interval: case-insensitive partial match on inspection_interval.
+
+    Pagination is applied in the database (LIMIT/OFFSET). Total uses a separate
+    COUNT query on the same filters, without loading rows or related collections.
     """
+    filters = _ad_monitoring_filters(
+        aircraft_fk=aircraft_fk,
+        search=search,
+        compli_date=compli_date,
+        inspection_interval=inspection_interval,
+    )
+
+    count_stmt = select(func.count(ADMonitoring.id)).where(*filters)
+    total = int((await session.execute(count_stmt)).scalar() or 0)
+
     stmt = (
         select(ADMonitoring)
-        .options(
-            selectinload(ADMonitoring.aircraft),
-            selectinload(ADMonitoring.ad_works),
-        )
-        .where(ADMonitoring.is_deleted == False)
+        .options(*_ad_monitoring_list_options())
+        .where(*filters)
     )
-    if aircraft_fk is not None:
-        stmt = stmt.where(ADMonitoring.aircraft_fk == aircraft_fk)
-
-    if inspection_interval and inspection_interval.strip():
-        stmt = stmt.where(
-            ADMonitoring.inspection_interval.ilike(f"%{inspection_interval.strip()}%")
-        )
-    if compli_date and compli_date.strip():
-        stmt = stmt.where(
-            cast(ADMonitoring.compli_date, String).ilike(f"%{compli_date.strip()}%")
-        )
-
-    search_filter = None
-    if search and search.strip():
-        pattern = f"%{search.strip()}%"
-        search_filter = or_(
-            ADMonitoring.ad_number.ilike(pattern),
-            ADMonitoring.subject.ilike(pattern),
-            ADMonitoring.inspection_interval.ilike(pattern),
-            cast(ADMonitoring.compli_date, String).ilike(pattern),
-        )
-        stmt = stmt.where(search_filter)
 
     sortable = {
         "id": ADMonitoring.id,
@@ -134,24 +192,6 @@ async def list_ad_monitoring(
     else:
         stmt = stmt.order_by(ADMonitoring.created_at.desc())
 
-    count_stmt = (
-        select(func.count())
-        .select_from(ADMonitoring)
-        .where(ADMonitoring.is_deleted == False)
-    )
-    if aircraft_fk is not None:
-        count_stmt = count_stmt.where(ADMonitoring.aircraft_fk == aircraft_fk)
-    if inspection_interval and inspection_interval.strip():
-        count_stmt = count_stmt.where(
-            ADMonitoring.inspection_interval.ilike(f"%{inspection_interval.strip()}%")
-        )
-    if compli_date and compli_date.strip():
-        count_stmt = count_stmt.where(
-            cast(ADMonitoring.compli_date, String).ilike(f"%{compli_date.strip()}%")
-        )
-    if search_filter is not None:
-        count_stmt = count_stmt.where(search_filter)
-    total = (await session.execute(count_stmt)).scalar()
     stmt = stmt.limit(limit).offset(offset)
     result = await session.execute(stmt)
     items = result.scalars().all()
@@ -346,11 +386,48 @@ async def soft_delete_ad_monitoring_by_aircraft(
 
 
 # ---------- WorkOrderADMonitoring ----------
+def _work_order_list_options():
+    """Load parent AD summary only; skip unused relations to avoid N+1."""
+    return (
+        load_only(
+            WorkOrderADMonitoring.id,
+            WorkOrderADMonitoring.ad_monitoring_fk,
+            WorkOrderADMonitoring.work_order_number,
+            WorkOrderADMonitoring.last_done_aftt,
+            WorkOrderADMonitoring.last_done_tach,
+            WorkOrderADMonitoring.last_done_date,
+            WorkOrderADMonitoring.next_due_aftt,
+            WorkOrderADMonitoring.next_due_tach,
+            WorkOrderADMonitoring.atl_ref,
+            WorkOrderADMonitoring.created_at,
+            WorkOrderADMonitoring.updated_at,
+        ),
+        selectinload(WorkOrderADMonitoring.ad_monitoring).options(
+            load_only(
+                ADMonitoring.id,
+                ADMonitoring.ad_number,
+                ADMonitoring.subject,
+            ),
+            noload(ADMonitoring.ad_works),
+            noload(ADMonitoring.aircraft),
+            noload(ADMonitoring.created_by_user),
+            noload(ADMonitoring.updated_by_user),
+        ),
+        noload(WorkOrderADMonitoring.created_by_user),
+        noload(WorkOrderADMonitoring.updated_by_user),
+    )
+
+
 def _work_order_select():
     """Base select for WorkOrderADMonitoring with ad_monitoring loaded."""
-    return select(WorkOrderADMonitoring).options(
-        selectinload(WorkOrderADMonitoring.ad_monitoring)
-    )
+    return select(WorkOrderADMonitoring).options(*_work_order_list_options())
+
+
+def _work_order_filters(ad_monitoring_fk: Optional[int] = None):
+    filters = [WorkOrderADMonitoring.is_deleted.is_(False)]
+    if ad_monitoring_fk is not None:
+        filters.append(WorkOrderADMonitoring.ad_monitoring_fk == ad_monitoring_fk)
+    return filters
 
 
 async def get_work_order_ad_monitoring(
@@ -391,10 +468,19 @@ async def list_work_order_ad_monitoring(
     ad_monitoring_fk: Optional[int] = None,
     sort: Optional[str] = "",
 ) -> Tuple[List[WorkOrderADMonitoring], int]:
-    """List WorkOrderADMonitoring with optional filter by ad_monitoring_fk."""
-    stmt = _work_order_select().where(WorkOrderADMonitoring.is_deleted == False)
-    if ad_monitoring_fk is not None:
-        stmt = stmt.where(WorkOrderADMonitoring.ad_monitoring_fk == ad_monitoring_fk)
+    """List WorkOrderADMonitoring with optional filter by ad_monitoring_fk.
+
+    Pagination is applied in the database (LIMIT/OFFSET). Total uses a separate
+    COUNT query on the same filters.
+    """
+    filters = _work_order_filters(ad_monitoring_fk=ad_monitoring_fk)
+
+    count_stmt = select(func.count(WorkOrderADMonitoring.id)).where(*filters)
+    total = int((await session.execute(count_stmt)).scalar() or 0)
+
+    stmt = select(WorkOrderADMonitoring).options(*_work_order_list_options()).where(
+        *filters
+    )
 
     sortable = {
         "id": WorkOrderADMonitoring.id,
@@ -419,16 +505,6 @@ async def list_work_order_ad_monitoring(
     else:
         stmt = stmt.order_by(WorkOrderADMonitoring.created_at.desc())
 
-    count_stmt = (
-        select(func.count())
-        .select_from(WorkOrderADMonitoring)
-        .where(WorkOrderADMonitoring.is_deleted == False)
-    )
-    if ad_monitoring_fk is not None:
-        count_stmt = count_stmt.where(
-            WorkOrderADMonitoring.ad_monitoring_fk == ad_monitoring_fk
-        )
-    total = (await session.execute(count_stmt)).scalar()
     stmt = stmt.limit(limit).offset(offset)
     result = await session.execute(stmt)
     items = result.scalars().all()

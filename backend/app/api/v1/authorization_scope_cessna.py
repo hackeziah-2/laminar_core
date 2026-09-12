@@ -1,4 +1,3 @@
-from math import ceil
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, Query, HTTPException, Request, status
@@ -23,6 +22,7 @@ from app.repository.authorization_scope_cessna import (
     get_all_authorization_scope_cessna_list,
 )
 from app.api.deps import get_current_active_account
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.database import get_session
 from app.models.account import AccountInformation
 
@@ -41,28 +41,25 @@ async def api_list_all(session: AsyncSession = Depends(get_session)):
 
 @router.get("/paged")
 async def api_list_paged(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = Query(None),
     sort: Optional[str] = Query("", description="Example: -created_at,name"),
     session: AsyncSession = Depends(get_session),
 ):
     """Paginated list of Authorization Scope Cessna."""
-    offset = (page - 1) * limit
     items, total = await list_authorization_scope_cessna(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         search=search,
         sort=sort,
     )
-    pages = ceil(total / limit) if total else 0
-    return {
-        "items": [AuthorizationScopeCessnaRead.from_orm(i) for i in items],
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+    return paged_payload(
+        [AuthorizationScopeCessnaRead.from_orm(i) for i in items],
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router.get("/{scope_id}", response_model=AuthorizationScopeCessnaRead)

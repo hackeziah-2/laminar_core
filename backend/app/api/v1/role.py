@@ -1,4 +1,3 @@
-from math import ceil
 from typing import Optional, List
 
 from fastapi import (
@@ -31,6 +30,7 @@ from app.repository.role import (
     get_all_roles_list,
 )
 from app.api.deps import get_current_active_account
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.database import get_session
 from app.models.account import AccountInformation
 
@@ -52,8 +52,7 @@ async def api_roles_list(session: AsyncSession = Depends(get_session)):
 
 @router.get("/paged")
 async def api_list_paged(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = None,
     sort: Optional[str] = Query(
         "",
@@ -62,22 +61,20 @@ async def api_list_paged(
     session: AsyncSession = Depends(get_session)
 ):
     """Get paginated list of Roles."""
-    offset = (page - 1) * limit
     items, total = await list_roles(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         search=search,
         sort=sort,
     )
-    pages = ceil(total / limit) if total else 0
     items_schemas = [RoleRead.from_orm(item) for item in items]
-    return {
-        "items": items_schemas,
-        "total": total,
-        "page": page,
-        "pages": pages
-    }
+    return paged_payload(
+        items_schemas,
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 def _role_permissions_list(role) -> List[RolePermissionItem]:

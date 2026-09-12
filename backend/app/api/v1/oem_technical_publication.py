@@ -1,4 +1,3 @@
-from math import ceil
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException, Request, status
@@ -19,6 +18,7 @@ from app.repository.oem_technical_publication import (
     soft_delete_oem_technical_publication,
 )
 from app.api.deps import get_current_active_account
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.constants.audit import (
     OEM_TECHNICAL_PUBLICATION_MODULE_NAME,
     OEM_TECHNICAL_PUBLICATION_TABLE_NAME,
@@ -34,8 +34,7 @@ router = APIRouter(
 
 @router.get("/paged", response_model=OemTechnicalPublicationPagedResponse)
 async def api_list_paged(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     item_fk: Optional[int] = Query(None, description="Filter by OEM item type ID"),
     category_type: Optional[OemTechnicalPublicationCategoryTypeEnum] = Query(
         None, description="Filter by category type: CERTIFICATE, SUBSCRIPTION, REGULATORY_CORRESPONDENCE_NON_CERT, LICENSE"
@@ -52,23 +51,21 @@ async def api_list_paged(
     session: AsyncSession = Depends(get_session),
 ):
     """List OEM technical publications with pagination. Sort ASC/DESC by date_of_expiration; search by item type name."""
-    offset = (page - 1) * limit
     effective_sort = (sort or "").strip() or (ordering or "").strip()
     items, total = await list_oem_technical_publications(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         item_fk=item_fk,
         category_type=category_type.value if category_type else None,
         search=search,
         sort=effective_sort,
     )
-    pages = ceil(total / limit) if total else 0
-    return OemTechnicalPublicationPagedResponse(
-        items=[OemTechnicalPublicationRead.from_orm(i) for i in items],
+    return paged_payload(
+        [OemTechnicalPublicationRead.from_orm(i) for i in items],
         total=total,
-        page=page,
-        pages=pages,
+        page=pagination.page,
+        page_size=pagination.page_size,
     )
 
 

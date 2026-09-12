@@ -38,6 +38,7 @@ from app.api.v1 import (
     authorization_scope_cessna as authorization_scope_cessna_router,
     authorization_scope_baron as authorization_scope_baron_router,
     authorization_scope_others as authorization_scope_others_router,
+    authorization_scope_piper_pa34 as authorization_scope_piper_pa34_router,
     personnel_authorization as personnel_authorization_router,
     personnel_compliance as personnel_compliance_router,
     personnel_compliance_matrix_2 as personnel_compliance_matrix_2_router,
@@ -314,6 +315,7 @@ app.include_router(oem_technical_publication_router.router)
 app.include_router(authorization_scope_cessna_router.router)
 app.include_router(authorization_scope_baron_router.router)
 app.include_router(authorization_scope_others_router.router)
+app.include_router(authorization_scope_piper_pa34_router.router)
 app.include_router(personnel_authorization_router.router)
 app.include_router(personnel_compliance_router.router)
 app.include_router(personnel_compliance_matrix_2_router.router)

@@ -70,6 +70,11 @@ class Aircraft(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     logbook_entries = relationship("AircraftLogbookEntry", back_populates="aircraft")
 
     atl_logs = relationship("AircraftTechnicalLog", back_populates="aircraft")
+    atl_batches = relationship(
+        "AtlBatch",
+        foreign_keys="AtlBatch.aircraft_id",
+        back_populates="aircraft",
+    )
     ldnd_records = relationship("LDNDMonitoring", back_populates="aircraft")
     ad_records = relationship("ADMonitoring", back_populates="aircraft")
 

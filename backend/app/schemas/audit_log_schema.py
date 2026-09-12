@@ -36,6 +36,8 @@ class AuditLogSummary(BaseModel):
 
 class AuditLogPagedResponse(BaseModel):
     page: int
+    page_size: int
+    pages: int
     limit: int
     total: int
     summary: AuditLogSummary = Field(default_factory=AuditLogSummary)

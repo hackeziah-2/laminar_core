@@ -1,10 +1,10 @@
-from math import ceil
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_account
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.constants.audit import (
     NATURE_OF_FLIGHT_DESCRIPTION_MODULE_NAME,
     NATURE_OF_FLIGHT_DESCRIPTION_TABLE_NAME,
@@ -42,20 +42,9 @@ router_aircraft_scoped = APIRouter(
 )
 
 
-def _paged_response(items, total: int, page: int, limit: int) -> dict:
-    pages = ceil(total / limit) if total else 0
-    return {
-        "items": [NatureOfFlightDescriptionRead.from_orm(i) for i in items],
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
-
-
 @router.get("/paged")
 async def api_list_paged(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     aircraft_fk: Optional[int] = Query(None, description="Filter by aircraft ID"),
     nature_of_flight: Optional[TypeEnum] = Query(
         None, description="Filter by nature of flight (e.g. TR, PSF, ATL_REPL)"
@@ -71,17 +60,21 @@ async def api_list_paged(
     session: AsyncSession = Depends(get_session),
 ):
     """Paginated list of Nature of Flight Description entries."""
-    offset = (page - 1) * limit
     items, total = await list_nature_of_flight_descriptions(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         search=search.strip() if search and search.strip() else None,
         sort=sort or "",
         aircraft_fk=aircraft_fk,
         nature_of_flight=nature_of_flight.value if nature_of_flight else None,
     )
-    return _paged_response(items, total, page, limit)
+    return paged_payload(
+        [NatureOfFlightDescriptionRead.from_orm(i) for i in items],
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router.get("/{entry_id}", response_model=NatureOfFlightDescriptionRead)
@@ -189,8 +182,7 @@ async def api_delete(
 @router_aircraft_scoped.get("/{aircraft_id}/nature-of-flight-descriptions/paged")
 async def api_list_by_aircraft_paged(
     aircraft_id: int,
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     nature_of_flight: Optional[TypeEnum] = Query(
         None, description="Filter by nature of flight (e.g. TR, PSF, ATL_REPL)"
     ),
@@ -205,17 +197,21 @@ async def api_list_by_aircraft_paged(
     aircraft = await get_aircraft(session, aircraft_id)
     if not aircraft:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Aircraft not found")
-    offset = (page - 1) * limit
     items, total = await list_nature_of_flight_descriptions(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         search=search.strip() if search and search.strip() else None,
         sort=sort or "",
         aircraft_fk=aircraft_id,
         nature_of_flight=nature_of_flight.value if nature_of_flight else None,
     )
-    return _paged_response(items, total, page, limit)
+    return paged_payload(
+        [NatureOfFlightDescriptionRead.from_orm(i) for i in items],
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router_aircraft_scoped.get(

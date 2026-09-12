@@ -1,10 +1,10 @@
-from math import ceil
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_permission
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.constants.audit import (
     PERSONNEL_COMPLIANCE_MODULE_NAME as PERSONNEL_COMPLIANCE_AUDIT_MODULE_NAME,
     PERSONNEL_COMPLIANCE_TABLE_NAME,
@@ -37,40 +37,36 @@ router = APIRouter(
 
 async def _list_paged(
     session: AsyncSession,
-    limit: int = 10,
-    page: int = 1,
+    pagination: Pagination,
     search: Optional[str] = None,
     sort: Optional[str] = "",
     account_information__designation: Optional[str] = None,
     item_type: Optional[PersonnelComplianceItemType] = None,
 ):
-    offset = (page - 1) * limit
     items, total = await list_personnel_compliances(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         search=search,
         sort=sort,
         designation=account_information__designation,
         item_type=item_type,
     )
-    pages = ceil(total / limit) if total else 0
-    return PersonnelCompliancePagedResponse(
-        items=[
+    return paged_payload(
+        [
             PersonnelComplianceRead.from_orm_with_personnel_authorization(pc, pa)
             for pc, pa in items
         ],
         total=total,
-        page=page,
-        pages=pages,
+        page=pagination.page,
+        page_size=pagination.page_size,
     )
 
 
 @router.get("", response_model=PersonnelCompliancePagedResponse)
 @router.get("/", response_model=PersonnelCompliancePagedResponse)
 async def api_list(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = Query(
         None,
         description="Search by account name: first_name, last_name, middle_name, or combined patterns (e.g. Last, First or First Last).",
@@ -94,8 +90,7 @@ async def api_list(
 ):
     return await _list_paged(
         session=session,
-        limit=limit,
-        page=page,
+        pagination=pagination,
         search=search,
         sort=sort,
         account_information__designation=account_information__designation,
@@ -105,8 +100,7 @@ async def api_list(
 
 @router.get("/paged", response_model=PersonnelCompliancePagedResponse)
 async def api_list_paged(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = Query(
         None,
         description="Search by account name: first_name, last_name, middle_name, or combined patterns (e.g. Last, First or First Last).",
@@ -130,8 +124,7 @@ async def api_list_paged(
 ):
     return await _list_paged(
         session=session,
-        limit=limit,
-        page=page,
+        pagination=pagination,
         search=search,
         sort=sort,
         account_information__designation=account_information__designation,

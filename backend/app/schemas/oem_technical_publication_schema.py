@@ -83,4 +83,5 @@ class OemTechnicalPublicationPagedResponse(BaseModel):
     items: List[OemTechnicalPublicationRead]
     total: int
     page: int
+    page_size: int
     pages: int

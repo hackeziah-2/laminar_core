@@ -1,4 +1,3 @@
-from math import ceil
 from typing import Optional
 
 from fastapi import (
@@ -11,6 +10,7 @@ from fastapi import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.schemas import ldnd_monitoring_schema
 from app.repository.ldnd_monitoring import (
     get_ldnd_monitoring,
@@ -44,8 +44,7 @@ router_aircraft_scoped = APIRouter(
 
 @router.get("/paged")
 async def api_list_ldnd_monitoring_paged(
-    limit: int = Query(10, ge=1, le=100, description="Items per page"),
-    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+    pagination: Pagination = Depends(pagination_params),
     aircraft_fk: Optional[int] = Query(None, description="Filter by aircraft ID"),
     inspection_type: Optional[str] = Query(None, description="Filter by inspection type (partial match)"),
     search: Optional[str] = Query(
@@ -60,24 +59,22 @@ async def api_list_ldnd_monitoring_paged(
     session: AsyncSession = Depends(get_session),
 ):
     """Get paginated list of LDNDMonitoring entries."""
-    offset = (page - 1) * limit
     items, total = await list_ldnd_monitoring(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         aircraft_fk=aircraft_fk,
         inspection_type=inspection_type,
         search=search.strip() if search and search.strip() else None,
         sort=sort,
     )
-    pages = ceil(total / limit) if total else 0
     items_schemas = [ldnd_monitoring_schema.LDNDMonitoringRead.from_orm(item) for item in items]
-    return {
-        "items": items_schemas,
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+    return paged_payload(
+        items_schemas,
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router.get(
@@ -213,8 +210,7 @@ async def api_get_ldnd_latest_by_aircraft(
 )
 async def api_list_ldnd_monitoring_by_aircraft_paged(
     aircraft_id: int,
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     inspection_type: Optional[str] = Query(None),
     search: Optional[str] = Query(
         None,
@@ -231,19 +227,22 @@ async def api_list_ldnd_monitoring_by_aircraft_paged(
     aircraft = await get_aircraft(session, aircraft_id)
     if not aircraft:
         raise HTTPException(status_code=404, detail="Aircraft not found")
-    offset = (page - 1) * limit
     items, total = await list_ldnd_monitoring(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         aircraft_fk=aircraft_id,
         inspection_type=inspection_type,
         search=search.strip() if search and search.strip() else None,
         sort=sort,
     )
-    pages = ceil(total / limit) if total else 0
     items_schemas = [ldnd_monitoring_schema.LDNDMonitoringRead.from_orm(item) for item in items]
-    return {"items": items_schemas, "total": total, "page": page, "pages": pages}
+    return paged_payload(
+        items_schemas,
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router_aircraft_scoped.get(

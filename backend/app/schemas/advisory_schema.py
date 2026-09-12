@@ -51,6 +51,7 @@ class AdvisoryPagedResponse(BaseModel):
     items: list[AdvisoryItem] = Field(default_factory=list)
     total: int = Field(..., description="Total number of items")
     page: int = Field(..., description="Current page number")
+    page_size: int = Field(..., description="Rows per page: 50, 100, or 500")
     pages: int = Field(..., description="Total number of pages")
 
     class Config:

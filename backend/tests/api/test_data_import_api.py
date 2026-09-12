@@ -363,7 +363,7 @@ def test_atl_import_list_and_detail_return_identical_time_fields(
 
     paged_response = client_with_maintenance_import_auth.get(
         f"/api/v1/aircraft-technical-log/paged"
-        f"?aircraft_fk={aircraft_id}&atl_batch_fk={batch_id}&limit=10&page=1"
+        f"?aircraft_fk={aircraft_id}&atl_batch_fk={batch_id}&page_size=50&page=1"
     )
     assert paged_response.status_code == 200, paged_response.text
     items = paged_response.json()["items"]

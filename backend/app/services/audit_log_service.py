@@ -4,6 +4,7 @@ from typing import Optional, Tuple
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.pagination import page_count
 from app.repository.audit_log import (
     enrich_audit_log_reads,
     get_audit_log_by_id,
@@ -24,7 +25,7 @@ async def fetch_audit_logs(
     session: AsyncSession,
     *,
     page: int = 1,
-    limit: int = 10,
+    page_size: int = 50,
     module_name: Optional[str] = None,
     table_name: Optional[str] = None,
     record_id: Optional[int] = None,
@@ -36,7 +37,7 @@ async def fetch_audit_logs(
     search: Optional[str] = None,
 ) -> AuditLogPagedResponse:
     """List audit logs with pagination, filters, and summary counts."""
-    offset = (page - 1) * limit
+    offset = (page - 1) * page_size
     filter_kwargs = {
         "module_name": module_name,
         "table_name": table_name,
@@ -51,7 +52,7 @@ async def fetch_audit_logs(
 
     items, total = await list_audit_logs(
         session,
-        limit=limit,
+        limit=page_size,
         offset=offset,
         **filter_kwargs,
     )
@@ -59,7 +60,9 @@ async def fetch_audit_logs(
 
     return AuditLogPagedResponse(
         page=page,
-        limit=limit,
+        page_size=page_size,
+        pages=page_count(total, page_size),
+        limit=page_size,
         total=total,
         summary=summary,
         items=items,

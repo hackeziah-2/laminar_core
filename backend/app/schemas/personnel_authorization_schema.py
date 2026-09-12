@@ -109,6 +109,14 @@ class AuthorizationScopeOthersSummary(BaseModel):
         orm_mode = True
 
 
+class AuthorizationScopePiperPa34Summary(BaseModel):
+    id: int
+    name: str
+
+    class Config:
+        orm_mode = True
+
+
 def _coerce_optional_scope_id(v: Any) -> Optional[int]:
     """Coerce empty string or other falsy non-int to None for scope FK fields."""
     if v is None:
@@ -123,11 +131,29 @@ def _coerce_optional_scope_id(v: Any) -> Optional[int]:
         return None
 
 
+def _map_piper_scope_alias(values: Any) -> Any:
+    """Accept frontend `authorization_scope_piper_id` as piper PA-34 FK."""
+    if not hasattr(values, "get"):
+        return values
+    current = values.get("authorization_scope_piper_pa34_id")
+    if current not in (None, ""):
+        return values
+    alias = values.get("authorization_scope_piper_id")
+    if alias in (None, ""):
+        return values
+    if isinstance(values, dict):
+        out = dict(values)
+        out["authorization_scope_piper_pa34_id"] = alias
+        return out
+    return values
+
+
 class PersonnelAuthorizationBase(BaseModel):
     account_information_id: int
     authorization_scope_cessna_id: Optional[int] = None
     authorization_scope_baron_id: Optional[int] = None
     authorization_scope_others_id: Optional[int] = None
+    authorization_scope_piper_pa34_id: Optional[int] = None
     auth_initial_doi: Optional[date] = None
     auth_issue_date: Optional[date] = None
     auth_expiry_date: Optional[date] = None
@@ -140,10 +166,15 @@ class PersonnelAuthorizationBase(BaseModel):
     class Config:
         orm_mode = True
 
+    @root_validator(pre=True)
+    def map_piper_scope_alias(cls, values: Any) -> Any:
+        return _map_piper_scope_alias(values)
+
     @validator(
         "authorization_scope_cessna_id",
         "authorization_scope_baron_id",
         "authorization_scope_others_id",
+        "authorization_scope_piper_pa34_id",
         pre=True,
     )
     def coerce_scope_ids_to_null(cls, v: Any) -> Optional[int]:
@@ -159,6 +190,7 @@ class PersonnelAuthorizationUpdate(BaseModel):
     authorization_scope_cessna_id: Optional[int] = None
     authorization_scope_baron_id: Optional[int] = None
     authorization_scope_others_id: Optional[int] = None
+    authorization_scope_piper_pa34_id: Optional[int] = None
     auth_initial_doi: Optional[date] = None
     auth_issue_date: Optional[date] = None
     auth_expiry_date: Optional[date] = None
@@ -171,10 +203,15 @@ class PersonnelAuthorizationUpdate(BaseModel):
     class Config:
         orm_mode = True
 
+    @root_validator(pre=True)
+    def map_piper_scope_alias(cls, values: Any) -> Any:
+        return _map_piper_scope_alias(values)
+
     @validator(
         "authorization_scope_cessna_id",
         "authorization_scope_baron_id",
         "authorization_scope_others_id",
+        "authorization_scope_piper_pa34_id",
         pre=True,
     )
     def coerce_scope_ids_to_null(cls, v: Any) -> Optional[int]:
@@ -240,6 +277,7 @@ class PersonnelAuthorizationRead(PersonnelAuthorizationBase):
     authorization_scope_cessna: Optional[AuthorizationScopeCessnaSummary] = None
     authorization_scope_baron: Optional[AuthorizationScopeBaronSummary] = None
     authorization_scope_others: Optional[AuthorizationScopeOthersSummary] = None
+    authorization_scope_piper_pa34: Optional[AuthorizationScopePiperPa34Summary] = None
 
     class Config:
         orm_mode = True

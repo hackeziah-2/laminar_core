@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 class AtlBatchBase(BaseModel):
     name: str = Field(..., max_length=255)
     description: Optional[str] = None
+    aircraft_id: Optional[int] = None
 
     class Config:
         orm_mode = True
@@ -19,6 +20,7 @@ class AtlBatchCreate(AtlBatchBase):
 class AtlBatchUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=255)
     description: Optional[str] = None
+    aircraft_id: Optional[int] = None
 
     class Config:
         orm_mode = True
@@ -39,6 +41,7 @@ class AtlBatchBrief(BaseModel):
     id: int
     name: str
     description: Optional[str] = None
+    aircraft_id: Optional[int] = None
 
     class Config:
         orm_mode = True
@@ -47,6 +50,7 @@ class AtlBatchBrief(BaseModel):
 class AtlBatchListItem(BaseModel):
     id: int
     name: str
+    aircraft_id: Optional[int] = None
 
     class Config:
         orm_mode = True

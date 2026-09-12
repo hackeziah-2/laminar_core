@@ -3,9 +3,11 @@ from typing import List, Optional, Tuple
 from fastapi import HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.database import set_audit_fields
 from app.models.account import AccountInformation
+from app.models.aircraft import Aircraft
 from app.models.atl_batch import AtlBatch
 from app.models.audit_log import AuditAction
 from app.schemas.atl_batch_schema import (
@@ -14,6 +16,45 @@ from app.schemas.atl_batch_schema import (
     AtlBatchUpdate,
 )
 from app.services.audit_trail_service import create_audit_log, serialize_audit_data
+
+
+async def _ensure_aircraft_exists(
+    session: AsyncSession, aircraft_id: Optional[int]
+) -> None:
+    if aircraft_id is None:
+        return
+    result = await session.execute(
+        select(Aircraft.id).where(
+            Aircraft.id == aircraft_id,
+            Aircraft.is_deleted.is_(False),
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=400, detail="Aircraft not found")
+
+
+async def _name_taken(
+    session: AsyncSession,
+    name: str,
+    aircraft_id: Optional[int],
+    *,
+    exclude_id: Optional[int] = None,
+) -> bool:
+    stmt = select(AtlBatch).where(
+        AtlBatch.name == name,
+        AtlBatch.is_deleted.is_(False),
+    )
+    if aircraft_id is None:
+        stmt = stmt.where(AtlBatch.aircraft_id.is_(None))
+    else:
+        stmt = stmt.where(AtlBatch.aircraft_id == aircraft_id)
+    if exclude_id is not None:
+        stmt = stmt.where(AtlBatch.id != exclude_id)
+    return (await session.execute(stmt)).scalar_one_or_none() is not None
+
+
+def _batch_stmt():
+    return select(AtlBatch).options(selectinload(AtlBatch.aircraft))
 
 
 async def create_atl_batch(
@@ -26,13 +67,8 @@ async def create_atl_batch(
     audit_user: Optional[AccountInformation] = None,
     audit_request: Optional[Request] = None,
 ) -> AtlBatchRead:
-    result = await session.execute(
-        select(AtlBatch).where(
-            AtlBatch.name == data.name,
-            AtlBatch.is_deleted.is_(False),
-        )
-    )
-    if result.scalar_one_or_none():
+    await _ensure_aircraft_exists(session, data.aircraft_id)
+    if await _name_taken(session, data.name, data.aircraft_id):
         raise HTTPException(
             status_code=400,
             detail="ATL batch with this name already exists",
@@ -63,7 +99,7 @@ async def create_atl_batch(
 
 async def get_atl_batch(session: AsyncSession, batch_id: int) -> Optional[AtlBatchRead]:
     result = await session.execute(
-        select(AtlBatch).where(
+        _batch_stmt().where(
             AtlBatch.id == batch_id,
             AtlBatch.is_deleted.is_(False),
         )
@@ -89,20 +125,22 @@ async def update_atl_batch(
     if not obj or obj.is_deleted:
         return None
     old_data_snapshot = serialize_audit_data(obj)
-    update_data = data.dict(exclude_unset=True) if hasattr(data, "dict") else data.model_dump(exclude_unset=True)
-    if "name" in update_data:
-        q = await session.execute(
-            select(AtlBatch).where(
-                AtlBatch.name == update_data["name"],
-                AtlBatch.id != batch_id,
-                AtlBatch.is_deleted.is_(False),
-            )
+    update_data = (
+        data.dict(exclude_unset=True)
+        if hasattr(data, "dict")
+        else data.model_dump(exclude_unset=True)
+    )
+    next_name = update_data.get("name", obj.name)
+    next_aircraft_id = update_data.get("aircraft_id", obj.aircraft_id)
+    if "aircraft_id" in update_data:
+        await _ensure_aircraft_exists(session, next_aircraft_id)
+    if await _name_taken(
+        session, next_name, next_aircraft_id, exclude_id=batch_id
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="ATL batch with this name already exists",
         )
-        if q.scalar_one_or_none():
-            raise HTTPException(
-                status_code=400,
-                detail="ATL batch with this name already exists",
-            )
     for k, v in update_data.items():
         setattr(obj, k, v)
     session.add(obj)
@@ -133,17 +171,25 @@ async def list_atl_batches_paged(
     offset: int = 0,
     search: Optional[str] = None,
     sort: str = "",
+    aircraft_id: Optional[int] = None,
 ) -> Tuple[List[AtlBatch], int]:
-    stmt = select(AtlBatch).where(AtlBatch.is_deleted.is_(False))
+    stmt = _batch_stmt().where(AtlBatch.is_deleted.is_(False))
+    count_stmt = select(func.count()).select_from(AtlBatch).where(
+        AtlBatch.is_deleted.is_(False)
+    )
+    if aircraft_id is not None:
+        stmt = stmt.where(AtlBatch.aircraft_id == aircraft_id)
+        count_stmt = count_stmt.where(AtlBatch.aircraft_id == aircraft_id)
     if search and search.strip():
         q = f"%{search.strip()}%"
-        stmt = stmt.where(
-            (AtlBatch.name.ilike(q)) | (AtlBatch.description.ilike(q))
-        )
+        search_filter = (AtlBatch.name.ilike(q)) | (AtlBatch.description.ilike(q))
+        stmt = stmt.where(search_filter)
+        count_stmt = count_stmt.where(search_filter)
 
     sortable = {
         "id": AtlBatch.id,
         "name": AtlBatch.name,
+        "aircraft_id": AtlBatch.aircraft_id,
         "created_at": AtlBatch.created_at,
         "updated_at": AtlBatch.updated_at,
     }
@@ -157,24 +203,24 @@ async def list_atl_batches_paged(
     else:
         stmt = stmt.order_by(AtlBatch.name.asc())
 
-    count_stmt = select(func.count()).select_from(AtlBatch).where(AtlBatch.is_deleted.is_(False))
-    if search and search.strip():
-        q = f"%{search.strip()}%"
-        count_stmt = count_stmt.where(
-            (AtlBatch.name.ilike(q)) | (AtlBatch.description.ilike(q))
-        )
     total = (await session.execute(count_stmt)).scalar()
     stmt = stmt.limit(limit).offset(offset)
     result = await session.execute(stmt)
     return list(result.scalars().all()), total
 
 
-async def get_all_atl_batches_list(session: AsyncSession) -> List[AtlBatch]:
-    result = await session.execute(
+async def get_all_atl_batches_list(
+    session: AsyncSession,
+    aircraft_id: Optional[int] = None,
+) -> List[AtlBatch]:
+    stmt = (
         select(AtlBatch)
         .where(AtlBatch.is_deleted.is_(False))
         .order_by(AtlBatch.created_at.desc(), AtlBatch.id.desc())
     )
+    if aircraft_id is not None:
+        stmt = stmt.where(AtlBatch.aircraft_id == aircraft_id)
+    result = await session.execute(stmt)
     return list(result.scalars().all())
 
 

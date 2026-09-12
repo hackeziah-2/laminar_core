@@ -1,10 +1,10 @@
-from math import ceil
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException, Request, status
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.schemas import fleet_daily_update_schema
 from app.repository.fleet_daily_update import (
     create_fleet_daily_update,
@@ -145,41 +145,37 @@ async def _enrich_item_with_ldnd(session, orm_item):
 
 async def _list_fleet_daily_updates_paged_impl(
     *,
-    limit: int,
-    page: int,
+    pagination: Pagination,
     search: Optional[str],
     status: Optional[str],
     aircraft_fk: Optional[int],
     sort: Optional[str],
     session: AsyncSession,
 ):
-    offset = (page - 1) * limit
     sort_param = (sort.strip() if (sort and isinstance(sort, str)) else None) or ""
     items, total = await list_fleet_daily_updates(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         search=search.strip() if search and search.strip() else None,
         aircraft_fk=aircraft_fk,
         status=status,
         sort=sort_param,
     )
-    pages = ceil(total / limit) if total else 0
     enriched = []
     for i in items:
         enriched.append(await _enrich_item_with_ldnd(session, i))
-    return {
-        "items": enriched,
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+    return paged_payload(
+        enriched,
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router.get("/")
 async def api_list_fleet_daily_updates_root(
-    limit: int = Query(10, ge=1, le=100, description="Page size"),
-    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = Query(
         None,
         description="Search by aircraft registration (partial match)",
@@ -197,8 +193,7 @@ async def api_list_fleet_daily_updates_root(
 ):
     """Paginated list (alias of /paged). Frontend historically called GET / with page/limit/sort."""
     return await _list_fleet_daily_updates_paged_impl(
-        limit=limit,
-        page=page,
+        pagination=pagination,
         search=search,
         status=status,
         aircraft_fk=aircraft_fk,
@@ -209,8 +204,7 @@ async def api_list_fleet_daily_updates_root(
 
 @router.get("/paged")
 async def api_list_fleet_daily_updates_paged(
-    limit: int = Query(10, ge=1, le=100, description="Page size"),
-    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = Query(
         None,
         description="Search by aircraft registration (partial match)",
@@ -232,8 +226,7 @@ async def api_list_fleet_daily_updates_paged(
     api/v1/aircraft/{id}/ldnd-monitoring/latest, and tach_time_eod from the stored daily-update
     value (bulk/PUT), falling back to latest ATL tachometer_end when unset."""
     return await _list_fleet_daily_updates_paged_impl(
-        limit=limit,
-        page=page,
+        pagination=pagination,
         search=search,
         status=status,
         aircraft_fk=aircraft_fk,
@@ -518,8 +511,7 @@ async def api_patch_fleet_daily_update_by_aircraft(
 )
 async def api_list_fleet_daily_updates_by_aircraft_paged(
     aircraft_id: int,
-    limit: int = Query(10, ge=1, le=100, description="Page size"),
-    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = Query(
         None,
         description="Search by aircraft registration (partial match)",
@@ -537,27 +529,14 @@ async def api_list_fleet_daily_updates_by_aircraft_paged(
     aircraft = await get_aircraft(session, aircraft_id)
     if not aircraft:
         raise HTTPException(status_code=404, detail="Aircraft not found")
-    offset = (page - 1) * limit
-    sort_param = (sort.strip() if (sort and isinstance(sort, str)) else None) or ""
-    items, total = await list_fleet_daily_updates(
-        session=session,
-        limit=limit,
-        offset=offset,
-        search=search.strip() if search and search.strip() else None,
-        aircraft_fk=aircraft_id,
+    return await _list_fleet_daily_updates_paged_impl(
+        pagination=pagination,
+        search=search,
         status=status,
-        sort=sort_param,
+        aircraft_fk=aircraft_id,
+        sort=sort,
+        session=session,
     )
-    pages = ceil(total / limit) if total else 0
-    enriched = []
-    for i in items:
-        enriched.append(await _enrich_item_with_ldnd(session, i))
-    return {
-        "items": enriched,
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
 
 
 @router_aircraft_scoped.post(

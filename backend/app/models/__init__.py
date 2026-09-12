@@ -37,6 +37,7 @@ from .oem_technical_publication import OemTechnicalPublication
 from .authorization_scope_cessna import AuthorizationScopeCessna
 from .authorization_scope_baron import AuthorizationScopeBaron
 from .authorization_scope_others import AuthorizationScopeOthers
+from .authorization_scope_piper_pa34 import AuthorizationScopePiperPa34
 from .personnel_authorization import PersonnelAuthorization
 from .personnel_compliance import (
     PERSONNEL_COMPLIANCE_MODULE_NAME,

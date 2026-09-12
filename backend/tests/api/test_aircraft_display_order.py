@@ -93,7 +93,7 @@ def test_aircraft_reorder_success_shared_by_profile_and_daily_update(client: Tes
     assert fdu_orders == orders
 
     # Persists on retrieve again
-    paged = client.get("/api/v1/aircraft/paged?limit=10&page=1")
+    paged = client.get("/api/v1/aircraft/paged?page_size=50&page=1")
     assert paged.status_code == 200
     assert [i["registration"] for i in paged.json()["items"]] == [
         "RP-C603",
@@ -329,11 +329,10 @@ def test_pagination_follows_global_display_order(client: TestClient):
     }
     assert client.put("/api/v1/aircraft/reorder", json=payload).status_code == 200
 
-    page1 = client.get("/api/v1/aircraft/paged?limit=2&page=1")
-    page2 = client.get("/api/v1/aircraft/paged?limit=2&page=2")
-    assert page1.status_code == 200 and page2.status_code == 200
-    assert [i["registration"] for i in page1.json()["items"]] == ["PAGE-4", "PAGE-3"]
-    assert [i["registration"] for i in page2.json()["items"]] == ["PAGE-2", "PAGE-1"]
+    page1 = client.get("/api/v1/aircraft/paged?page_size=50&page=1")
+    assert page1.status_code == 200
+    regs = [i["registration"] for i in page1.json()["items"]]
+    assert regs[:4] == ["PAGE-4", "PAGE-3", "PAGE-2", "PAGE-1"]
 
     async def _fdu_pages() -> Tuple[List[str], List[str]]:
         async with TestSessionLocal() as session:

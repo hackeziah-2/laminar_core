@@ -1,10 +1,10 @@
-from math import ceil
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException, Request, status
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.schemas import tcc_maintenance_schema
 from app.repository.tcc_maintenance import (
     create_tcc_maintenance,
@@ -47,8 +47,7 @@ router_aircraft_scoped = APIRouter(
     response_model=tcc_maintenance_schema.TCCMaintenancePagedResponse,
 )
 async def api_list_tcc_maintenances_paged(
-    limit: int = Query(10, ge=1, le=100, description="Number of items per page"),
-    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = Query(None, description="Search in part_number, serial_number, description"),
     aircraft_fk: Optional[int] = Query(None, description="Filter by aircraft ID"),
     atl_ref: Optional[int] = Query(None, description="Filter by ATL (aircraft_technical_log) ID"),
@@ -63,26 +62,26 @@ async def api_list_tcc_maintenances_paged(
     session: AsyncSession = Depends(get_session),
 ):
     """Get paginated list of TCC Maintenance entries."""
-    offset = (page - 1) * limit
     items, total = await list_tcc_maintenances(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         search=search.strip() if search and search.strip() else None,
         aircraft_fk=aircraft_fk,
         atl_ref=atl_ref,
         category=category,
         sort=sort or "",
     )
-    pages = ceil(total / limit) if total else 0
     items_schemas = [
         await tcc_maintenance_to_read(session, item) for item in items
     ]
     return tcc_maintenance_schema.TCCMaintenancePagedResponse(
-        items=items_schemas,
-        total=total,
-        page=page,
-        pages=pages,
+        **paged_payload(
+            items_schemas,
+            total=total,
+            page=pagination.page,
+            page_size=pagination.page_size,
+        )
     )
 
 
@@ -251,8 +250,7 @@ async def api_delete_tcc_maintenance(
 )
 async def api_list_tcc_maintenances_by_aircraft_paged(
     aircraft_id: int,
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = Query(None),
     atl_ref: Optional[int] = Query(None),
     category: Optional[str] = Query(None, description="Filter by category: Powerplant, Airframe, Inspection Servicing"),
@@ -263,18 +261,16 @@ async def api_list_tcc_maintenances_by_aircraft_paged(
     aircraft = await get_aircraft(session, aircraft_id)
     if not aircraft:
         raise HTTPException(status_code=404, detail="Aircraft not found")
-    offset = (page - 1) * limit
     items, total = await list_tcc_maintenances(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         search=search.strip() if search and search.strip() else None,
         aircraft_fk=aircraft_id,
         atl_ref=atl_ref,
         category=category,
         sort=sort or "",
     )
-    pages = ceil(total / limit) if total else 0
     prefetched_tach_aftt = await fetch_latest_atl_tach_aftt(session, aircraft_id)
     items_schemas = [
         await tcc_maintenance_to_read(
@@ -285,10 +281,12 @@ async def api_list_tcc_maintenances_by_aircraft_paged(
         for item in items
     ]
     return tcc_maintenance_schema.TCCMaintenancePagedResponse(
-        items=items_schemas,
-        total=total,
-        page=page,
-        pages=pages,
+        **paged_payload(
+            items_schemas,
+            total=total,
+            page=pagination.page,
+            page_size=pagination.page_size,
+        )
     )
 
 

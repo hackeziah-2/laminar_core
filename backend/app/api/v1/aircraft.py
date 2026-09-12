@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 
-from math import ceil
 from typing import Dict, List, Optional
 from fastapi import (
     APIRouter,
@@ -42,6 +41,7 @@ from app.repository.aircraft_technical_log import (
 )
 from app.database import get_session
 from app.api.deps import get_current_active_account
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.constants.audit import AIRCRAFT_MODULE_NAME, AIRCRAFT_TABLE_NAME
 from app.models.account import AccountInformation
 from app.upload_config import UPLOAD_DIR
@@ -59,8 +59,7 @@ async def api_list_aircraft(session: AsyncSession = Depends(get_session)):
 
 @router.get("/paged")
 async def api_list_paged(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = Query(None, description="Search in registration, base, model"),
     status: Optional[str] = Query(
         None,
@@ -72,16 +71,24 @@ async def api_list_paged(
     ),
     session: AsyncSession = Depends(get_session),
 ):
-    offset = (page - 1) * limit
     search_param = search.strip() if (search and isinstance(search, str)) else None
     status_param = status.strip() if (status and isinstance(status, str)) else None
     sort_param = (sort.strip() if (sort and isinstance(sort, str)) else None) or ""
     items, total = await list_aircraft(
-        session, limit=limit, offset=offset, search=search_param, status=status_param, sort=sort_param
+        session,
+        limit=pagination.limit,
+        offset=pagination.offset,
+        search=search_param,
+        status=status_param,
+        sort=sort_param,
     )
-    pages = ceil(total / limit) if limit else 0
     items_out = [aircraft_schema.AircraftOut.from_orm(a) for a in items]
-    return {"items": items_out, "total": total, "page": page, "pages": pages}
+    return paged_payload(
+        items_out,
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router.put(
@@ -209,22 +216,24 @@ async def api_get(aircraft_id: int, session: AsyncSession = Depends(get_session)
 @router.get("/{aircraft_id}/history")
 async def api_get_aircraft_history(
     aircraft_id: int,
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     session: AsyncSession = Depends(get_session),
 ):
     obj = await get_aircraft(session, aircraft_id)
     if not obj:
         raise HTTPException(status_code=404, detail="Aircraft not found")
-    offset = (page - 1) * limit
     items, total = await list_aircraft_history_paged(
         session,
         aircraft_id,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
     )
-    pages = ceil(total / limit) if total else 0
-    return {"items": items, "total": total, "page": page, "pages": pages}
+    return paged_payload(
+        items,
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 def _serve_aircraft_file(

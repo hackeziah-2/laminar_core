@@ -1,10 +1,10 @@
 import json
-from math import ceil
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException, status, Form, File, UploadFile, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.schemas import ad_monitoring_schema
 from app.repository.ad_monitoring import (
     get_ad_monitoring,
@@ -63,10 +63,12 @@ router_work_order = APIRouter(
 
 
 # ========== ADMonitoring: global endpoints ==========
-@router.get("/paged")
+@router.get(
+    "/paged",
+    response_model=ad_monitoring_schema.ADMonitoringPagedResponse,
+)
 async def api_list_ad_monitoring_paged(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     aircraft_fk: Optional[int] = Query(None),
     search: Optional[str] = Query(
         None,
@@ -86,24 +88,22 @@ async def api_list_ad_monitoring_paged(
     sort: Optional[str] = Query(""),
     session: AsyncSession = Depends(get_session),
 ):
-    offset = (page - 1) * limit
     items, total = await list_ad_monitoring(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         aircraft_fk=aircraft_fk,
         search=search.strip() if search and search.strip() else None,
         compli_date=compli_date,
         inspection_interval=inspection_interval,
         sort=sort,
     )
-    pages = ceil(total / limit) if total else 0
-    return {
-        "items": [ad_monitoring_schema.ADMonitoringRead.from_orm(i) for i in items],
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+    return paged_payload(
+        [ad_monitoring_schema.ADMonitoringRead.from_orm(i) for i in items],
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router.get("/{ad_id}", response_model=ad_monitoring_schema.ADMonitoringRead)
@@ -207,11 +207,13 @@ async def api_delete_ad_monitoring(
 
 
 # ========== ADMonitoring: aircraft-scoped CRUD (api/v1/aircraft/{aircraft_fk}/ad_monitoring/) ==========
-@router_aircraft_scoped.get("/{aircraft_fk}/ad_monitoring/paged")
+@router_aircraft_scoped.get(
+    "/{aircraft_fk}/ad_monitoring/paged",
+    response_model=ad_monitoring_schema.ADMonitoringPagedResponse,
+)
 async def api_list_ad_monitoring_by_aircraft_paged(
     aircraft_fk: int,
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = Query(
         None,
         description=(
@@ -233,24 +235,22 @@ async def api_list_ad_monitoring_by_aircraft_paged(
     aircraft = await get_aircraft(session, aircraft_fk)
     if not aircraft:
         raise HTTPException(status_code=404, detail="Aircraft not found")
-    offset = (page - 1) * limit
     items, total = await list_ad_monitoring(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         aircraft_fk=aircraft_fk,
         search=search.strip() if search and search.strip() else None,
         compli_date=compli_date,
         inspection_interval=inspection_interval,
         sort=sort,
     )
-    pages = ceil(total / limit) if total else 0
-    return {
-        "items": [ad_monitoring_schema.ADMonitoringRead.from_orm(i) for i in items],
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+    return paged_payload(
+        [ad_monitoring_schema.ADMonitoringRead.from_orm(i) for i in items],
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router_aircraft_scoped.get(
@@ -377,35 +377,33 @@ async def api_delete_ad_monitoring_by_aircraft(
 # ========== WorkOrderADMonitoring: aircraft-scoped CRUD ==========
 @router_aircraft_scoped.get(
     "/{aircraft_fk}/ad_monitoring/{ad_monitoring_fk}/work-order-ad-monitoring/paged",
+    response_model=ad_monitoring_schema.WorkOrderADMonitoringPagedResponse,
     tags=["work-order-ad-monitoring"],
 )
 async def api_list_work_orders_by_aircraft_ad_paged(
     aircraft_fk: int,
     ad_monitoring_fk: int,
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     sort: Optional[str] = Query(""),
     session: AsyncSession = Depends(get_session),
     _: None = Depends(get_ad_monitoring_scoped_to_aircraft),
 ):
-    offset = (page - 1) * limit
     items, total = await list_work_order_ad_monitoring(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         ad_monitoring_fk=ad_monitoring_fk,
         sort=sort,
     )
-    pages = ceil(total / limit) if total else 0
-    return {
-        "items": [
+    return paged_payload(
+        [
             ad_monitoring_schema.WorkOrderADMonitoringRead.from_orm(i)
             for i in items
         ],
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router_aircraft_scoped.get(
@@ -529,32 +527,32 @@ async def api_delete_work_order_by_aircraft_ad(
 
 
 # ========== WorkOrderADMonitoring: global endpoints ==========
-@router_work_order.get("/paged")
+@router_work_order.get(
+    "/paged",
+    response_model=ad_monitoring_schema.WorkOrderADMonitoringPagedResponse,
+)
 async def api_list_work_order_ad_monitoring_paged(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     ad_monitoring_fk: Optional[int] = Query(None),
     sort: Optional[str] = Query(""),
     session: AsyncSession = Depends(get_session),
 ):
-    offset = (page - 1) * limit
     items, total = await list_work_order_ad_monitoring(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         ad_monitoring_fk=ad_monitoring_fk,
         sort=sort,
     )
-    pages = ceil(total / limit) if total else 0
-    return {
-        "items": [
+    return paged_payload(
+        [
             ad_monitoring_schema.WorkOrderADMonitoringRead.from_orm(i)
             for i in items
         ],
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router_work_order.get(

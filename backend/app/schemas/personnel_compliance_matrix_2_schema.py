@@ -49,6 +49,7 @@ class PersonnelComplianceMatrix2Item(BaseModel):
     authorization_scope_cessna: Optional[str] = None
     authorization_scope_baron: Optional[str] = None
     authorization_scope_others: Optional[str] = None
+    authorization_scope_piper: Optional[str] = None
     caap_lic_expiry: Optional[date] = None
     hf_training_expiry: Optional[date] = None
     type_training_expiry_cessna: Optional[date] = None
@@ -109,6 +110,15 @@ class PersonnelComplianceMatrix2Item(BaseModel):
         if scope_others is None and pc_others and pc_others.authorization_scope_others:
             scope_others = pc_others.authorization_scope_others.name
 
+        pa_piper = getattr(pa, "authorization_scope_piper_pa34", None) if pa is not None else None
+        scope_piper = pa_piper.name if pa_piper is not None else None
+        if (
+            scope_piper is None
+            and pc_piper is not None
+            and getattr(pc_piper, "authorization_scope_piper_pa34", None)
+        ):
+            scope_piper = pc_piper.authorization_scope_piper_pa34.name
+
         others_exp = others_expiry_date
         if others_exp is None:
             others_exp = _coalesce_compliance_then_auth(pc_others, None)
@@ -134,6 +144,7 @@ class PersonnelComplianceMatrix2Item(BaseModel):
             authorization_scope_cessna=scope_cessna,
             authorization_scope_baron=scope_baron,
             authorization_scope_others=scope_others,
+            authorization_scope_piper=scope_piper,
             caap_lic_expiry=_coalesce_compliance_then_auth(pc_caap, pa_caap),
             hf_training_expiry=_coalesce_compliance_then_auth(pc_hf, pa_hf),
             type_training_expiry_cessna=_coalesce_compliance_then_auth(pc_cessna, pa_tc),
@@ -165,4 +176,5 @@ class PersonnelComplianceMatrix2PagedResponse(BaseModel):
     items: List[PersonnelComplianceMatrix2Item]
     total: int
     page: int
+    page_size: int
     pages: int

@@ -1,10 +1,10 @@
-from math import ceil
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_account
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.database import get_session
 from app.models.account import AccountInformation
 from app.repository.organizational_approval_history import (
@@ -25,8 +25,7 @@ router = APIRouter(
 
 @router.get("/paged")
 async def api_list_paged(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     certificate_fk: Optional[int] = Query(None),
     oa_history: Optional[int] = Query(
         None,
@@ -35,47 +34,42 @@ async def api_list_paged(
     sort: Optional[str] = Query(""),
     session: AsyncSession = Depends(get_session),
 ):
-    offset = (page - 1) * limit
     items, total = await list_organizational_approvals_history(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         certificate_fk=certificate_fk,
         oa_history=oa_history,
         sort=sort,
     )
-    pages = ceil(total / limit) if total else 0
-    return {
-        "items": [OrganizationalApprovalHistoryRead.from_orm(i) for i in items],
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+    return paged_payload(
+        [OrganizationalApprovalHistoryRead.from_orm(i) for i in items],
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router.get("/{oa_history}/paged")
 async def api_list_paged_by_oa_history(
     oa_history: int,
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     sort: Optional[str] = Query(""),
     session: AsyncSession = Depends(get_session),
 ):
-    offset = (page - 1) * limit
     items, total = await list_organizational_approvals_history(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         oa_history=oa_history,
         sort=sort,
     )
-    pages = ceil(total / limit) if total else 0
-    return {
-        "items": [OrganizationalApprovalHistoryRead.from_orm(i) for i in items],
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+    return paged_payload(
+        [OrganizationalApprovalHistoryRead.from_orm(i) for i in items],
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router.get("/{history_id}", response_model=OrganizationalApprovalHistoryRead)

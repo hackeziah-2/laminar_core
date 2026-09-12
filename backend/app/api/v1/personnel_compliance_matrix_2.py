@@ -1,10 +1,10 @@
-from math import ceil
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_permission
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.database import get_session
 from app.models.account import AccountInformation
 from app.models.personnel_compliance import PERSONNEL_COMPLIANCE_MODULE_NAME
@@ -38,8 +38,7 @@ router = APIRouter(
     summary="Personnel compliance matrix (grouped by account)",
 )
 async def api_matrix_2_paged(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = Query(
         None,
         description="Search by account name (first, last, middle, or Last, First / First Last patterns) or auth stamp.",
@@ -65,7 +64,6 @@ async def api_matrix_2_paged(
         require_permission(PERSONNEL_COMPLIANCE_MODULE_NAME, "can_read")
     ),
 ):
-    offset = (page - 1) * limit
     effective_search = None
     for value in (search, name):
         if value and value.strip():
@@ -73,15 +71,14 @@ async def api_matrix_2_paged(
             break
     rows, total, compliance_by_account = await list_personnel_compliance_matrix_2_paged(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         search=effective_search,
         sort=sort or "",
         designation=account_information__designation,
     )
-    pages = ceil(total / limit) if total else 0
-    return PersonnelComplianceMatrix2PagedResponse(
-        items=[
+    return paged_payload(
+        [
             PersonnelComplianceMatrix2Item.from_account_and_personnel_authorization(
                 acc,
                 pa,
@@ -90,6 +87,6 @@ async def api_matrix_2_paged(
             for acc, pa in rows
         ],
         total=total,
-        page=page,
-        pages=pages,
+        page=pagination.page,
+        page_size=pagination.page_size,
     )

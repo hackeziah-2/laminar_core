@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text
+from sqlalchemy import Column, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
@@ -10,6 +10,17 @@ class AtlBatch(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
+    aircraft_id = Column(
+        Integer,
+        ForeignKey("aircrafts.id"),
+        nullable=True,
+        index=True,
+    )
+    aircraft = relationship(
+        "Aircraft",
+        foreign_keys=[aircraft_id],
+        back_populates="atl_batches",
+    )
 
     atl_logs = relationship(
         "AircraftTechnicalLog",

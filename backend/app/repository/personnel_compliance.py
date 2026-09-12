@@ -77,6 +77,7 @@ async def list_personnel_compliances(
             selectinload(PersonnelCompliance.authorization_scope_cessna),
             selectinload(PersonnelCompliance.authorization_scope_baron),
             selectinload(PersonnelCompliance.authorization_scope_others),
+            selectinload(PersonnelCompliance.authorization_scope_piper_pa34),
         )
         .outerjoin(latest_pa, latest_pa.c.acc_id == PersonnelCompliance.account_information_id)
         .outerjoin(PersonnelAuthorization, PersonnelAuthorization.id == latest_pa.c.pa_id)
@@ -244,6 +245,7 @@ async def get_personnel_compliance(
             selectinload(PersonnelCompliance.authorization_scope_cessna),
             selectinload(PersonnelCompliance.authorization_scope_baron),
             selectinload(PersonnelCompliance.authorization_scope_others),
+            selectinload(PersonnelCompliance.authorization_scope_piper_pa34),
         )
         .where(PersonnelCompliance.id == compliance_id)
         .where(PersonnelCompliance.is_deleted == False)
@@ -275,6 +277,7 @@ async def create_personnel_compliance(
             selectinload(PersonnelCompliance.authorization_scope_cessna),
             selectinload(PersonnelCompliance.authorization_scope_baron),
             selectinload(PersonnelCompliance.authorization_scope_others),
+            selectinload(PersonnelCompliance.authorization_scope_piper_pa34),
         )
         .where(PersonnelCompliance.id == obj.id)
         .where(PersonnelCompliance.is_deleted == False)
@@ -315,6 +318,7 @@ async def update_personnel_compliance(
             selectinload(PersonnelCompliance.authorization_scope_cessna),
             selectinload(PersonnelCompliance.authorization_scope_baron),
             selectinload(PersonnelCompliance.authorization_scope_others),
+            selectinload(PersonnelCompliance.authorization_scope_piper_pa34),
         )
         .where(PersonnelCompliance.id == compliance_id)
         .where(PersonnelCompliance.is_deleted == False)
@@ -343,6 +347,7 @@ async def update_personnel_compliance(
             "authorization_scope_cessna",
             "authorization_scope_baron",
             "authorization_scope_others",
+            "authorization_scope_piper_pa34",
         ],
     )
 
