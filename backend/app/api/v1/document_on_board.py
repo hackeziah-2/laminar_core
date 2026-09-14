@@ -1,5 +1,4 @@
 import json
-from math import ceil
 from typing import Optional
 
 from fastapi import (
@@ -28,6 +27,7 @@ from app.repository.document_on_board import (
     soft_delete_document_on_board_by_aircraft,
 )
 from app.api.deps import get_current_active_account
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.database import get_session
 from app.models.account import AccountInformation
 from app.repository.aircraft import get_aircraft
@@ -57,8 +57,7 @@ def clean_parsed_data(parsed: dict) -> dict:
 
 @router.get("/paged")
 async def api_list_documents_on_board_paged(
-    limit: int = Query(10, ge=1, le=100, description="Number of items per page"),
-    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = Query(None, description="Search in document_name, description, and aircraft registration"),
     aircraft_id: Optional[int] = Query(None, description="Filter by aircraft ID"),
     status: Optional[str] = Query(None, description="Filter by status"),
@@ -66,35 +65,30 @@ async def api_list_documents_on_board_paged(
     session: AsyncSession = Depends(get_session)
 ):
     """Get paginated list of DocumentOnBoard entries."""
-    offset = (page - 1) * limit
     search_param = search.strip() if search and search.strip() else None
     items, total = await list_documents_on_board(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         search=search_param,
         aircraft_id=aircraft_id,
         status=status,
         sort=sort,
     )
-    pages = ceil(total / limit) if total else 0
-    
     items_schemas = [
         document_on_board_schema.DocumentOnBoardRead.from_orm(item)
         for item in items
     ]
-    
-    return {
-        "items": items_schemas,
-        "total": total,
-        "page": page,
-        "pages": pages
-    }
+    return paged_payload(
+        items_schemas,
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 @router.get("/certificates/paged")
 async def api_list_documents_on_board_certificates_paged(
-    limit: int = Query(10, ge=1, le=100, description="Number of items per page"),
-    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = Query(None, description="Search in document_name, description, and aircraft registration"),
     aircraft_id: Optional[int] = Query(None, description="Filter by aircraft ID"),
     status: Optional[str] = Query(None, description="Filter by status"),
@@ -102,30 +96,26 @@ async def api_list_documents_on_board_certificates_paged(
     session: AsyncSession = Depends(get_session)
 ):
     """Get paginated list of DocumentOnBoard entries."""
-    offset = (page - 1) * limit
     search_param = search.strip() if search and search.strip() else None
     items, total = await list_documents_certi_on_board(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         search=search_param,
         aircraft_id=aircraft_id,
         status=status,
         sort=sort,
     )
-    pages = ceil(total / limit) if total else 0
-    
     items_schemas = [
         document_on_board_schema.DocumentOnBoardRead.from_orm(item)
         for item in items
     ]
-    
-    return {
-        "items": items_schemas,
-        "total": total,
-        "page": page,
-        "pages": pages
-    }
+    return paged_payload(
+        items_schemas,
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router.get(
@@ -269,8 +259,7 @@ async def api_delete_document_on_board(
 )
 async def api_list_documents_on_board_by_aircraft_paged(
     aircraft_id: int,
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     sort: Optional[str] = Query(""),
@@ -281,28 +270,26 @@ async def api_list_documents_on_board_by_aircraft_paged(
     aircraft = await get_aircraft(session, aircraft_id)
     if not aircraft:
         raise HTTPException(status_code=404, detail="Aircraft not found")
-    offset = (page - 1) * limit
     search_param = search.strip() if search and search.strip() else None
     items, total = await list_documents_on_board(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         search=search_param,
         aircraft_id=aircraft_id,
         status=status,
         sort=sort,
     )
-    pages = ceil(total / limit) if total else 0
     items_schemas = [
         document_on_board_schema.DocumentOnBoardRead.from_orm(item)
         for item in items
     ]
-    return {
-        "items": items_schemas,
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+    return paged_payload(
+        items_schemas,
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router_aircraft_scoped.get(

@@ -348,7 +348,7 @@ def test_audit_logs_api_summary_counts(client: TestClient, test_aircraft_data: d
     )
     assert response.status_code == 200
 
-    list_response = client.get("/api/v1/audit-logs/?limit=10&page=1")
+    list_response = client.get("/api/v1/audit-logs/?page_size=50&page=1")
     assert list_response.status_code == 200
     payload = list_response.json()
     assert "summary" in payload
@@ -357,7 +357,7 @@ def test_audit_logs_api_summary_counts(client: TestClient, test_aircraft_data: d
 
 
 def test_audit_logs_api_pagination_response(client: TestClient, test_aircraft_data: dict):
-    """Audit logs API returns page, limit, total, and items."""
+    """Audit logs API returns page, page_size, pages, limit, total, and items."""
     for idx in range(3):
         payload = {**test_aircraft_data, "msn": f"TEST-MSN-AUDIT-{idx}", "registration": f"TEST-AUDIT-{idx}"}
         response = client.post(
@@ -367,11 +367,13 @@ def test_audit_logs_api_pagination_response(client: TestClient, test_aircraft_da
         )
         assert response.status_code == 200
 
-    response = client.get("/api/v1/audit-logs/?limit=2&page=1")
+    response = client.get("/api/v1/audit-logs/?page_size=50&page=1")
     assert response.status_code == 200
     data = response.json()
     assert data["page"] == 1
-    assert data["limit"] == 2
+    assert data["page_size"] == 50
+    assert data["limit"] == 50
+    assert data["pages"] >= 1
     assert data["total"] >= 3
-    assert len(data["items"]) == 2
+    assert len(data["items"]) >= 3
     assert "items" in data

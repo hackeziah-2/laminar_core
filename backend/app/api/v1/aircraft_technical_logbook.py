@@ -1,6 +1,5 @@
 import json
 
-from math import ceil
 from typing import List, Dict
 from app.repository.aircraft_technical_logbook import (
     list_aircraft_logbook_entries, list_aircraft_has_logbook_entries
@@ -33,6 +32,7 @@ from app.repository.aircraft_technical_logbook import (
    update_logbook_entry
 )
 from app.api.deps import get_current_active_account
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.database import get_session
 from app.models.account import AccountInformation
 
@@ -83,8 +83,7 @@ async def api_update_logbook_entry(
 
 @router.get("/paged")
 async def api_list_aircraft_logbook_entries_paged(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = Query(None, description="Search by sequence_no"),
     sort: Optional[str] = Query(
         "",
@@ -92,24 +91,20 @@ async def api_list_aircraft_logbook_entries_paged(
     ),
     session: AsyncSession = Depends(get_session),
 ):
-    offset = (page - 1) * limit
-
     items, total = await list_aircraft_logbook_entries(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         search=search,
         sort=sort,
     )
 
-    pages = ceil(total / limit) if total else 0
-
-    return {
-        "items": items,
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+    return paged_payload(
+        items,
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
     
 # @router.get(
 #     "/{aircraft_id}/",

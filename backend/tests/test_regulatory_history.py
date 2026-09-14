@@ -16,7 +16,7 @@ def certificate_category_id(client: TestClient) -> int:
 
 
 def test_org_approval_history_list_empty(client: TestClient):
-    response = client.get("/api/v1/organizational-approvals-history/paged?limit=10&page=1")
+    response = client.get("/api/v1/organizational-approvals-history/paged?page_size=50&page=1")
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 0
@@ -74,7 +74,7 @@ def test_org_approval_history_create_and_get(
     assert all(i["oa_history"] == approval_id for i in paged_by_oa.json()["items"])
 
     paged_path = client.get(
-        f"/api/v1/organizational-approvals-history/{approval_id}/paged?limit=10&page=1"
+        f"/api/v1/organizational-approvals-history/{approval_id}/paged?page_size=50&page=1"
     )
     assert paged_path.status_code == 200
     path_data = paged_path.json()
@@ -117,7 +117,7 @@ def test_org_approval_history_not_found(client: TestClient):
 
 
 def test_aircraft_cert_history_list_empty(client: TestClient):
-    response = client.get("/api/v1/aircraft-statutory-certificates-history/paged?limit=10&page=1")
+    response = client.get("/api/v1/aircraft-statutory-certificates-history/paged?page_size=50&page=1")
     assert response.status_code == 200
     assert response.json()["total"] == 0
 
@@ -171,7 +171,7 @@ def test_aircraft_cert_history_create_and_get(client: TestClient, aircraft_id: i
     assert all(i["asc_history"] == cert_id for i in paged_by_asc.json()["items"])
 
     paged_by_asc_path = client.get(
-        f"/api/v1/aircraft-statutory-certificates-history/{cert_id}/paged?limit=10&page=1"
+        f"/api/v1/aircraft-statutory-certificates-history/{cert_id}/paged?page_size=50&page=1"
     )
     assert paged_by_asc_path.status_code == 200
     paged_path_data = paged_by_asc_path.json()

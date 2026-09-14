@@ -20,7 +20,7 @@ from app.schemas.account_schema import (
 @pytest.mark.no_auth
 def test_list_account_information_empty(client: TestClient):
     """Test listing account information when database is empty."""
-    response = client.get("/api/v1/account-information/paged?limit=10&page=1")
+    response = client.get("/api/v1/account-information/paged?page_size=50&page=1")
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 0
@@ -232,7 +232,7 @@ def test_delete_account_information(client: TestClient):
 
     # Verify it's soft deleted (should not appear in list)
     list_response = client.get(
-        "/api/v1/account-information/paged?limit=10&page=1"
+        "/api/v1/account-information/paged?page_size=50&page=1"
     )
     assert list_response.status_code == 200
     data = list_response.json()
@@ -283,7 +283,7 @@ def test_list_account_information_with_search(client: TestClient):
 
     # Search by first name
     response = client.get(
-        "/api/v1/account-information/paged?search=John&limit=10&page=1"
+        "/api/v1/account-information/paged?search=John&page_size=50&page=1"
     )
     assert response.status_code == 200
     data = response.json()
@@ -295,7 +295,7 @@ def test_list_account_information_with_search(client: TestClient):
 
     # Search by designation
     response = client.get(
-        "/api/v1/account-information/paged?search=Pilot&limit=10&page=1"
+        "/api/v1/account-information/paged?search=Pilot&page_size=50&page=1"
     )
     assert response.status_code == 200
     data = response.json()
@@ -320,12 +320,13 @@ def test_list_account_information_pagination(client: TestClient):
 
     # Test pagination
     response = client.get(
-        "/api/v1/account-information/paged?limit=2&page=1"
+        "/api/v1/account-information/paged?page_size=50&page=1"
     )
     assert response.status_code == 200
     data = response.json()
-    assert len(data["items"]) <= 2
+    assert len(data["items"]) <= 50
     assert data["page"] == 1
+    assert data["page_size"] == 50
     assert data["total"] >= 5
 
 
@@ -361,7 +362,7 @@ def test_list_account_information_sorting(client: TestClient):
 
     # Sort by username ascending
     response = client.get(
-        "/api/v1/account-information/paged?sort=username&limit=10&page=1"
+        "/api/v1/account-information/paged?sort=username&page_size=50&page=1"
     )
     assert response.status_code == 200
     data = response.json()
@@ -370,7 +371,7 @@ def test_list_account_information_sorting(client: TestClient):
 
     # Sort by created_at descending
     response = client.get(
-        "/api/v1/account-information/paged?sort=-created_at&limit=10&page=1"
+        "/api/v1/account-information/paged?sort=-created_at&page_size=50&page=1"
     )
     assert response.status_code == 200
     data = response.json()
@@ -426,7 +427,7 @@ def test_list_account_information_with_roles_filter(client: TestClient):
         assert response.status_code == 201
 
     response = client.get(
-        "/api/v1/account-information/paged?roles=Pilot%20Role%20Filter&limit=10&page=1"
+        "/api/v1/account-information/paged?roles=Pilot%20Role%20Filter&page_size=50&page=1"
     )
     assert response.status_code == 200
     data = response.json()
@@ -481,7 +482,7 @@ def test_list_account_information_with_multiple_roles_filter(client: TestClient)
         assert response.status_code == 201
 
     response = client.get(
-        "/api/v1/account-information/paged?roles=QA%20Role%20Filter&roles=Engineering%20Role%20Filter&limit=10&page=1"
+        "/api/v1/account-information/paged?roles=QA%20Role%20Filter&roles=Engineering%20Role%20Filter&page_size=50&page=1"
     )
     assert response.status_code == 200
     data = response.json()

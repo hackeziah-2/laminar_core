@@ -1,5 +1,4 @@
 import json
-from math import ceil
 from typing import List, Optional
 
 from fastapi import (
@@ -16,6 +15,7 @@ from fastapi import (
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.schemas import logbook_schema
 from app.repository.logbooks import (
     # Engine Logbook
@@ -144,8 +144,7 @@ def _parse_aircraft_fk(value: Optional[str]) -> Optional[int]:
     response_description="Paginated list of Engine Logbook entries"
 )
 async def api_list_engine_logbooks_paged(
-    limit: int = Query(10, ge=1, le=100, description="Number of items per page"),
-    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = Query(None, description="Search in sequence_no, logbook_seq_no and description fields"),
     sort: Optional[str] = Query("", description="Sort fields (comma-separated). Prefix with '-' for descending. Example: -created_at,logbook_seq_no"),
     aircraft_fk: Optional[str] = Query(None, description="Filter by aircraft ID"),
@@ -153,29 +152,27 @@ async def api_list_engine_logbooks_paged(
     session: AsyncSession = Depends(get_session)
 ):
     """Get paginated list of Engine Logbook entries."""
-    offset = (page - 1) * limit
     items, total = await list_engine_logbooks(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         search=search,
         sort=sort,
         aircraft_fk=_parse_aircraft_fk(aircraft_fk),
         logbook_seq_no=logbook_seq_no,
     )
-    pages = ceil(total / limit) if total else 0
     
     items_schemas = [
         logbook_schema.EngineLogbookRead.from_orm(item)
         for item in items
     ]
     
-    return {
-        "items": items_schemas,
-        "total": total,
-        "page": page,
-        "pages": pages
-    }
+    return paged_payload(
+        items_schemas,
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router.get(
@@ -320,8 +317,7 @@ async def api_delete_engine_logbook(
 # ========== Airframe Logbook Endpoints ==========
 @router.get("/airframe/paged")
 async def api_list_airframe_logbooks_paged(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = None,
     sort: Optional[str] = Query("", description="Example: -created_at,logbook_seq_no"),
     aircraft_fk: Optional[str] = Query(None, description="Filter by aircraft ID"),
@@ -329,29 +325,27 @@ async def api_list_airframe_logbooks_paged(
     session: AsyncSession = Depends(get_session)
 ):
     """Get paginated list of Airframe Logbook entries."""
-    offset = (page - 1) * limit
     items, total = await list_airframe_logbooks(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         search=search,
         sort=sort,
         aircraft_fk=_parse_aircraft_fk(aircraft_fk),
         logbook_seq_no=logbook_seq_no,
     )
-    pages = ceil(total / limit) if total else 0
     
     items_schemas = [
         logbook_schema.AirframeLogbookRead.from_orm(item)
         for item in items
     ]
     
-    return {
-        "items": items_schemas,
-        "total": total,
-        "page": page,
-        "pages": pages
-    }
+    return paged_payload(
+        items_schemas,
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router.get(
@@ -482,8 +476,7 @@ async def api_delete_airframe_logbook(
 # ========== Avionics Logbook Endpoints ==========
 @router.get("/avionics/paged")
 async def api_list_avionics_logbooks_paged(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = None,
     sort: Optional[str] = Query("", description="Example: -created_at,logbook_seq_no"),
     aircraft_fk: Optional[str] = Query(None, description="Filter by aircraft ID"),
@@ -491,29 +484,27 @@ async def api_list_avionics_logbooks_paged(
     session: AsyncSession = Depends(get_session)
 ):
     """Get paginated list of Avionics Logbook entries."""
-    offset = (page - 1) * limit
     items, total = await list_avionics_logbooks(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         search=search,
         sort=sort,
         aircraft_fk=_parse_aircraft_fk(aircraft_fk),
         logbook_seq_no=logbook_seq_no,
     )
-    pages = ceil(total / limit) if total else 0
     
     items_schemas = [
         logbook_schema.AvionicsLogbookRead.from_orm(item)
         for item in items
     ]
     
-    return {
-        "items": items_schemas,
-        "total": total,
-        "page": page,
-        "pages": pages
-    }
+    return paged_payload(
+        items_schemas,
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router.get(
@@ -644,8 +635,7 @@ async def api_delete_avionics_logbook(
 # ========== Propeller Logbook Endpoints ==========
 @router.get("/propeller/paged")
 async def api_list_propeller_logbooks_paged(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = None,
     sort: Optional[str] = Query("", description="Example: -created_at,logbook_seq_no"),
     aircraft_fk: Optional[str] = Query(None, description="Filter by aircraft ID"),
@@ -653,29 +643,27 @@ async def api_list_propeller_logbooks_paged(
     session: AsyncSession = Depends(get_session)
 ):
     """Get paginated list of Propeller Logbook entries."""
-    offset = (page - 1) * limit
     items, total = await list_propeller_logbooks(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         search=search,
         sort=sort,
         aircraft_fk=_parse_aircraft_fk(aircraft_fk),
         logbook_seq_no=logbook_seq_no,
     )
-    pages = ceil(total / limit) if total else 0
     
     items_schemas = [
         logbook_schema.PropellerLogbookRead.from_orm(item)
         for item in items
     ]
     
-    return {
-        "items": items_schemas,
-        "total": total,
-        "page": page,
-        "pages": pages
-    }
+    return paged_payload(
+        items_schemas,
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router.get(

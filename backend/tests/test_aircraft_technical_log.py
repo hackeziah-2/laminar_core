@@ -85,19 +85,38 @@ def test_atl_api_read_formats_canonical_time_fields_to_one_decimal():
 @pytest.mark.no_auth
 def test_atl_paged_requires_authentication(client: TestClient):
     """GET /paged requires a valid session (JWT) or dependency override."""
-    response = client.get("/api/v1/aircraft-technical-log/paged?limit=10&page=1")
+    response = client.get("/api/v1/aircraft-technical-log/paged?page_size=50&page=1")
+    assert response.status_code == 401
+
+
+@pytest.mark.no_auth
+def test_atl_list_root_requires_authentication(client: TestClient):
+    """GET /?search= requires a valid session (JWT) or dependency override."""
+    response = client.get("/api/v1/aircraft-technical-log/?search=")
     assert response.status_code == 401
 
 
 def test_list_aircraft_technical_logs_empty(client_with_atl_auth: TestClient):
     """Test listing ATL logs when database is empty."""
-    response = client_with_atl_auth.get("/api/v1/aircraft-technical-log/paged?limit=10&page=1")
+    response = client_with_atl_auth.get("/api/v1/aircraft-technical-log/paged?page_size=50&page=1")
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 0
     assert data["page"] == 1
     assert data["pages"] == 0
     assert len(data["items"]) == 0
+
+
+def test_list_aircraft_technical_logs_root_empty_search(client_with_atl_auth: TestClient):
+    """GET /?search= lists ATLs; blank search is not a filter and must not 405."""
+    response = client_with_atl_auth.get("/api/v1/aircraft-technical-log/?search=")
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["page"] == 1
+    assert data["page_size"] == 50
+    assert data["total"] == 0
+    assert data["pages"] == 0
+    assert data["items"] == []
 
 
 def test_create_aircraft_technical_log(
@@ -148,11 +167,23 @@ def test_list_aircraft_technical_logs_with_search(
 
     # Search for it (stored as 001; search accepts 001 or ATL-001)
     response = client_with_atl_auth.get(
-        "/api/v1/aircraft-technical-log/paged?search=001&limit=10&page=1"
+        "/api/v1/aircraft-technical-log/paged?search=001&page_size=50&page=1"
     )
     assert response.status_code == 200
     data = response.json()
     assert data["total"] >= 1
+
+    root_search = client_with_atl_auth.get(
+        "/api/v1/aircraft-technical-log/?search=001&page_size=50&page=1"
+    )
+    assert root_search.status_code == 200
+    assert root_search.json()["total"] >= 1
+
+    blank_search = client_with_atl_auth.get(
+        "/api/v1/aircraft-technical-log/?search="
+    )
+    assert blank_search.status_code == 200
+    assert blank_search.json()["total"] >= 1
 
 
 def test_list_aircraft_technical_logs_filter_work_status(
@@ -168,7 +199,7 @@ def test_list_aircraft_technical_logs_filter_work_status(
     log_id = create_response.json()["id"]
 
     approved = client_with_atl_auth.get(
-        "/api/v1/aircraft-technical-log/paged?work_status=APPROVED&limit=10&page=1"
+        "/api/v1/aircraft-technical-log/paged?work_status=APPROVED&page_size=50&page=1"
     )
     assert approved.status_code == 200
     approved_ids = {item["id"] for item in approved.json()["items"]}
@@ -180,7 +211,7 @@ def test_list_aircraft_technical_logs_filter_work_status(
     )
 
     approved2 = client_with_atl_auth.get(
-        "/api/v1/aircraft-technical-log/paged?work_status=APPROVED&limit=10&page=1"
+        "/api/v1/aircraft-technical-log/paged?work_status=APPROVED&page_size=50&page=1"
     )
     assert approved2.status_code == 200
     approved_ids2 = {item["id"] for item in approved2.json()["items"]}
@@ -214,7 +245,7 @@ def test_manage_paged_maintenance_manager_sees_all_work_statuses(
     pending_log_id = asyncio.run(seed_pending_row())
 
     manage_response = client_with_atl_auth.get(
-        "/api/v1/aircraft-technical-log/manage/paged?limit=10&page=1"
+        "/api/v1/aircraft-technical-log/manage/paged?page_size=50&page=1"
     )
     assert manage_response.status_code == 200
     manage_ids = {item["id"] for item in manage_response.json()["items"]}
@@ -222,7 +253,7 @@ def test_manage_paged_maintenance_manager_sees_all_work_statuses(
     assert pending_log_id in manage_ids
 
     pending_response = client_with_atl_auth.get(
-        "/api/v1/aircraft-technical-log/manage/paged?work_status=PENDING&limit=10&page=1"
+        "/api/v1/aircraft-technical-log/manage/paged?work_status=PENDING&page_size=50&page=1"
     )
     assert pending_response.status_code == 200
     pending_ids = {item["id"] for item in pending_response.json()["items"]}
@@ -250,7 +281,7 @@ def test_paged_does_not_apply_atl_rbac_filter(
     pending_log_id = asyncio.run(seed_pending_row())
 
     paged_response = client_with_atl_auth.get(
-        "/api/v1/aircraft-technical-log/paged?limit=10&page=1"
+        "/api/v1/aircraft-technical-log/paged?page_size=50&page=1"
     )
     assert paged_response.status_code == 200
     paged_ids = {item["id"] for item in paged_response.json()["items"]}

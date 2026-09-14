@@ -1,6 +1,5 @@
 import json
 import uuid
-from math import ceil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -40,6 +39,7 @@ from app.repository.aircraft_technical_log import (
     serialize_atl_paged_api_items,
 )
 from app.api.deps import get_current_active_account
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.constants.audit import ATL_MODULE_NAME, ATL_TABLE_NAME
 from app.database import get_session
 from app.models.account import AccountInformation
@@ -127,11 +127,58 @@ def _atl_update_openapi_request_body() -> dict:
     }
 
 
+def _normalize_optional_search(search: Optional[str]) -> Optional[str]:
+    """Treat missing or blank ?search= as no search filter."""
+    if not search or not str(search).strip():
+        return None
+    return str(search).strip()
+
+
+async def _fetch_atl_list_page(
+    *,
+    session: AsyncSession,
+    pagination: Pagination,
+    search: Optional[str],
+    aircraft_id: Optional[int],
+    aircraft_fk: Optional[int],
+    work_status: Optional[WorkStatus],
+    atl_batch: Optional[int],
+    atl_batch_fk: Optional[int],
+    sort: str,
+) -> dict:
+    batch_filter = atl_batch_fk if atl_batch_fk is not None else atl_batch
+    filter_aircraft = _resolve_aircraft_id_filter(aircraft_id, aircraft_fk)
+    items, total = await list_aircraft_technical_logs(
+        session=session,
+        limit=pagination.limit,
+        offset=pagination.offset,
+        search=_normalize_optional_search(search),
+        aircraft_fk=filter_aircraft,
+        atl_batch_fk=batch_filter,
+        work_status=work_status,
+        sort=sort,
+    )
+    result_items = await serialize_atl_paged_api_items(session, items)
+    return paged_payload(
+        result_items,
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
+
+
+@router.get("")
+@router.get("/")
 @router.get("/paged")
 async def api_list_paged(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
-    search: Optional[str] = None,
+    pagination: Pagination = Depends(pagination_params),
+    search: Optional[str] = Query(
+        None,
+        description=(
+            "Search sequence_no, stations, nature of flight, or aircraft registration. "
+            "Blank is ignored."
+        ),
+    ),
     aircraft_id: Optional[int] = Query(None, description="Filter by aircraft ID"),
     aircraft_fk: Optional[int] = Query(
         None,
@@ -163,30 +210,18 @@ async def api_list_paged(
     session: AsyncSession = Depends(get_session),
     _current_account: AccountInformation = Depends(get_current_active_account),
 ):
-    """Get paginated list of Aircraft Technical Log entries. auto_* fields are read from persisted columns."""
-    offset = (page - 1) * limit
-    batch_filter = atl_batch_fk if atl_batch_fk is not None else atl_batch
-    filter_aircraft = _resolve_aircraft_id_filter(aircraft_id, aircraft_fk)
-    items, total = await list_aircraft_technical_logs(
+    """Get paginated ATL list (GET / and GET /paged). Blank ?search= is ignored."""
+    return await _fetch_atl_list_page(
         session=session,
-        limit=limit,
-        offset=offset,
+        pagination=pagination,
         search=search,
-        aircraft_fk=filter_aircraft,
-        atl_batch_fk=batch_filter,
+        aircraft_id=aircraft_id,
+        aircraft_fk=aircraft_fk,
         work_status=work_status,
+        atl_batch=atl_batch,
+        atl_batch_fk=atl_batch_fk,
         sort=sort,
     )
-    pages = ceil(total / limit) if total else 0
-
-    result_items = await serialize_atl_paged_api_items(session, items)
-
-    return {
-        "items": result_items,
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
 
 
 @router.get(
@@ -340,8 +375,7 @@ async def api_get_latest(
 
 @router.get("/manage/paged")
 async def api_atl_list_paged(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = None,
     aircraft_fk: Optional[int] = Query(None, description="Filter by aircraft ID"),
     work_status: Optional[WorkStatus] = Query(
@@ -371,20 +405,18 @@ async def api_atl_list_paged(
     current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Get paginated list of Aircraft Technical Log entries (manage). auto_* from persisted columns."""
-    offset = (page - 1) * limit
     batch_filter = atl_batch_fk if atl_batch_fk is not None else atl_batch
     items, total = await list_aircraft_technical_logs_manage(
         session=session,
-        limit=limit,
-        offset=offset,
-        search=search,
+        limit=pagination.limit,
+        offset=pagination.offset,
+        search=_normalize_optional_search(search),
         aircraft_fk=aircraft_fk,
         atl_batch_fk=batch_filter,
         work_status=work_status,
         sort=sort,
         current_account=current_account,
     )
-    pages = ceil(total / limit) if total else 0
 
     result_items = [
         aircraft_technical_log_schema.ATLPagedItemWithAuto.from_orm(item).dict()
@@ -392,12 +424,12 @@ async def api_atl_list_paged(
     ]
     result_items = await apply_uppercase_signer_names_to_atl_dicts(session, result_items)
 
-    return {
-        "items": result_items,
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+    return paged_payload(
+        result_items,
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router.get(

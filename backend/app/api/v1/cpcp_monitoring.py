@@ -1,10 +1,10 @@
-from math import ceil
 from typing import Optional, Set
 
 from fastapi import APIRouter, Depends, Query, HTTPException, Request, status
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.schemas import cpcp_monitoring_schema
 from app.repository.cpcp_monitoring import (
     create_cpcp_monitoring,
@@ -38,8 +38,7 @@ router_maintenance_cpcp = APIRouter(
 
 @router.get("/paged")
 async def api_list_paged(
-    limit: int = Query(10, ge=1, le=100, description="Items per page"),
-    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = Query(
         None,
         description="Search by Description or ATL Sequence NO",
@@ -55,16 +54,14 @@ async def api_list_paged(
     session: AsyncSession = Depends(get_session),
 ):
     """Get paginated list of CPCP Monitoring entries. Search by Sequence NO (ATL) and Description. Filter by aircraft_id."""
-    offset = (page - 1) * limit
     items, total = await list_cpcp_monitorings(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         search=search.strip() if search and search.strip() else None,
         sort=sort or "",
         aircraft_id=aircraft_id,
     )
-    pages = ceil(total / limit) if total else 0
     aircraft_ids: Set[int] = {item.aircraft_id for item in items}
     metrics = await fetch_latest_atl_metrics_by_aircraft_ids(session, aircraft_ids)
     items_schemas = [
@@ -75,12 +72,12 @@ async def api_list_paged(
         )
         for item in items
     ]
-    return {
-        "items": items_schemas,
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+    return paged_payload(
+        items_schemas,
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 async def _api_reorder_cpcp_monitorings(

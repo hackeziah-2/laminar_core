@@ -1,10 +1,10 @@
-from math import ceil
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_account
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.constants.audit import ATL_BATCH_MODULE_NAME, ATL_BATCH_TABLE_NAME
 from app.database import get_session
 from app.models.account import AccountInformation
@@ -30,34 +30,36 @@ router = APIRouter(
 
 
 @router.get("/list", response_model=List[AtlBatchListItem])
-async def api_list_all(session: AsyncSession = Depends(get_session)):
-    items = await get_all_atl_batches_list(session)
+async def api_list_all(
+    aircraft_id: Optional[int] = Query(None),
+    session: AsyncSession = Depends(get_session),
+):
+    items = await get_all_atl_batches_list(session, aircraft_id=aircraft_id)
     return [AtlBatchListItem.from_orm(i) for i in items]
 
 
 @router.get("/paged")
 async def api_list_paged(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = Query(None),
     sort: Optional[str] = Query("", description="Example: -created_at,name"),
+    aircraft_id: Optional[int] = Query(None),
     session: AsyncSession = Depends(get_session),
 ):
-    offset = (page - 1) * limit
     items, total = await list_atl_batches_paged(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         search=search,
         sort=sort or "",
+        aircraft_id=aircraft_id,
     )
-    pages = ceil(total / limit) if total else 0
-    return {
-        "items": [AtlBatchRead.from_orm(i) for i in items],
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+    return paged_payload(
+        [AtlBatchRead.from_orm(i) for i in items],
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router.get("/{batch_id}", response_model=AtlBatchRead)

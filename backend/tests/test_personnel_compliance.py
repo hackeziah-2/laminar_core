@@ -33,15 +33,15 @@ def test_personnel_compliance_paged_includes_nonempty_account_full_name(
     assert created["account_information"] is not None
     assert created["account_information"]["full_name"] == "PILOT, JANE"
 
-    r3 = client.get("/api/v1/personnel-compliance/paged?page=1&limit=10")
+    r3 = client.get("/api/v1/personnel-compliance/paged?page=1&page_size=50")
     assert r3.status_code == 200, r3.text
 
     r4 = client.get(
-        "/api/v1/personnel-compliance/paged?page=1&limit=10&sort=expiry_date"
+        "/api/v1/personnel-compliance/paged?page=1&page_size=50&sort=expiry_date"
     )
     assert r4.status_code == 200, r4.text
     r5 = client.get(
-        "/api/v1/personnel-compliance/paged?page=1&limit=10&sort=-EXPIRY_DATE"
+        "/api/v1/personnel-compliance/paged?page=1&page_size=50&sort=-EXPIRY_DATE"
     )
     assert r5.status_code == 200, r5.text
     body = r3.json()

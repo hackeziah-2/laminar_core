@@ -32,6 +32,12 @@ class PersonnelAuthorization(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
         nullable=True,
         index=True,
     )
+    authorization_scope_piper_pa34_id = Column(
+        Integer,
+        ForeignKey("authorization_scope_piper_pa34.id"),
+        nullable=True,
+        index=True,
+    )
 
     auth_initial_doi = Column(Date, nullable=True)
     auth_issue_date = Column(Date, nullable=True)
@@ -57,6 +63,10 @@ class PersonnelAuthorization(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     )
     authorization_scope_others = relationship(
         "AuthorizationScopeOthers",
+        back_populates="personnel_authorizations",
+    )
+    authorization_scope_piper_pa34 = relationship(
+        "AuthorizationScopePiperPa34",
         back_populates="personnel_authorizations",
     )
 

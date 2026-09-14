@@ -30,6 +30,7 @@ async def list_personnel_authorizations(
             selectinload(PersonnelAuthorization.authorization_scope_cessna),
             selectinload(PersonnelAuthorization.authorization_scope_baron),
             selectinload(PersonnelAuthorization.authorization_scope_others),
+            selectinload(PersonnelAuthorization.authorization_scope_piper_pa34),
         )
         .where(PersonnelAuthorization.is_deleted == False)
     )
@@ -120,6 +121,7 @@ async def get_personnel_authorization(
             selectinload(PersonnelAuthorization.authorization_scope_cessna),
             selectinload(PersonnelAuthorization.authorization_scope_baron),
             selectinload(PersonnelAuthorization.authorization_scope_others),
+            selectinload(PersonnelAuthorization.authorization_scope_piper_pa34),
         )
         .where(PersonnelAuthorization.id == auth_id)
         .where(PersonnelAuthorization.is_deleted == False)
@@ -146,6 +148,7 @@ async def create_personnel_authorization(
             "authorization_scope_cessna",
             "authorization_scope_baron",
             "authorization_scope_others",
+            "authorization_scope_piper_pa34",
         ],
     )
     return PersonnelAuthorizationRead.from_orm(obj)
@@ -165,6 +168,7 @@ async def update_personnel_authorization(
             selectinload(PersonnelAuthorization.authorization_scope_cessna),
             selectinload(PersonnelAuthorization.authorization_scope_baron),
             selectinload(PersonnelAuthorization.authorization_scope_others),
+            selectinload(PersonnelAuthorization.authorization_scope_piper_pa34),
         )
         .where(PersonnelAuthorization.id == auth_id)
         .where(PersonnelAuthorization.is_deleted == False)
@@ -187,6 +191,7 @@ async def update_personnel_authorization(
             "authorization_scope_cessna",
             "authorization_scope_baron",
             "authorization_scope_others",
+            "authorization_scope_piper_pa34",
         ],
     )
     return PersonnelAuthorizationRead.from_orm(obj)

@@ -1,9 +1,9 @@
-from math import ceil
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException, status, Path, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.schemas.personnel_authorization_schema import (
     PersonnelAuthorizationCreate,
     PersonnelAuthorizationUpdate,
@@ -28,57 +28,64 @@ router = APIRouter(
 
 async def _list_paged(
     session: AsyncSession,
-    limit: int = 10,
-    page: int = 1,
+    pagination: Pagination,
     search: Optional[str] = None,
     sort: Optional[str] = "",
     account_information__designation: Optional[str] = None,
 ):
     """Shared paged list logic."""
-    offset = (page - 1) * limit
     items, total = await list_personnel_authorizations(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         search=search,
         sort=sort,
         designation=account_information__designation,
     )
-    pages = ceil(total / limit) if total else 0
-    return {
-        "items": [PersonnelAuthorizationRead.from_orm(i) for i in items],
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+    return paged_payload(
+        [PersonnelAuthorizationRead.from_orm(i) for i in items],
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 # ---------- List (GET): static paths before /{auth_id} ----------
 @router.get("")
 @router.get("/")
 async def api_list(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = Query(None, description="Search by account_information name (first_name, last_name)"),
     sort: Optional[str] = Query("", description="Sort: date_of_expiration, -date_of_expiration, auth_expiry_date, -auth_expiry_date, etc."),
     account_information__designation: Optional[str] = Query(None, description="Filter by account_information designation"),
     session: AsyncSession = Depends(get_session),
 ):
     """List personnel authorizations (paged). GET /api/v1/personnel-authorization or .../personnel-authorization/."""
-    return await _list_paged(session=session, limit=limit, page=page, search=search, sort=sort, account_information__designation=account_information__designation)
+    return await _list_paged(
+        session=session,
+        pagination=pagination,
+        search=search,
+        sort=sort,
+        account_information__designation=account_information__designation,
+    )
 
 
 @router.get("/paged")
 async def api_list_paged(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = Query(None, description="Search by account_information name (first_name, last_name)"),
     sort: Optional[str] = Query("", description="Sort: date_of_expiration, -date_of_expiration, auth_expiry_date, -auth_expiry_date, etc."),
     account_information__designation: Optional[str] = Query(None, description="Filter by account_information designation"),
     session: AsyncSession = Depends(get_session),
 ):
     """List personnel authorizations (paged). Same as GET /."""
-    return await _list_paged(session=session, limit=limit, page=page, search=search, sort=sort, account_information__designation=account_information__designation)
+    return await _list_paged(
+        session=session,
+        pagination=pagination,
+        search=search,
+        sort=sort,
+        account_information__designation=account_information__designation,
+    )
 
 
 # ---------- Create (POST): support with and without trailing slash ----------
