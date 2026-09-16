@@ -1,10 +1,10 @@
-from math import ceil
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_account
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.database import get_session
 from app.models.account import AccountInformation
 from app.repository.advisory import (
@@ -55,23 +55,25 @@ def _parse_sort_remaining_validity(sort: Optional[str]) -> Optional[str]:
 async def _fetch_advisory_page(
     *,
     session: AsyncSession,
-    page: int,
-    limit: int,
+    pagination: Pagination,
     type_filter: Optional[str],
     sort_remaining_validity: Optional[str],
     item_filter: Optional[str],
 ):
-    offset = (page - 1) * limit
     items, total_items = await list_advisory_items(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         type_filter=type_filter,
         sort_remaining_validity=sort_remaining_validity,
         item_filter=item_filter,
     )
-    total_pages = ceil(total_items / limit) if total_items else 0
-    return items, total_items, total_pages
+    return paged_payload(
+        items,
+        total=total_items,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 def _resolve_advisory_item_filter(
@@ -93,8 +95,7 @@ async def get_advisory_filter_options():
 @router.get("", response_model=AdvisoryPagedResponse)
 @router.get("/", response_model=AdvisoryPagedResponse)
 async def get_advisory(
-    page: int = Query(1, ge=1, description="Page number"),
-    limit: int = Query(10, ge=1, le=100, description="Page size"),
+    pagination: Pagination = Depends(pagination_params),
     type_filter: Optional[str] = Query(
         None,
         alias="type",
@@ -116,27 +117,19 @@ async def get_advisory(
     session: AsyncSession = Depends(get_session),
 ):
     sort_remaining_validity = _parse_sort_remaining_validity(sort)
-    items, total_items, total_pages = await _fetch_advisory_page(
+    return await _fetch_advisory_page(
         session=session,
-        page=page,
-        limit=limit,
+        pagination=pagination,
         type_filter=type_filter,
         sort_remaining_validity=sort_remaining_validity,
         item_filter=_resolve_advisory_item_filter(search, item_filter),
-    )
-    return AdvisoryPagedResponse(
-        items=items,
-        total=total_items,
-        page=page,
-        pages=total_pages,
     )
 
 
 @router.get("/paged", response_model=AdvisoryPagedResponse)
 @router.get("/paged/", response_model=AdvisoryPagedResponse)
 async def get_advisory_paged(
-    limit: int = Query(10, ge=1, le=100, description="Page size"),
-    page: int = Query(1, ge=1, description="Page number"),
+    pagination: Pagination = Depends(pagination_params),
     type_filter: Optional[str] = Query(
         None,
         alias="type",
@@ -158,8 +151,7 @@ async def get_advisory_paged(
     session: AsyncSession = Depends(get_session),
 ):
     return await get_advisory(
-        page=page,
-        limit=limit,
+        pagination=pagination,
         type_filter=type_filter,
         search=search,
         item_filter=item_filter,

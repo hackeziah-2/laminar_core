@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_account
+from app.api.pagination import Pagination, pagination_params
 from app.database import get_session
 from app.models.account import AccountInformation
 from app.schemas.audit_log_schema import (
@@ -44,8 +45,7 @@ async def api_audit_log_filter_options(
 
 @router.get("/", response_model=AuditLogPagedResponse)
 async def api_list_audit_logs(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     module_name: Optional[str] = Query(None),
     table_name: Optional[str] = Query(None),
     record_id: Optional[int] = Query(None),
@@ -66,8 +66,8 @@ async def api_list_audit_logs(
     )
     return await fetch_audit_logs(
         session,
-        page=page,
-        limit=limit,
+        page=pagination.page,
+        page_size=pagination.page_size,
         module_name=module_name,
         table_name=table_name,
         record_id=record_id,

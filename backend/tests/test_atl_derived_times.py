@@ -282,7 +282,7 @@ def test_atl_paged_computes_runtime_and_component_totals_from_tach_and_aircraft_
     assert create_response.status_code == 201, create_response.text
 
     paged_response = client_with_atl_auth.get(
-        f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&limit=10&page=1"
+        f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&page_size=50&page=1"
     )
     assert paged_response.status_code == 200, paged_response.text
     items = paged_response.json()["items"]
@@ -346,7 +346,7 @@ def test_atl_paged_uses_aircraft_airframe_aftt_when_previous_aftt_is_missing(
     assert create_response.status_code == 201, create_response.text
 
     paged_response = client_with_atl_auth.get(
-        f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&limit=10&page=1"
+        f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&page_size=50&page=1"
     )
     assert paged_response.status_code == 200, paged_response.text
     items = paged_response.json()["items"]
@@ -402,7 +402,7 @@ def test_atl_paged_uses_aircraft_propeller_tsn_tso_when_previous_values_are_miss
     assert create_response.status_code == 201, create_response.text
 
     paged_response = client_with_atl_auth.get(
-        f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&limit=10&page=1"
+        f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&page_size=50&page=1"
     )
     assert paged_response.status_code == 200, paged_response.text
     items = paged_response.json()["items"]
@@ -474,7 +474,7 @@ def test_atl_paged_uses_aircraft_engine_and_propeller_tso_when_previous_tso_is_z
     assert create_response.status_code == 201, create_response.text
 
     paged_response = client_with_atl_auth.get(
-        f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&limit=10&page=1"
+        f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&page_size=50&page=1"
     )
     assert paged_response.status_code == 200, paged_response.text
     items = paged_response.json()["items"]
@@ -540,7 +540,7 @@ def test_atl_paged_keeps_tso_cumulative_from_previous_computed_values_for_later_
     asyncio.run(_persist_auto_columns_for_all_atl_rows(aircraft_id))
 
     paged_response = client_with_atl_auth.get(
-        f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&limit=10&page=1&sort=sequence_no"
+        f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&page_size=50&page=1&sort=sequence_no"
     )
     assert paged_response.status_code == 200, paged_response.text
     items = {item["sequence_no"]: item for item in paged_response.json()["items"]}
@@ -767,7 +767,7 @@ def test_atl_paged_defaults_to_sequence_number_descending(
     asyncio.run(_persist_auto_columns_for_all_atl_rows(aircraft_id))
 
     paged_response = client_with_atl_auth.get(
-        f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&limit=10&page=1"
+        f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&page_size=50&page=1"
     )
     assert paged_response.status_code == 200, paged_response.text
 
@@ -824,7 +824,7 @@ def test_aircraft_technical_log_paged_sorts_sequence_numbers_numerically_ascendi
         assert response.status_code == 201, response.text
 
     paged_response = client_with_atl_auth.get(
-        f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&limit=10&page=1&sort=sequence_no"
+        f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&page_size=50&page=1&sort=sequence_no"
     )
     assert paged_response.status_code == 200, paged_response.text
     sequence_numbers = [item["sequence_no"] for item in paged_response.json()["items"]]
@@ -923,7 +923,7 @@ def test_atl_paged_uses_previous_sequence_in_numeric_ascending_order_for_auto_co
     assert create_response.status_code == 201, create_response.text
 
     paged_response = client_with_atl_auth.get(
-        f"/api/v1/aircraft/{aircraft_id}/atl/paged?page=1&page_size=20&sort=asc"
+        f"/api/v1/aircraft/{aircraft_id}/atl/paged?page=1&page_size=50&sort=asc"
     )
     assert paged_response.status_code == 200, paged_response.text
     items = paged_response.json()["items"]
@@ -1003,13 +1003,13 @@ def test_aircraft_technical_log_paged_sequence_sort_does_not_change_auto_computa
     asyncio.run(_persist_auto_columns_for_all_atl_rows(aircraft_id))
 
     asc_response = client_with_atl_auth.get(
-        f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&limit=10&page=1&sort=sequence_no"
+        f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&page_size=50&page=1&sort=sequence_no"
     )
     assert asc_response.status_code == 200, asc_response.text
     asc_items = {item["sequence_no"]: item for item in asc_response.json()["items"]}
 
     desc_response = client_with_atl_auth.get(
-        f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&limit=10&page=1&sort=-sequence_no"
+        f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&page_size=50&page=1&sort=-sequence_no"
     )
     assert desc_response.status_code == 200, desc_response.text
     desc_items = {item["sequence_no"]: item for item in desc_response.json()["items"]}
@@ -1018,7 +1018,7 @@ def test_aircraft_technical_log_paged_sequence_sort_does_not_change_auto_computa
     assert list(desc_items.keys()) == ["010", "002", "001"]
 
     asc_alias_response = client_with_atl_auth.get(
-        f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&limit=10&page=1&sort=asc"
+        f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&page_size=50&page=1&sort=asc"
     )
     assert asc_alias_response.status_code == 200, asc_alias_response.text
     assert [item["sequence_no"] for item in asc_alias_response.json()["items"]] == [
@@ -1028,7 +1028,7 @@ def test_aircraft_technical_log_paged_sequence_sort_does_not_change_auto_computa
     ]
 
     desc_alias_response = client_with_atl_auth.get(
-        f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&limit=10&page=1&sort=desc"
+        f"/api/v1/aircraft-technical-log/paged?aircraft_fk={aircraft_id}&page_size=50&page=1&sort=desc"
     )
     assert desc_alias_response.status_code == 200, desc_alias_response.text
     assert [item["sequence_no"] for item in desc_alias_response.json()["items"]] == [
@@ -1038,7 +1038,7 @@ def test_aircraft_technical_log_paged_sequence_sort_does_not_change_auto_computa
     ]
 
     manage_asc = client_with_atl_auth.get(
-        f"/api/v1/aircraft-technical-log/manage/paged?aircraft_fk={aircraft_id}&limit=10&page=1&sort=sequence_no"
+        f"/api/v1/aircraft-technical-log/manage/paged?aircraft_fk={aircraft_id}&page_size=50&page=1&sort=sequence_no"
     )
     assert manage_asc.status_code == 200, manage_asc.text
     assert [item["sequence_no"] for item in manage_asc.json()["items"]] == [
@@ -1048,7 +1048,7 @@ def test_aircraft_technical_log_paged_sequence_sort_does_not_change_auto_computa
     ]
 
     manage_desc = client_with_atl_auth.get(
-        f"/api/v1/aircraft-technical-log/manage/paged?aircraft_fk={aircraft_id}&limit=10&page=1&sort=-sequence_no"
+        f"/api/v1/aircraft-technical-log/manage/paged?aircraft_fk={aircraft_id}&page_size=50&page=1&sort=-sequence_no"
     )
     assert manage_desc.status_code == 200, manage_desc.text
     assert [item["sequence_no"] for item in manage_desc.json()["items"]] == [
@@ -1286,7 +1286,7 @@ def test_aircraft_scoped_atl_search_matches_paged_latest_record(
     )
     paged = client_with_atl_auth.get(
         "/api/v1/aircraft-technical-log/paged"
-        f"?page=1&limit=10&aircraft_id={aircraft_id}&aircraft_fk={aircraft_id}"
+        f"?page=1&page_size=50&aircraft_id={aircraft_id}&aircraft_fk={aircraft_id}"
         f"&sort=-sequence_no&search={search_id}"
     )
     assert scoped.status_code == 200, scoped.text

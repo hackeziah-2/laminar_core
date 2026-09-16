@@ -69,6 +69,9 @@ AUTHORIZATION_SCOPE_BARON_TABLE_NAME = "authorization_scope_baron"
 AUTHORIZATION_SCOPE_OTHERS_MODULE_NAME = "authorization_scope_others"
 AUTHORIZATION_SCOPE_OTHERS_TABLE_NAME = "authorization_scope_others"
 
+AUTHORIZATION_SCOPE_PIPER_PA34_MODULE_NAME = "authorization_scope_piper_pa34"
+AUTHORIZATION_SCOPE_PIPER_PA34_TABLE_NAME = "authorization_scope_piper_pa34"
+
 ROLE_MODULE_NAME = "roles"
 ROLE_TABLE_NAME = "roles"
 

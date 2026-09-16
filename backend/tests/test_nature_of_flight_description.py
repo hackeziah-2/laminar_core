@@ -16,7 +16,7 @@ def description_payload(aircraft_id: int):
 
 
 def test_list_descriptions_empty(client: TestClient):
-    response = client.get("/api/v1/nature-of-flight-descriptions/paged?limit=10&page=1")
+    response = client.get("/api/v1/nature-of-flight-descriptions/paged?page_size=50&page=1")
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 0
@@ -167,7 +167,7 @@ def test_list_paged_with_filter(client: TestClient, description_payload: dict):
     client.post("/api/v1/nature-of-flight-descriptions/", json=description_payload)
 
     response = client.get(
-        "/api/v1/nature-of-flight-descriptions/paged?limit=10&page=1&nature_of_flight=TR"
+        "/api/v1/nature-of-flight-descriptions/paged?page_size=50&page=1&nature_of_flight=TR"
     )
     assert response.status_code == 200
     data = response.json()
@@ -176,7 +176,7 @@ def test_list_paged_with_filter(client: TestClient, description_payload: dict):
         assert item["nature_of_flight"] == "TR"
 
     response_other = client.get(
-        "/api/v1/nature-of-flight-descriptions/paged?limit=10&page=1&nature_of_flight=PSF"
+        "/api/v1/nature-of-flight-descriptions/paged?page_size=50&page=1&nature_of_flight=PSF"
     )
     assert response_other.status_code == 200
     assert "items" in response_other.json()
@@ -185,7 +185,7 @@ def test_list_paged_with_filter(client: TestClient, description_payload: dict):
 def test_list_paged_search_remarks(client: TestClient, description_payload: dict):
     client.post("/api/v1/nature-of-flight-descriptions/", json=description_payload)
     response = client.get(
-        "/api/v1/nature-of-flight-descriptions/paged?limit=10&page=1&search=Training"
+        "/api/v1/nature-of-flight-descriptions/paged?page_size=50&page=1&search=Training"
     )
     assert response.status_code == 200
     assert response.json()["total"] >= 1
@@ -235,7 +235,7 @@ def test_list_by_aircraft_paged(client: TestClient, description_payload: dict, a
     client.post("/api/v1/nature-of-flight-descriptions/", json=description_payload)
 
     response = client.get(
-        f"/api/v1/aircraft/{aircraft_id}/nature-of-flight-descriptions/paged?limit=10&page=1"
+        f"/api/v1/aircraft/{aircraft_id}/nature-of-flight-descriptions/paged?page_size=50&page=1"
     )
     assert response.status_code == 200
     data = response.json()

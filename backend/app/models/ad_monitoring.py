@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, Float, String, Date, ForeignKey
+from sqlalchemy import Column, Date, Float, ForeignKey, Index, Integer, String, text
 from sqlalchemy.orm import relationship
 
 from app.database import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
@@ -8,6 +8,27 @@ class ADMonitoring(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     """AD Monitoring (one) -> many WorkOrderADMonitoring. Belongs to one Aircraft via aircraft_fk."""
 
     __tablename__ = "ad_monitoring"
+    __table_args__ = (
+        Index(
+            "ix_ad_monitoring_aircraft_fk_created_at_active",
+            "aircraft_fk",
+            "created_at",
+            postgresql_where=text("is_deleted IS FALSE"),
+            sqlite_where=text("is_deleted = 0"),
+        ),
+        Index(
+            "ix_ad_monitoring_created_at_active",
+            "created_at",
+            postgresql_where=text("is_deleted IS FALSE"),
+            sqlite_where=text("is_deleted = 0"),
+        ),
+        Index(
+            "ix_ad_monitoring_compli_date_active",
+            "compli_date",
+            postgresql_where=text("is_deleted IS FALSE"),
+            sqlite_where=text("is_deleted = 0"),
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     aircraft_fk = Column(
@@ -35,6 +56,21 @@ class WorkOrderADMonitoring(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     """Work order for an AD; belongs to one ADMonitoring via ad_monitoring_fk."""
 
     __tablename__ = "workorder_ad_monitoring"
+    __table_args__ = (
+        Index(
+            "ix_workorder_ad_monitoring_ad_fk_created_at_active",
+            "ad_monitoring_fk",
+            "created_at",
+            postgresql_where=text("is_deleted IS FALSE"),
+            sqlite_where=text("is_deleted = 0"),
+        ),
+        Index(
+            "ix_workorder_ad_monitoring_last_done_date_active",
+            "last_done_date",
+            postgresql_where=text("is_deleted IS FALSE"),
+            sqlite_where=text("is_deleted = 0"),
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     ad_monitoring_fk = Column(

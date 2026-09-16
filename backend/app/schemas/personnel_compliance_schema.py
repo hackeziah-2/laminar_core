@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Any, List, Optional, TYPE_CHECKING
 
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, root_validator, validator
 
 from app.models.personnel_compliance import PersonnelComplianceItemType
 
@@ -12,8 +12,10 @@ from app.schemas.personnel_authorization_schema import (
     AuthorizationScopeBaronSummary,
     AuthorizationScopeCessnaSummary,
     AuthorizationScopeOthersSummary,
+    AuthorizationScopePiperPa34Summary,
     _account_info_to_summary,
     _coerce_optional_scope_id,
+    _map_piper_scope_alias,
 )
 
 
@@ -23,6 +25,7 @@ class PersonnelComplianceBase(BaseModel):
     authorization_scope_cessna_id: Optional[int] = None
     authorization_scope_baron_id: Optional[int] = None
     authorization_scope_others_id: Optional[int] = None
+    authorization_scope_piper_pa34_id: Optional[int] = None
     auth_issue_date: Optional[date] = None
     expiry_date: Optional[date] = None
     is_withhold: bool = False
@@ -30,10 +33,15 @@ class PersonnelComplianceBase(BaseModel):
     class Config:
         orm_mode = True
 
+    @root_validator(pre=True)
+    def map_piper_scope_alias(cls, values: Any) -> Any:
+        return _map_piper_scope_alias(values)
+
     @validator(
         "authorization_scope_cessna_id",
         "authorization_scope_baron_id",
         "authorization_scope_others_id",
+        "authorization_scope_piper_pa34_id",
         pre=True,
     )
     def coerce_scope_ids_to_null(cls, v: Any) -> Optional[int]:
@@ -50,6 +58,7 @@ class PersonnelComplianceUpdate(BaseModel):
     authorization_scope_cessna_id: Optional[int] = None
     authorization_scope_baron_id: Optional[int] = None
     authorization_scope_others_id: Optional[int] = None
+    authorization_scope_piper_pa34_id: Optional[int] = None
     auth_issue_date: Optional[date] = None
     expiry_date: Optional[date] = None
     is_withhold: Optional[bool] = None
@@ -57,10 +66,15 @@ class PersonnelComplianceUpdate(BaseModel):
     class Config:
         orm_mode = True
 
+    @root_validator(pre=True)
+    def map_piper_scope_alias(cls, values: Any) -> Any:
+        return _map_piper_scope_alias(values)
+
     @validator(
         "authorization_scope_cessna_id",
         "authorization_scope_baron_id",
         "authorization_scope_others_id",
+        "authorization_scope_piper_pa34_id",
         pre=True,
     )
     def coerce_scope_ids_to_null(cls, v: Any) -> Optional[int]:
@@ -76,6 +90,7 @@ class PersonnelComplianceRead(PersonnelComplianceBase):
     authorization_scope_cessna: Optional[AuthorizationScopeCessnaSummary] = None
     authorization_scope_baron: Optional[AuthorizationScopeBaronSummary] = None
     authorization_scope_others: Optional[AuthorizationScopeOthersSummary] = None
+    authorization_scope_piper_pa34: Optional[AuthorizationScopePiperPa34Summary] = None
 
     class Config:
         orm_mode = True
@@ -111,4 +126,5 @@ class PersonnelCompliancePagedResponse(BaseModel):
     items: List[PersonnelComplianceRead]
     total: int
     page: int
+    page_size: int
     pages: int

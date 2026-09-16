@@ -15,12 +15,13 @@ from tests.conftest import TestSessionLocal
 @pytest.mark.no_auth
 def test_list_aircraft_empty(client: TestClient):
     """Test listing aircraft when database is empty."""
-    response = client.get("/api/v1/aircraft/paged?limit=10&page=1")
+    response = client.get("/api/v1/aircraft/paged?page_size=50&page=1")
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 0
     assert data["page"] == 1
     assert data["pages"] == 0
+    assert data["page_size"] == 50
     assert len(data["items"]) == 0
 
 
@@ -128,7 +129,7 @@ def test_update_aircraft_airframe_aftt(client: TestClient, test_aircraft_data: d
     assert update_resp.status_code == 200
     assert update_resp.json()["airframe_aftt"] == 150.75
 
-    history_resp = client.get(f"/api/v1/aircraft/{aircraft_id}/history?limit=10&page=1")
+    history_resp = client.get(f"/api/v1/aircraft/{aircraft_id}/history?page_size=50&page=1")
     assert history_resp.status_code == 200
     history_body = history_resp.json()
     history_rows = history_body["items"]
@@ -170,7 +171,7 @@ def test_update_aircraft_tsn_tso(client: TestClient, test_aircraft_data: dict):
     assert update_resp.status_code == 200
     assert update_resp.json()["engine_tso"] == 550.0
 
-    history_resp = client.get(f"/api/v1/aircraft/{aircraft_id}/history?limit=10&page=1")
+    history_resp = client.get(f"/api/v1/aircraft/{aircraft_id}/history?page_size=50&page=1")
     assert history_resp.status_code == 200
     history_body = history_resp.json()
     history_rows = history_body["items"]
@@ -203,7 +204,7 @@ def test_get_aircraft_history_returns_entries_in_read_api(client: TestClient, te
     )
     assert update_resp.status_code == 200
 
-    history_resp = client.get(f"/api/v1/aircraft/{aircraft_id}/history?limit=10&page=1")
+    history_resp = client.get(f"/api/v1/aircraft/{aircraft_id}/history?page_size=50&page=1")
     assert history_resp.status_code == 200, history_resp.text
     body = history_resp.json()
     rows = body["items"]
@@ -234,21 +235,22 @@ def test_get_aircraft_history_supports_pagination(client: TestClient, test_aircr
         files={},
     )
 
-    page_1 = client.get(f"/api/v1/aircraft/{aircraft_id}/history?limit=1&page=1")
+    page_1 = client.get(f"/api/v1/aircraft/{aircraft_id}/history?page_size=50&page=1")
     assert page_1.status_code == 200, page_1.text
     body_1 = page_1.json()
     assert body_1["total"] == 2
     assert body_1["page"] == 1
-    assert body_1["pages"] == 2
-    assert len(body_1["items"]) == 1
+    assert body_1["page_size"] == 50
+    assert body_1["pages"] == 1
+    assert len(body_1["items"]) == 2
 
-    page_2 = client.get(f"/api/v1/aircraft/{aircraft_id}/history?limit=1&page=2")
+    page_2 = client.get(f"/api/v1/aircraft/{aircraft_id}/history?page_size=50&page=2")
     assert page_2.status_code == 200, page_2.text
     body_2 = page_2.json()
     assert body_2["total"] == 2
     assert body_2["page"] == 2
-    assert body_2["pages"] == 2
-    assert len(body_2["items"]) == 1
+    assert body_2["pages"] == 1
+    assert body_2["items"] == []
 
 
 def test_update_aircraft_with_history_creates_records(client: TestClient, test_aircraft_data: dict):
@@ -455,7 +457,7 @@ def test_list_aircraft_with_search(
     )
 
     # Search for it
-    response = client.get("/api/v1/aircraft/paged?search=TEST-001&limit=10&page=1")
+    response = client.get("/api/v1/aircraft/paged?search=TEST-001&page_size=50&page=1")
     assert response.status_code == 200
     data = response.json()
     assert data["total"] >= 1
@@ -483,11 +485,12 @@ def test_list_aircraft_pagination(client: TestClient):
         )
 
     # Test pagination
-    response = client.get("/api/v1/aircraft/paged?limit=2&page=1")
+    response = client.get("/api/v1/aircraft/paged?page_size=50&page=1")
     assert response.status_code == 200
     data = response.json()
-    assert len(data["items"]) <= 2
+    assert len(data["items"]) <= 50
     assert data["page"] == 1
+    assert data["page_size"] == 50
 
 
 def test_delete_aircraft(client: TestClient, test_aircraft_data: dict):
@@ -508,7 +511,7 @@ def test_delete_aircraft(client: TestClient, test_aircraft_data: dict):
     assert response.status_code == 204
 
     # Verify it's soft deleted (should not appear in list)
-    list_response = client.get("/api/v1/aircraft/paged?limit=10&page=1")
+    list_response = client.get("/api/v1/aircraft/paged?page_size=50&page=1")
     assert list_response.status_code == 200
     data = list_response.json()
     assert not any(item["id"] == aircraft_id for item in data["items"])

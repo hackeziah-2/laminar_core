@@ -60,7 +60,7 @@ def _put_logbook(client: TestClient, path: str, data: dict):
 # ========== Engine Logbook Tests ==========
 def test_list_engine_logbook_empty(client: TestClient):
     """Test listing engine logbooks when database is empty."""
-    response = client.get("/api/v1/logbooks/engine/paged?limit=10&page=1")
+    response = client.get("/api/v1/logbooks/engine/paged?page_size=50&page=1")
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 0
@@ -223,7 +223,7 @@ def test_delete_engine_logbook(client: TestClient, aircraft_id: int):
 # ========== Airframe Logbook Tests ==========
 def test_list_airframe_logbook_empty(client: TestClient):
     """Test listing airframe logbooks when database is empty."""
-    response = client.get("/api/v1/logbooks/airframe/paged?limit=10&page=1")
+    response = client.get("/api/v1/logbooks/airframe/paged?page_size=50&page=1")
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 0
@@ -350,7 +350,7 @@ def test_delete_airframe_logbook(client: TestClient, aircraft_id: int):
 # ========== Avionics Logbook Tests ==========
 def test_list_avionics_logbook_empty(client: TestClient):
     """Test listing avionics logbooks when database is empty."""
-    response = client.get("/api/v1/logbooks/avionics/paged?limit=10&page=1")
+    response = client.get("/api/v1/logbooks/avionics/paged?page_size=50&page=1")
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 0
@@ -553,7 +553,7 @@ def test_delete_avionics_logbook(client: TestClient, aircraft_id: int):
 # ========== Propeller Logbook Tests ==========
 def test_list_propeller_logbook_empty(client: TestClient):
     """Test listing propeller logbooks when database is empty."""
-    response = client.get("/api/v1/logbooks/propeller/paged?limit=10&page=1")
+    response = client.get("/api/v1/logbooks/propeller/paged?page_size=50&page=1")
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 0
@@ -861,7 +861,7 @@ def test_list_engine_logbook_with_search(client: TestClient, aircraft_id: int):
         _post_logbook(client, "/api/v1/logbooks/engine", logbook_data)
 
     response = client.get(
-        "/api/v1/logbooks/engine/paged?search=SEARCH-1&limit=10&page=1"
+        "/api/v1/logbooks/engine/paged?search=SEARCH-1&page_size=50&page=1"
     )
     assert response.status_code == 200
     data = response.json()
@@ -880,11 +880,12 @@ def test_list_engine_logbook_pagination(client: TestClient, aircraft_id: int):
         }
         _post_logbook(client, "/api/v1/logbooks/engine", logbook_data)
 
-    response = client.get("/api/v1/logbooks/engine/paged?limit=2&page=1")
+    response = client.get("/api/v1/logbooks/engine/paged?page_size=50&page=1")
     assert response.status_code == 200
     data = response.json()
-    assert len(data["items"]) <= 2
+    assert len(data["items"]) <= 50
     assert data["page"] == 1
+    assert data["page_size"] == 50
     assert data["total"] >= 5
 
 
@@ -1013,7 +1014,7 @@ def test_list_and_detail_include_web_link(client: TestClient, aircraft_id: int, 
     assert detail_response.json()["web_link"] == web_link
 
     list_response = client.get(
-        f"/api/v1/logbooks/{logbook_type}/paged?search={sequence_no}-LIST&limit=10&page=1"
+        f"/api/v1/logbooks/{logbook_type}/paged?search={sequence_no}-LIST&page_size=50&page=1"
     )
     assert list_response.status_code == 200
     items = list_response.json()["items"]
@@ -1257,14 +1258,14 @@ def test_update_and_filter_logbook_seq_no(client: TestClient, aircraft_id: int, 
     assert update_response.json()["logbook_seq_no"] == "ELB-000999"
 
     exact = client.get(
-        f"/api/v1/logbooks/{logbook_type}/paged?logbook_seq_no=ELB-000999&limit=10&page=1"
+        f"/api/v1/logbooks/{logbook_type}/paged?logbook_seq_no=ELB-000999&page_size=50&page=1"
     )
     assert exact.status_code == 200
     exact_items = exact.json()["items"]
     assert any(item["id"] == logbook_id for item in exact_items)
 
     partial = client.get(
-        f"/api/v1/logbooks/{logbook_type}/paged?logbook_seq_no=000999&limit=10&page=1"
+        f"/api/v1/logbooks/{logbook_type}/paged?logbook_seq_no=000999&page_size=50&page=1"
     )
     assert partial.status_code == 200
     partial_items = partial.json()["items"]

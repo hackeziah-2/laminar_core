@@ -1,10 +1,10 @@
-from math import ceil
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_account
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.database import get_session
 from app.models.account import AccountInformation
 from app.models.aircraft_statutory_certificate import CategoryTypeEnum
@@ -26,58 +26,52 @@ router = APIRouter(
 
 @router.get("/paged")
 async def api_list_paged(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     aircraft_fk: Optional[int] = Query(None),
     asc_history: Optional[int] = Query(None),
     category_type: Optional[CategoryTypeEnum] = Query(None),
     sort: Optional[str] = Query(""),
     session: AsyncSession = Depends(get_session),
 ):
-    offset = (page - 1) * limit
     items, total = await list_aircraft_statutory_certificates_history(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         aircraft_fk=aircraft_fk,
         asc_history=asc_history,
         category_type=category_type,
         sort=sort,
     )
-    pages = ceil(total / limit) if total else 0
-    return {
-        "items": [AircraftStatutoryCertificateHistoryRead.from_orm(i) for i in items],
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+    return paged_payload(
+        [AircraftStatutoryCertificateHistoryRead.from_orm(i) for i in items],
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router.get("/{asc_history}/paged")
 async def api_list_paged_by_asc_history(
     asc_history: int,
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     category_type: Optional[CategoryTypeEnum] = Query(None),
     sort: Optional[str] = Query(""),
     session: AsyncSession = Depends(get_session),
 ):
-    offset = (page - 1) * limit
     items, total = await list_aircraft_statutory_certificates_history(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         asc_history=asc_history,
         category_type=category_type,
         sort=sort,
     )
-    pages = ceil(total / limit) if total else 0
-    return {
-        "items": [AircraftStatutoryCertificateHistoryRead.from_orm(i) for i in items],
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+    return paged_payload(
+        [AircraftStatutoryCertificateHistoryRead.from_orm(i) for i in items],
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router.get("/{history_id}", response_model=AircraftStatutoryCertificateHistoryRead)

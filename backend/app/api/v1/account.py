@@ -1,4 +1,3 @@
-from math import ceil
 from typing import Optional, List
 
 from fastapi import (
@@ -28,6 +27,7 @@ from app.repository.account import (
     get_all_account_informations_list,
 )
 from app.api.deps import get_current_active_account, get_current_active_account_optional
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.constants.audit import (
     ACCOUNT_INFORMATION_MODULE_NAME,
     ACCOUNT_INFORMATION_TABLE_NAME,
@@ -95,8 +95,7 @@ async def api_account_informations_list(
 
 @router.get("/paged")
 async def api_list_paged(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = None,
     roles: Optional[List[str]] = Query(
         None,
@@ -109,24 +108,21 @@ async def api_list_paged(
     session: AsyncSession = Depends(get_session)
 ):
     """Get paginated list of Account Information entries."""
-    offset = (page - 1) * limit
     items, total = await list_account_informations(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         search=search,
         roles=roles,
         sort=sort,
     )
-    pages = ceil(total / limit) if total else 0
-    # Convert SQLAlchemy models to Pydantic schemas
     items_schemas = [AccountInformationRead.from_orm(item) for item in items]
-    return {
-        "items": items_schemas,
-        "total": total,
-        "page": page,
-        "pages": pages
-    }
+    return paged_payload(
+        items_schemas,
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router.get(

@@ -1,5 +1,4 @@
 import json
-from math import ceil
 from typing import Optional
 
 from fastapi import (
@@ -27,6 +26,7 @@ from app.repository.aircraft_statutory_certificate import (
     soft_delete_aircraft_statutory_certificate,
 )
 from app.api.deps import get_current_active_account
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.constants.audit import (
     AIRCRAFT_STATUTORY_CERTIFICATE_MODULE_NAME,
     AIRCRAFT_STATUTORY_CERTIFICATE_TABLE_NAME,
@@ -46,8 +46,7 @@ router_aircraft_scoped = APIRouter(
 
 @router.get("/paged")
 async def api_list_paged(
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     aircraft_fk: Optional[int] = Query(None),
     category_type: Optional[CategoryTypeEnum] = Query(None),
     search: Optional[str] = Query(
@@ -58,23 +57,21 @@ async def api_list_paged(
     session: AsyncSession = Depends(get_session),
 ):
     """List aircraft statutory certificates with pagination, search, and filter by category_type."""
-    offset = (page - 1) * limit
     items, total = await list_aircraft_statutory_certificates(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         aircraft_fk=aircraft_fk,
         category_type=category_type,
         search=search,
         sort=sort,
     )
-    pages = ceil(total / limit) if total else 0
-    return {
-        "items": [aircraft_statutory_certificate_schema.AircraftStatutoryCertificateRead.from_orm(i) for i in items],
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+    return paged_payload(
+        [aircraft_statutory_certificate_schema.AircraftStatutoryCertificateRead.from_orm(i) for i in items],
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router.get("/{cert_id}", response_model=aircraft_statutory_certificate_schema.AircraftStatutoryCertificateRead)
@@ -196,8 +193,7 @@ async def api_delete(
 @router_aircraft_scoped.get("/{aircraft_id}/aircraft-statutory-certificates/paged")
 async def api_list_by_aircraft_paged(
     aircraft_id: int,
-    limit: int = Query(10, ge=1, le=100),
-    page: int = Query(1, ge=1),
+    pagination: Pagination = Depends(pagination_params),
     category_type: Optional[CategoryTypeEnum] = Query(None),
     search: Optional[str] = Query(
         None,
@@ -207,23 +203,21 @@ async def api_list_by_aircraft_paged(
     session: AsyncSession = Depends(get_session),
 ):
     """List statutory certificates for a specific aircraft with pagination and optional category_type filter."""
-    offset = (page - 1) * limit
     items, total = await list_aircraft_statutory_certificates(
         session=session,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
         aircraft_fk=aircraft_id,
         category_type=category_type,
         search=search,
         sort=sort,
     )
-    pages = ceil(total / limit) if total else 0
-    return {
-        "items": [aircraft_statutory_certificate_schema.AircraftStatutoryCertificateRead.from_orm(i) for i in items],
-        "total": total,
-        "page": page,
-        "pages": pages,
-    }
+    return paged_payload(
+        [aircraft_statutory_certificate_schema.AircraftStatutoryCertificateRead.from_orm(i) for i in items],
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router_aircraft_scoped.get(

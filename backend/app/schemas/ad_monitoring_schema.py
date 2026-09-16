@@ -100,6 +100,19 @@ class ADMonitoringRead(ADMonitoringBase):
         orm_mode = True
 
 
+class ADMonitoringPagedResponse(BaseModel):
+    """Paginated AD monitoring list: items, total, page, pages."""
+
+    items: List[ADMonitoringRead] = Field(default_factory=list)
+    total: int
+    page: int
+    page_size: int
+    pages: int
+
+    class Config:
+        orm_mode = False
+
+
 # ---------- WorkOrderADMonitoring ----------
 class ADMonitoringSummary(BaseModel):
     """Embedded in WorkOrderADMonitoringRead."""
@@ -238,6 +251,19 @@ class WorkOrderADMonitoringRead(WorkOrderADMonitoringBase):
 
     class Config:
         orm_mode = True
+
+
+class WorkOrderADMonitoringPagedResponse(BaseModel):
+    """Paginated work-order AD monitoring list: items, total, page, pages."""
+
+    items: List[WorkOrderADMonitoringRead] = Field(default_factory=list)
+    total: int
+    page: int
+    page_size: int
+    pages: int
+
+    class Config:
+        orm_mode = False
 
 
 ADMonitoringRead.update_forward_refs()

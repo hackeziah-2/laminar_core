@@ -18,7 +18,7 @@ def certificate_payload(aircraft_id: int):
 
 def test_list_certificates_empty(client: TestClient):
     """List when no certificates exist."""
-    response = client.get("/api/v1/aircraft-statutory-certificates/paged?limit=10&page=1")
+    response = client.get("/api/v1/aircraft-statutory-certificates/paged?page_size=50&page=1")
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 0
@@ -75,7 +75,7 @@ def test_list_paged_with_filter(client: TestClient, certificate_payload: dict):
     )
 
     response = client.get(
-        "/api/v1/aircraft-statutory-certificates/paged?limit=10&page=1&category_type=COA"
+        "/api/v1/aircraft-statutory-certificates/paged?page_size=50&page=1&category_type=COA"
     )
     assert response.status_code == 200
     data = response.json()
@@ -85,7 +85,7 @@ def test_list_paged_with_filter(client: TestClient, certificate_payload: dict):
 
     # Filter by different category returns no match for this certificate
     response_other = client.get(
-        "/api/v1/aircraft-statutory-certificates/paged?limit=10&page=1&category_type=COR"
+        "/api/v1/aircraft-statutory-certificates/paged?page_size=50&page=1&category_type=COR"
     )
     assert response_other.status_code == 200
     # Total may be 0 if only COA was created
@@ -142,7 +142,7 @@ def test_list_by_aircraft_paged(client: TestClient, certificate_payload: dict, a
     )
 
     response = client.get(
-        f"/api/v1/aircraft/{aircraft_id}/aircraft-statutory-certificates/paged?limit=10&page=1"
+        f"/api/v1/aircraft/{aircraft_id}/aircraft-statutory-certificates/paged?page_size=50&page=1"
     )
     assert response.status_code == 200
     data = response.json()
@@ -152,7 +152,7 @@ def test_list_by_aircraft_paged(client: TestClient, certificate_payload: dict, a
 
     response_filtered = client.get(
         f"/api/v1/aircraft/{aircraft_id}/aircraft-statutory-certificates/paged"
-        "?limit=10&page=1&category_type=COA"
+        "?page_size=50&page=1&category_type=COA"
     )
     assert response_filtered.status_code == 200
 
@@ -212,7 +212,7 @@ def test_create_duplicate_updates_existing_and_appends_history(
     assert body["is_withhold"] is False
 
     hist = client.get(
-        f"/api/v1/aircraft-statutory-certificates-history/paged?limit=10&page=1"
+        f"/api/v1/aircraft-statutory-certificates-history/paged?page_size=50&page=1"
         f"&aircraft_fk={aircraft_id}&category_type=COA"
     )
     assert hist.status_code == 200

@@ -1,12 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from app import schemas
 from app.repository.flight_crud import create_flight, get_flight, update_flight, delete_flight, list_flights
 from app.api.deps import get_current_active_account
+from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.database import get_session
 from app.models.account import AccountInformation
-from math import ceil
 
 router = APIRouter(prefix="/api/v1/flights", tags=["flights"])
 
@@ -21,17 +21,14 @@ async def api_create_flight(
     )
 
 @router.get("/", response_model=List[schemas.flight_schema.FlightOut])
-async def api_list_flights(limit: int = Query(10, ge=1, le=100), page: int = Query(1, ge=1), search: Optional[str] = None, session: AsyncSession = Depends(get_session)):
-    offset = (page - 1) * limit
-    items, total = await list_flights(session, limit=limit, offset=offset, search=search)
+async def api_list_flights(pagination: Pagination = Depends(pagination_params), search: Optional[str] = None, session: AsyncSession = Depends(get_session)):
+    items, total = await list_flights(session, limit=pagination.limit, offset=pagination.offset, search=search)
     return items
 
 @router.get("/paged")
-async def api_list_paged(limit: int = Query(10, ge=1, le=100), page: int = Query(1, ge=1), search: Optional[str] = None, session: AsyncSession = Depends(get_session)):
-    offset = (page - 1) * limit
-    items, total = await list_flights(session, limit=limit, offset=offset, search=search)
-    pages = ceil(total / limit) if total else 0
-    return {"items": items, "total": total, "page": page, "pages": pages}
+async def api_list_paged(pagination: Pagination = Depends(pagination_params), search: Optional[str] = None, session: AsyncSession = Depends(get_session)):
+    items, total = await list_flights(session, limit=pagination.limit, offset=pagination.offset, search=search)
+    return paged_payload(items, total=total, page=pagination.page, page_size=pagination.page_size)
 
 @router.get("/{flight_id}", response_model=schemas.flight_schema.FlightOut)
 async def api_get(flight_id: int, session: AsyncSession = Depends(get_session)):

@@ -1201,8 +1201,8 @@ def _build_aircraft_technical_logs_list_statements(
     aircraft_joined = False
 
     # Search functionality; sequence_no stored as number only, so strip ATL- from search for that field
-    if search:
-        q = f"%{search}%"
+    if search and str(search).strip():
+        q = f"%{str(search).strip()}%"
         q_seq = f"%{_sequence_no_digits_only(search)}%"
         # Join Aircraft table for registration search
         stmt = stmt.join(Aircraft, AircraftTechnicalLog.aircraft_fk == Aircraft.id)
@@ -1237,8 +1237,8 @@ def _build_aircraft_technical_logs_list_statements(
             AircraftTechnicalLog.atl_batch_fk == atl_batch_fk
         )
 
-    if search:
-        q = f"%{search}%"
+    if search and str(search).strip():
+        q = f"%{str(search).strip()}%"
         q_seq = f"%{_sequence_no_digits_only(search)}%"
         # Join Aircraft table for registration search in count query
         count_stmt = count_stmt.join(

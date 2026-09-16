@@ -83,6 +83,7 @@ async def list_personnel_compliance_matrix_2_paged(
             selectinload(PersonnelAuthorization.authorization_scope_cessna),
             selectinload(PersonnelAuthorization.authorization_scope_baron),
             selectinload(PersonnelAuthorization.authorization_scope_others),
+            selectinload(PersonnelAuthorization.authorization_scope_piper_pa34),
         )
     )
 
@@ -210,6 +211,7 @@ async def list_personnel_compliance_matrix_2_paged(
                 selectinload(PersonnelCompliance.authorization_scope_cessna),
                 selectinload(PersonnelCompliance.authorization_scope_baron),
                 selectinload(PersonnelCompliance.authorization_scope_others),
+                selectinload(PersonnelCompliance.authorization_scope_piper_pa34),
             )
         )
         pc_result = await session.execute(pc_stmt)
