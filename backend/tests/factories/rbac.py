@@ -42,6 +42,7 @@ async def seed_role_permission(
     can_create: bool = False,
     can_update: bool = False,
     can_delete: bool = False,
+    can_approve: bool = False,
 ) -> None:
     session.add(
         RolePermission(
@@ -51,6 +52,8 @@ async def seed_role_permission(
             can_create=can_create,
             can_update=can_update,
             can_delete=can_delete,
+            can_approve=can_approve,
+            can_write=can_create or can_update or can_delete,
         )
     )
 

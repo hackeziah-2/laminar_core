@@ -53,6 +53,7 @@ def test_rbac_admin_not_in_status_map_but_skips_filter():
     assert atl_paged_list_skips_work_status_rbac("admin") is True
     assert atl_paged_list_skips_work_status_rbac("Maintenance Manager") is True
     assert atl_paged_list_skips_work_status_rbac("maintenance manager") is True
+    assert atl_paged_list_skips_work_status_rbac("Mechanic - Maintenance Manager") is True
     assert atl_paged_list_skips_work_status_rbac("Quality Manager") is True
     assert atl_paged_list_skips_work_status_rbac("quality manager") is True
 

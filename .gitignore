@@ -6,6 +6,7 @@ __pycache__/
 venv/
 .idea/
 .vscode/
+backend/.venv/
 backend/uploads/
 backend/static/
 backups/
