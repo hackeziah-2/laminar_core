@@ -1,6 +1,4 @@
 import json
-import uuid
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import (
@@ -16,7 +14,6 @@ from pydantic import ValidationError
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 from app.schemas import aircraft_technical_log_schema
 from app.core.atl_derived_times import (
     aircraft_technical_log_read_persisted,
@@ -44,16 +41,7 @@ from app.constants.audit import ATL_MODULE_NAME, ATL_TABLE_NAME
 from app.database import get_session
 from app.models.account import AccountInformation
 from app.models.aircraft_techinical_log import WorkStatus
-
-
-def _sanitize_filename(name: str) -> str:
-    """Keep only safe filename characters; avoid path traversal."""
-    if not name or not isinstance(name, str):
-        return "upload"
-    base = (name.split("/")[-1].split("\\")[-1] or "upload").strip()
-    if not base or ".." in base:
-        return "upload"
-    return "".join(c for c in base if c.isalnum() or c in "._- ") or "upload"
+from app.services.file_upload_service import persist_optional_upload, reject_if_content_length_too_large
 
 
 def _round_optional_float_2(value: Any) -> Optional[float]:
@@ -66,21 +54,8 @@ def _round_optional_float_2(value: Any) -> Optional[float]:
 
 
 async def _save_atl_upload(form_file: Any, subdir: str) -> Optional[str]:
-    """Save an uploaded file to uploads/<subdir>/ with a unique name. Returns stored path like 'white_atl/unique_name.pdf' or None if not a file."""
-    if form_file is None:
-        return None
-    filename = getattr(form_file, "filename", None) if form_file else None
-    if not filename or not getattr(form_file, "read", None):
-        return None
-    ensure_uploads_dir()
-    target_dir = UPLOAD_DIR / subdir
-    target_dir.mkdir(parents=True, exist_ok=True)
-    safe_base = _sanitize_filename(filename)
-    unique_name = f"{uuid.uuid4().hex}_{safe_base}"
-    path = target_dir / unique_name
-    content = await form_file.read()
-    path.write_bytes(content)
-    return f"{subdir}/{unique_name}"
+    """Stream an ATL file into uploads/<subdir>/; return '{subdir}/{unique}' or None."""
+    return await persist_optional_upload(form_file, subdir, path_style="module")
 
 
 router = APIRouter(
@@ -496,6 +471,8 @@ async def api_create(
 async def _parse_update_payload(request: Request) -> aircraft_technical_log_schema.AircraftTechnicalLogUpdate:
     """Parse request body as either JSON or multipart form with 'data'/'json_data' JSON string (for file upload)."""
     content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    if content_type == "multipart/form-data":
+        reject_if_content_length_too_large(request.headers.get("content-length"))
     if content_type == "application/json":
         body = await request.body()
         if not body:

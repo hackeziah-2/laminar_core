@@ -46,6 +46,18 @@
         ]
     },
     {
+        "name": "Mechanic - Maintenance Manager",
+        "description": "Same access and behavior as Maintenance Manager.",
+        "permissions": [
+            { "module": "Dashboard", "read": true, "create": false, "update": false, "delete": false },
+            { "module": "General Information", "read": true, "create": true, "update": true, "delete": true },
+            { "module": "Operation", "read": true, "create": true, "update": true, "delete": true },
+            { "module": "Daily Update", "read": true, "create": false, "update": true, "delete": true },
+            { "module": "Maintenance", "read": true, "create": true, "update": true, "delete": true },
+            { "module": "Logbook", "read": true, "create": true, "update": true, "delete": true }
+        ]
+    },
+    {
         "name": "Technical Publication",
         "description": "Regulatory compliance areas (read/create/update), General Information read, Operation update.",
         "permissions": [

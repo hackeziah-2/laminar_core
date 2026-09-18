@@ -5,6 +5,12 @@ from typing import Dict, Optional, Tuple
 
 from sqlalchemy import false, or_
 
+from app.core.role_identity import (
+    canonical_access_role,
+    is_admin_role,
+    is_maintenance_manager_role,
+    is_quality_manager_role,
+)
 from app.models.aircraft_techinical_log import AircraftTechnicalLog, WorkStatus
 from app.models.role import Role
 
@@ -51,29 +57,28 @@ def _is_maintenance_planner_role(role_name: Optional[str]) -> bool:
         return False
     return str(role_name).strip().casefold() == "maintenance planner"
 
-_ROLES_SKIP_ATL_MANAGE_PAGED_WORK_STATUS_RBAC = frozenset(
-    {"admin", "maintenance manager", "quality manager"}
-)
-
 
 def atl_paged_list_skips_work_status_rbac(role_name: Optional[str]) -> bool:
-    """Admin, Maintenance Manager, and Quality Manager see all ATL rows on manage/paged."""
-    if not role_name or not str(role_name).strip():
-        return False
-    return str(role_name).strip().casefold() in _ROLES_SKIP_ATL_MANAGE_PAGED_WORK_STATUS_RBAC
+    """Admin, Maintenance Manager (and equivalents), and Quality Manager see all ATL rows."""
+    return (
+        is_admin_role(role_name)
+        or is_maintenance_manager_role(role_name)
+        or is_quality_manager_role(role_name)
+    )
 
 
 def allowed_work_statuses_for_atl_paged_list(role_name: Optional[str]) -> Tuple[WorkStatus, ...]:
     """
     Return work_status values the role may list. Empty tuple = no access (fail-safe).
     Unknown role, blank name, or missing role yields ().
+    Equivalent roles (e.g. Mechanic - Maintenance Manager) use the canonical map.
     """
     if not role_name or not str(role_name).strip():
         return ()
-    stripped = str(role_name).strip()
-    if stripped in _ATL_PAGED_WORK_STATUSES_BY_ROLE:
-        return _ATL_PAGED_WORK_STATUSES_BY_ROLE[stripped]
-    return _CF_INDEX.get(stripped.casefold(), ())
+    lookup_name = canonical_access_role(role_name) or str(role_name).strip()
+    if lookup_name in _ATL_PAGED_WORK_STATUSES_BY_ROLE:
+        return _ATL_PAGED_WORK_STATUSES_BY_ROLE[lookup_name]
+    return _CF_INDEX.get(lookup_name.casefold(), ())
 
 
 def atl_rbac_filter():

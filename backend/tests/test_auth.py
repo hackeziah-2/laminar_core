@@ -45,6 +45,31 @@ def test_register_bulk_users(client: TestClient):
         assert usernames == {"bulk_register_one", "bulk_register_two"}
 
 
+def test_register_bulk_users_allows_duplicate_email(client: TestClient):
+    """Bulk register accepts the same email on different usernames."""
+    batch = [
+        {
+            "first_name": "Bulk",
+            "last_name": "Shared One",
+            "username": "bulk_shared_email_one",
+            "email": "shared.bulk@example.com",
+            "password": "testpassword123",
+        },
+        {
+            "first_name": "Bulk",
+            "last_name": "Shared Two",
+            "username": "bulk_shared_email_two",
+            "email": "shared.bulk@example.com",
+            "password": "testpassword123",
+        },
+    ]
+    response = client.post("/api/v1/auth/register", json=batch)
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert len(body) == 2
+    assert {row["email"] for row in body} == {"shared.bulk@example.com"}
+
+
 def test_login_user(client: TestClient):
     """Test user login/token generation."""
     # First register a user
@@ -103,6 +128,7 @@ def test_me_returns_profile_with_full_name(client: TestClient):
     assert body["full_name"] == "JANE PILOT"
     assert body["email"] == "me@example.com"
     assert "role" in body
+    assert "access_role" in body
     assert "designation" in body
 
 
