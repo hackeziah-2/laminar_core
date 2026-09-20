@@ -55,20 +55,6 @@ async def create_account_information(
             detail="Account with this username already exists"
         )
 
-    # Check for duplicate email if provided (excluding soft-deleted)
-    if getattr(data, "email", None):
-        result = await session.execute(
-            select(AccountInformation).where(
-                AccountInformation.email == data.email,
-                AccountInformation.is_deleted == False
-            )
-        )
-        if result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=400,
-                detail="Account with this email already exists"
-            )
-
     # Validate role_id FK before insert (clean API error instead of DB FK error)
     if getattr(data, "role_id", None) is not None:
         role_result = await session.execute(
@@ -208,21 +194,6 @@ async def update_account_information(
             raise HTTPException(
                 status_code=400,
                 detail="Account with this username already exists"
-            )
-
-    # Check for duplicate email if email is being updated (excluding soft-deleted)
-    if "email" in update_data and update_data["email"]:
-        result = await session.execute(
-            select(AccountInformation).where(
-                AccountInformation.email == update_data["email"],
-                AccountInformation.id != account_id,
-                AccountInformation.is_deleted == False
-            )
-        )
-        if result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=400,
-                detail="Account with this email already exists"
             )
 
     # Validate role_id FK before update (allow explicit null to unassign role)

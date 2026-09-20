@@ -9,14 +9,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.account import AccountInformation
 from app.models.role import Role
+from app.core.role_identity import expand_equivalent_role_names
 
 
 async def get_active_accounts_by_roles(
     session: AsyncSession,
     role_names: Sequence[str],
 ) -> List[AccountInformation]:
-    """Return active accounts whose role name matches any given role."""
-    names = [str(name).strip() for name in role_names if str(name).strip()]
+    """Return active accounts whose role name matches any given role or equivalent."""
+    names = expand_equivalent_role_names(
+        [str(name).strip() for name in role_names if str(name).strip()]
+    )
     if not names:
         return []
 

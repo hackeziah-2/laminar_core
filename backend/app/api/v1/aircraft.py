@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 
 from typing import Dict, List, Optional
 from fastapi import (
@@ -44,7 +43,7 @@ from app.api.deps import get_current_active_account
 from app.api.pagination import Pagination, paged_payload, pagination_params
 from app.constants.audit import AIRCRAFT_MODULE_NAME, AIRCRAFT_TABLE_NAME
 from app.models.account import AccountInformation
-from app.upload_config import UPLOAD_DIR
+from app.services.file_upload_service import resolve_stored_upload_path
 from app.services.generate_report_excel import generate_excel
 from app.services.generate_report_pdf import generate_pdf_report
 
@@ -242,11 +241,8 @@ def _serve_aircraft_file(
     disposition: str = "attachment",
 ) -> FileResponse:
     """Resolve aircraft file path under UPLOAD_DIR and return FileResponse or raise 404."""
-    if not file_path or not str(file_path).strip():
-        raise HTTPException(status_code=404, detail="File not found")
-    path = Path(file_path).resolve()
-    upload_root = Path(UPLOAD_DIR).resolve()
-    if not path.is_file() or not str(path).startswith(str(upload_root)):
+    path = resolve_stored_upload_path(file_path or "")
+    if path is None:
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(
         path=path,

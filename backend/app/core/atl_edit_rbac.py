@@ -2,6 +2,14 @@
 
 from typing import FrozenSet, Optional, Set, Tuple
 
+from app.core.role_identity import (
+    is_admin_role,
+    is_maintenance_manager_role,
+    is_maintenance_planner_role,
+    is_quality_manager_role,
+    is_technical_publication_role,
+    normalize_role_name,
+)
 from app.models.aircraft_techinical_log import WorkStatus
 
 ATL_EDIT_FORBIDDEN_MESSAGE = (
@@ -54,79 +62,8 @@ _MAINTENANCE_MANAGER_WORKFLOW_TRANSITIONS: Set[Tuple[WorkStatus, WorkStatus]] = 
 }
 
 
-def _normalize_role_name(role_name: Optional[str]) -> str:
-    if not role_name or not str(role_name).strip():
-        return ""
-    return (
-        str(role_name)
-        .strip()
-        .lower()
-        .replace("_", " ")
-        .replace(".", "")
-        .replace("'", "")
-        .replace('"', "")
-    )
-
-
-def is_admin_role(role_name: Optional[str]) -> bool:
-    n = _normalize_role_name(role_name)
-    if not n:
-        return False
-    return (
-        n == "admin"
-        or n == "administrator"
-        or n.endswith(" admin")
-        or n.endswith(" administrator")
-    )
-
-
-def is_maintenance_planner_role(role_name: Optional[str]) -> bool:
-    n = _normalize_role_name(role_name)
-    if not n:
-        return False
-    return (
-        n == "maintenance planner"
-        or n == "maint planner"
-        or n == "maintenance planning"
-        or n.endswith(" maintenance planner")
-    )
-
-
-def is_maintenance_manager_role(role_name: Optional[str]) -> bool:
-    n = _normalize_role_name(role_name)
-    if not n:
-        return False
-    return (
-        n == "maintenance manager"
-        or n == "maint manager"
-        or n.endswith(" maintenance manager")
-    )
-
-
-def is_technical_publication_role(role_name: Optional[str]) -> bool:
-    n = _normalize_role_name(role_name)
-    if not n:
-        return False
-    has_phrase = "technical publication" in n or "tech publication" in n
-    return (
-        has_phrase
-        or n == "technical publication"
-        or n == "tech publication"
-        or n == "oem technical publication"
-        or n == "oem tech publication"
-        or n.endswith(" technical publication")
-    )
-
-
-def is_quality_manager_role(role_name: Optional[str]) -> bool:
-    n = _normalize_role_name(role_name)
-    if not n:
-        return False
-    return (
-        n == "quality manager"
-        or n == "qa manager"
-        or n.endswith(" quality manager")
-    )
+# Re-exported so existing ATL RBAC imports keep working.
+_normalize_role_name = normalize_role_name
 
 
 def _allowed_statuses_for_role(role_name: Optional[str]) -> Optional[FrozenSet[WorkStatus]]:

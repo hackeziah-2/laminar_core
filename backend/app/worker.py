@@ -11,5 +11,6 @@ celery_app.conf.enable_utc = False
 celery_app.conf.imports = (
     "app.tasks.advisory_notifications",
     "app.tasks.notify",
+    "app.tasks.file_upload",
 )
 register_periodic_jobs(celery_app)

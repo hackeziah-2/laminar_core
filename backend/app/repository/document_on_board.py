@@ -1,4 +1,3 @@
-import os
 from datetime import date, datetime
 from typing import Optional, List, Tuple
 
@@ -8,9 +7,7 @@ from sqlalchemy.orm import selectinload
 from fastapi import HTTPException, UploadFile
 
 from app.database import set_audit_fields
-from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
-
-ensure_uploads_dir()
+from app.services.file_upload_service import persist_optional_upload
 
 from app.models.aircraft import Aircraft
 from app.models.document_on_board import DocumentOnBoard, DocumentStatusEnum
@@ -297,13 +294,9 @@ async def create_document_on_board(
         document_data.pop("status", None)
 
     # Handle optional file upload (file_path remains None if no file)
-    if upload_file and upload_file.filename:
-        ensure_uploads_dir()
-        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
-        with open(file_path, "wb") as f:
-            content = await upload_file.read()
-            f.write(content)
-        document_data["file_path"] = file_path
+    stored = await persist_optional_upload(upload_file, "document_on_board")
+    if stored:
+        document_data["file_path"] = stored
 
     try:
         document = DocumentOnBoard(**document_data)
@@ -357,13 +350,9 @@ async def update_document_on_board(
             update_data["status"] = DocumentStatusEnum.ACTIVE.value
 
     # Handle optional file upload (only set file_path if a file is provided)
-    if upload_file and upload_file.filename:
-        ensure_uploads_dir()
-        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
-        with open(file_path, "wb") as f:
-            content = await upload_file.read()
-            f.write(content)
-        update_data["file_path"] = file_path
+    stored = await persist_optional_upload(upload_file, "document_on_board")
+    if stored:
+        update_data["file_path"] = stored
 
     for k, v in update_data.items():
         setattr(obj, k, v)

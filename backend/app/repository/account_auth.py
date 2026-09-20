@@ -1,7 +1,7 @@
 """Authentication and lookup for AccountInformation."""
 from typing import Optional
 
-from sqlalchemy import select, or_
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -30,23 +30,29 @@ async def authenticate_account(
 ) -> Optional[AccountInformation]:
     """
     Authenticate by username or email and password.
-    Returns AccountInformation if credentials are valid.
+    Username is unique; email may be shared, so email login matches the
+    first active account whose password is valid.
     """
-    result = await session.execute(
+    username_result = await session.execute(
         select(AccountInformation)
-        .where(
-            or_(
-                AccountInformation.username == username_or_email,
-                AccountInformation.email == username_or_email,
-            )
-        )
+        .where(AccountInformation.username == username_or_email)
         .where(AccountInformation.is_deleted == False)
     )
-    account = result.scalar_one_or_none()
-    if not account:
-        return None
-    if not account.status:
-        return None  # inactive account
-    if not verify_password(password, account.password):
-        return None
-    return account
+    account = username_result.scalar_one_or_none()
+    if account:
+        if not account.status:
+            return None
+        if not verify_password(password, account.password):
+            return None
+        return account
+
+    email_result = await session.execute(
+        select(AccountInformation)
+        .where(AccountInformation.email == username_or_email)
+        .where(AccountInformation.is_deleted == False)
+        .where(AccountInformation.status == True)
+    )
+    for candidate in email_result.scalars().all():
+        if verify_password(password, candidate.password):
+            return candidate
+    return None
