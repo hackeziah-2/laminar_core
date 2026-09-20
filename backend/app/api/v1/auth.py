@@ -26,6 +26,7 @@ from app.constants.audit import (
     ACCOUNT_INFORMATION_TABLE_NAME,
 )
 from app.core.security import create_access_token, _truncate_password
+from app.core.role_identity import canonical_access_role
 from app.models.account import AccountInformation
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
@@ -128,7 +129,6 @@ async def register(
                 detail="At least one account is required.",
             )
         seen_usernames: Set[str] = set()
-        seen_emails: Set[str] = set()
         for item in payload:
             if item.username in seen_usernames:
                 raise HTTPException(
@@ -136,13 +136,6 @@ async def register(
                     detail=f"Duplicate username in request: {item.username}",
                 )
             seen_usernames.add(item.username)
-            if item.email:
-                if item.email in seen_emails:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Duplicate email in request: {item.email}",
-                    )
-                seen_emails.add(item.email)
         created: List[AccountInformationRead] = []
         for item in payload:
             created.append(
@@ -179,9 +172,11 @@ async def me(
     account: AccountInformation = Depends(get_current_account),
 ):
     """Get current logged-in account profile. Requires valid JWT."""
+    displayed_role = account.role.name if account.role else None
     return AccountMe(
         full_name=account.full_name,
-        role=account.role.name if account.role else None,
+        role=displayed_role,
+        access_role=canonical_access_role(displayed_role),
         designation=account.designation,
         email=account.email,
         username=account.username,

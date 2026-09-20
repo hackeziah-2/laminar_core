@@ -1,4 +1,3 @@
-import os
 from typing import List, Optional, Tuple, Union
 
 from sqlalchemy import select, or_, cast, String
@@ -7,9 +6,7 @@ from fastapi import Query, Depends, UploadFile, File, Form, HTTPException, Reque
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
-
-ensure_uploads_dir()
+from app.services.file_upload_service import persist_optional_upload
 
 from app.models.aircraft import Aircraft, StatusEnum
 from app.models.fleet_daily_update import FleetDailyUpdate, FleetDailyUpdateStatusEnum
@@ -127,10 +124,13 @@ async def _find_active_aircraft_by_field(
 
 
 async def _persist_upload_file(upload_file: UploadFile) -> str:
-    file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
-    with open(file_path, "wb") as f:
-        f.write(await upload_file.read())
-    return file_path
+    stored = await persist_optional_upload(upload_file, "aircraft")
+    if not stored:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="No file provided",
+        )
+    return stored
 
 def _normalize_status(status: Optional[Union[str, object]]) -> Optional[str]:
     """Return a string status for filtering: 'all', 'active', 'inactive', 'maintenance', or None (treated as all)."""

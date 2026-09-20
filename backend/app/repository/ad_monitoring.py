@@ -1,4 +1,3 @@
-import os
 from typing import Optional, List, Tuple
 
 from fastapi import HTTPException, Request, UploadFile
@@ -7,14 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only, noload, selectinload
 
 from app.database import set_audit_fields
-from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
+from app.services.file_upload_service import persist_optional_upload
 from app.models.account import AccountInformation
 from app.models.ad_monitoring import ADMonitoring, WorkOrderADMonitoring
 from app.models.aircraft import Aircraft
 from app.models.audit_log import AuditAction
 from app.services.audit_trail_service import create_audit_log, serialize_audit_data
 
-ensure_uploads_dir()
 from app.schemas.ad_monitoring_schema import (
     ADMonitoringCreate,
     ADMonitoringUpdate,
@@ -211,11 +209,9 @@ async def create_ad_monitoring(
 ) -> ADMonitoringRead:
     """Create ADMonitoring with optional file upload."""
     ad_data = data.dict()
-    if upload_file and getattr(upload_file, "filename", None):
-        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
-        with open(file_path, "wb") as f:
-            f.write(await upload_file.read())
-        ad_data["file_path"] = file_path
+    stored = await persist_optional_upload(upload_file, "ad_monitoring")
+    if stored:
+        ad_data["file_path"] = stored
     obj = ADMonitoring(**ad_data)
     try:
         session.add(obj)
@@ -271,11 +267,9 @@ async def update_ad_monitoring(
         return None
     old_data_snapshot = serialize_audit_data(obj)
     update_data = data.dict(exclude_unset=True)
-    if upload_file and getattr(upload_file, "filename", None):
-        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
-        with open(file_path, "wb") as f:
-            f.write(await upload_file.read())
-        update_data["file_path"] = file_path
+    stored = await persist_optional_upload(upload_file, "ad_monitoring")
+    if stored:
+        update_data["file_path"] = stored
     for k, v in update_data.items():
         setattr(obj, k, v)
     try:

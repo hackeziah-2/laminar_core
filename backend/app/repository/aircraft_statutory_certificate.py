@@ -1,5 +1,3 @@
-import os
-import uuid
 from typing import Optional, List, Tuple
 
 from fastapi import HTTPException, Request, UploadFile
@@ -12,7 +10,7 @@ from app.models.account import AccountInformation
 from app.models.aircraft import Aircraft
 from app.models.audit_log import AuditAction
 from app.services.audit_trail_service import create_audit_log, serialize_audit_data
-from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
+from app.services.file_upload_service import persist_optional_upload
 from app.models.aircraft_statutory_certificate import (
     AircraftStatutoryCertificate,
     CategoryTypeEnum,
@@ -32,28 +30,9 @@ from app.repository.aircraft_statutory_certificate_history import (
 UPLOAD_SUBDIR = "statutory_certificates"
 
 
-def _sanitize_filename(name: str) -> str:
-    if not name or not isinstance(name, str):
-        return "upload"
-    base = (name.split("/")[-1].split("\\")[-1] or "upload").strip()
-    if not base or ".." in base:
-        return "upload"
-    return "".join(c for c in base if c.isalnum() or c in "._- ") or "upload"
-
-
 async def _save_certificate_upload(upload_file: Optional[UploadFile]) -> Optional[str]:
     """Save uploaded file to uploads/statutory_certificates/; return relative path or None."""
-    if not upload_file or not getattr(upload_file, "filename", None) or not getattr(upload_file, "read", None):
-        return None
-    ensure_uploads_dir()
-    target_dir = UPLOAD_DIR / UPLOAD_SUBDIR
-    target_dir.mkdir(parents=True, exist_ok=True)
-    safe_base = _sanitize_filename(upload_file.filename)
-    unique_name = f"{uuid.uuid4().hex}_{safe_base}"
-    path = target_dir / unique_name
-    content = await upload_file.read()
-    path.write_bytes(content)
-    return f"{UPLOAD_SUBDIR}/{unique_name}"
+    return await persist_optional_upload(upload_file, UPLOAD_SUBDIR)
 
 
 async def list_aircraft_statutory_certificates(

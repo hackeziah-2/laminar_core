@@ -11,6 +11,7 @@ from fastapi import (
     Form,
     HTTPException,
     Query,
+    Request,
     UploadFile,
     status,
 )
@@ -35,6 +36,10 @@ from app.services.excel_import.validation_errors import (
     format_error_report_markdown,
 )
 from app.upload_config import ATL_IMPORT_JOBS_DIR, ensure_atl_import_jobs_dir
+from app.services.file_upload_service import (
+    reject_if_content_length_too_large,
+    save_upload_to_exact_path,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["atl-excel-import"])
 
@@ -61,6 +66,7 @@ def _parse_form_optional_int(value: Union[str, int, None]) -> Optional[int]:
 )
 async def start_atl_excel_import(
     background_tasks: BackgroundTasks,
+    request: Request,
     file: UploadFile = File(..., description="Excel .xlsx or .xls"),
     aircraft_id: Optional[str] = Form(None, description="Aircraft ID for all rows"),
     registration: Optional[str] = Form(None, description="Aircraft registration if aircraft_id omitted"),
@@ -76,6 +82,8 @@ async def start_atl_excel_import(
             status_code=400,
             detail="Only .xlsx or .xls files are allowed for this import.",
         )
+
+    reject_if_content_length_too_large(request.headers.get("content-length"))
 
     resolved_batch_id = _parse_form_optional_int(batch_id)
     if resolved_batch_id is None:
@@ -100,23 +108,27 @@ async def start_atl_excel_import(
     suffix = Path(fn).suffix or ".xlsx"
     dest_path = ATL_IMPORT_JOBS_DIR / f"{job_id}{suffix}"
 
-    contents = await file.read()
-    if not contents:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty")
-
-    dest_path.write_bytes(contents)
-
-    await create_import_job(
-        session,
-        job_id=job_id,
-        temp_file_path=str(dest_path),
-        aircraft_fk=resolved_id,
-        atl_batch_fk=resolved_batch_id,
-        started_by=current_account.id,
-        status="PENDING",
-        message="Queued for processing",
-    )
-    await session.commit()
+    try:
+        await save_upload_to_exact_path(
+            file,
+            dest_path,
+            allowed_extensions={".xlsx", ".xls"},
+        )
+        await create_import_job(
+            session,
+            job_id=job_id,
+            temp_file_path=str(dest_path),
+            aircraft_fk=resolved_id,
+            atl_batch_fk=resolved_batch_id,
+            started_by=current_account.id,
+            status="PENDING",
+            message="Queued for processing",
+        )
+        await session.commit()
+    except Exception:
+        dest_path.unlink(missing_ok=True)
+        await session.rollback()
+        raise
 
     background_tasks.add_task(process_atl_excel_import_job, job_id)
 

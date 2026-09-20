@@ -1,4 +1,3 @@
-import os
 from typing import Optional, List, Tuple, Type
 from math import ceil
 
@@ -9,11 +8,18 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import NO_VALUE, set_committed_value
 from sqlalchemy import inspect
 
-from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
-
-ensure_uploads_dir()
+from app.services.file_upload_service import persist_optional_upload
 
 from app.database import set_audit_fields
+
+
+async def _store_logbook_upload(
+    upload_file: Optional[UploadFile],
+    target: dict,
+) -> None:
+    stored = await persist_optional_upload(upload_file, "logbooks")
+    if stored:
+        target["upload_file"] = stored
 from app.models.account import AccountInformation
 from app.models.audit_log import AuditAction
 from app.services.audit_trail_service import create_audit_log, serialize_audit_data
@@ -172,11 +178,7 @@ async def create_engine_logbook(
 ) -> EngineLogbookRead:
     """Create a new Engine Logbook entry (with optional component_parts)."""
     logbook_data = data.dict(exclude={"component_parts"})
-    if upload_file:
-        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
-        with open(file_path, "wb") as f:
-            f.write(await upload_file.read())
-        logbook_data["upload_file"] = file_path
+    await _store_logbook_upload(upload_file, logbook_data)
 
     entry = EngineLogbook(**logbook_data)
     try:
@@ -353,11 +355,7 @@ async def update_engine_logbook(
 
     old_data_snapshot = serialize_audit_data(obj)
     update_data = logbook_in.dict(exclude_unset=True, exclude={"component_parts"})
-    if upload_file:
-        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
-        with open(file_path, "wb") as f:
-            f.write(await upload_file.read())
-        update_data["upload_file"] = file_path
+    await _store_logbook_upload(upload_file, update_data)
 
     for k, v in update_data.items():
         setattr(obj, k, v)
@@ -459,11 +457,7 @@ async def create_airframe_logbook(
 ) -> AirframeLogbookRead:
     """Create a new Airframe Logbook entry (with optional component_parts)."""
     logbook_data = data.dict(exclude={"component_parts"})
-    if upload_file:
-        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
-        with open(file_path, "wb") as f:
-            f.write(await upload_file.read())
-        logbook_data["upload_file"] = file_path
+    await _store_logbook_upload(upload_file, logbook_data)
 
     entry = AirframeLogbook(**logbook_data)
     try:
@@ -641,11 +635,7 @@ async def update_airframe_logbook(
 
     old_data_snapshot = serialize_audit_data(obj)
     update_data = logbook_in.dict(exclude_unset=True, exclude={"component_parts"})
-    if upload_file:
-        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
-        with open(file_path, "wb") as f:
-            f.write(await upload_file.read())
-        update_data["upload_file"] = file_path
+    await _store_logbook_upload(upload_file, update_data)
 
     for k, v in update_data.items():
         setattr(obj, k, v)
@@ -747,11 +737,7 @@ async def create_avionics_logbook(
 ) -> AvionicsLogbookRead:
     """Create a new Avionics Logbook entry (with optional component_parts)."""
     logbook_data = data.dict(exclude={"component_parts"})
-    if upload_file:
-        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
-        with open(file_path, "wb") as f:
-            f.write(await upload_file.read())
-        logbook_data["upload_file"] = file_path
+    await _store_logbook_upload(upload_file, logbook_data)
 
     entry = AvionicsLogbook(**logbook_data)
     try:
@@ -935,11 +921,7 @@ async def update_avionics_logbook(
 
     old_data_snapshot = serialize_audit_data(obj)
     update_data = logbook_in.dict(exclude_unset=True, exclude={"component_parts"})
-    if upload_file:
-        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
-        with open(file_path, "wb") as f:
-            f.write(await upload_file.read())
-        update_data["upload_file"] = file_path
+    await _store_logbook_upload(upload_file, update_data)
 
     for k, v in update_data.items():
         setattr(obj, k, v)
@@ -1043,11 +1025,7 @@ async def create_propeller_logbook(
     logbook_data = data.dict()
     
     # Handle file upload
-    if upload_file:
-        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
-        with open(file_path, "wb") as f:
-            f.write(await upload_file.read())
-        logbook_data["upload_file"] = file_path
+    await _store_logbook_upload(upload_file, logbook_data)
     
     entry = PropellerLogbook(**logbook_data)
     try:
@@ -1196,11 +1174,7 @@ async def update_propeller_logbook(
     update_data = logbook_in.dict(exclude_unset=True)
     
     # Handle file upload
-    if upload_file:
-        file_path = os.path.join(str(UPLOAD_DIR), upload_file.filename)
-        with open(file_path, "wb") as f:
-            f.write(await upload_file.read())
-        update_data["upload_file"] = file_path
+    await _store_logbook_upload(upload_file, update_data)
     
     for k, v in update_data.items():
         setattr(obj, k, v)

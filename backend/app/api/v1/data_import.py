@@ -20,6 +20,7 @@ from app.models.account import AccountInformation
 from app.schemas.data_import_schema import ExcelImportResult, ImportTargetInfo
 from app.services.excel_import.config import ExcelImportConfig
 from app.services.excel_import_service import ExcelImportService
+from app.services.file_upload_service import reject_if_content_length_too_large
 
 router = APIRouter(
     prefix="/api/v1/excel-data",
@@ -137,6 +138,7 @@ async def import_excel_by_target(
         session, current_account, target.rbac_module, target.rbac_action
     )
 
+    reject_if_content_length_too_large(request.headers.get("content-length"))
     form = await request.form()
     return await _run_registered_import(
         target=target,
