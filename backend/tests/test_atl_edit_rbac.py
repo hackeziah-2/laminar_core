@@ -36,8 +36,14 @@ def test_can_edit_atl_matrix():
     assert can_edit_atl_for_role_and_status(
         "Maintenance Manager", WorkStatus.REJECTED_MAINTENANCE
     )
+    assert can_edit_atl_for_role_and_status(
+        "Mechanic - Maintenance Manager", WorkStatus.REJECTED_MAINTENANCE
+    )
     assert not can_edit_atl_for_role_and_status(
         "Maintenance Manager", WorkStatus.COMPLETED
+    )
+    assert not can_edit_atl_for_role_and_status(
+        "Mechanic - Maintenance Manager", WorkStatus.COMPLETED
     )
     assert can_edit_atl_for_role_and_status(
         "Quality Manager", WorkStatus.COMPLETED
@@ -65,6 +71,11 @@ def test_maintenance_planner_renew_only_update():
 def test_maintenance_manager_workflow_only_update():
     assert is_maintenance_manager_workflow_only_update(
         "Maintenance Manager",
+        WorkStatus.FOR_REVIEW,
+        {"work_status": WorkStatus.APPROVED},
+    )
+    assert is_maintenance_manager_workflow_only_update(
+        "Mechanic - Maintenance Manager",
         WorkStatus.FOR_REVIEW,
         {"work_status": WorkStatus.APPROVED},
     )

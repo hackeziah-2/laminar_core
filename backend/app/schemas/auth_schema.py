@@ -25,6 +25,7 @@ class AccountMe(BaseModel):
 
     full_name: str
     role: Optional[str] = None
+    access_role: Optional[str] = None
     designation: Optional[str] = None
     email: Optional[str] = None
     username: str

@@ -14,7 +14,7 @@ class AccountInformation(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     middle_name = Column(String(100), nullable=True)
     
     username = Column(String(100), unique=True, nullable=False, index=True)
-    email = Column(String(150), unique=True, nullable=True, index=True)
+    email = Column(String(150), unique=False, nullable=True, index=True)
     password = Column(String(255), nullable=False)
     
     designation = Column(String(100), nullable=True)

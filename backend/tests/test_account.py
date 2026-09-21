@@ -72,6 +72,33 @@ def test_create_account_information_duplicate_username(client: TestClient):
     assert "already exists" in response2.json()["detail"].lower()
 
 
+def test_create_account_information_allows_duplicate_email(client: TestClient):
+    """Test creating accounts that share the same email."""
+    shared_email = "shared.email@example.com"
+    first = {
+        "first_name": "John",
+        "last_name": "Doe",
+        "username": "jdoe_shared_email",
+        "email": shared_email,
+        "password": "securepassword123",
+        "status": True,
+    }
+    second = {
+        "first_name": "Jane",
+        "last_name": "Smith",
+        "username": "jsmith_shared_email",
+        "email": shared_email,
+        "password": "securepassword123",
+        "status": True,
+    }
+    response1 = client.post("/api/v1/account-information/", json=first)
+    assert response1.status_code == 201
+    response2 = client.post("/api/v1/account-information/", json=second)
+    assert response2.status_code == 201
+    assert response1.json()["email"] == shared_email
+    assert response2.json()["email"] == shared_email
+
+
 def test_get_account_information(client: TestClient):
     """Test getting a single account information by ID."""
     # Create account first
@@ -201,6 +228,38 @@ def test_update_account_information_duplicate_username(client: TestClient):
     )
     assert response.status_code == 400
     assert "already exists" in response.json()["detail"].lower()
+
+
+def test_update_account_information_allows_duplicate_email(client: TestClient):
+    """Test updating an account to reuse another account's email."""
+    first = {
+        "first_name": "John",
+        "last_name": "Doe",
+        "username": "jdoe_update_email",
+        "email": "first.update@example.com",
+        "password": "securepassword123",
+        "status": True,
+    }
+    second = {
+        "first_name": "Jane",
+        "last_name": "Smith",
+        "username": "jsmith_update_email",
+        "email": "second.update@example.com",
+        "password": "securepassword123",
+        "status": True,
+    }
+    create1 = client.post("/api/v1/account-information/", json=first)
+    create2 = client.post("/api/v1/account-information/", json=second)
+    assert create1.status_code == 201
+    assert create2.status_code == 201
+    account_id2 = create2.json()["id"]
+
+    response = client.put(
+        f"/api/v1/account-information/{account_id2}",
+        json={"email": first["email"]},
+    )
+    assert response.status_code == 200
+    assert response.json()["email"] == first["email"]
 
 
 def test_update_account_information_not_found(client: TestClient):

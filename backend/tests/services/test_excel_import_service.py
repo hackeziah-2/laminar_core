@@ -1,6 +1,8 @@
 """Service-layer tests for Excel import orchestration."""
 from __future__ import annotations
 
+import io
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,10 +26,14 @@ from tests.factories.import_files import aircraft_csv_bytes
 class _MockUploadFile:
     def __init__(self, filename: str, content: bytes) -> None:
         self.filename = filename
-        self._content = content
+        self.content_type = None
+        self._buffer = io.BytesIO(content)
 
-    async def read(self) -> bytes:
-        return self._content
+    async def read(self, size: int = -1) -> bytes:
+        return self._buffer.read(size if size is not None and size >= 0 else -1)
+
+    async def close(self) -> None:
+        self._buffer.close()
 
 
 @pytest.mark.asyncio

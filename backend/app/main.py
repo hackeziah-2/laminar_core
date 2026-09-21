@@ -3,7 +3,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from pydantic.json import ENCODERS_BY_TYPE
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -55,7 +55,9 @@ from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
 from app.websocket.notification_broker import start_notification_subscriber
 from app.services.file_upload_service import (
     is_safe_module_folder,
+    reject_if_content_length_too_large,
     save_module_upload,
+    schedule_post_upload_work,
 )
 
 def _isoformat_ph(dt: datetime) -> str:
@@ -258,6 +260,8 @@ async def download_file_by_name(
     status_code=201,
 )
 async def upload_file(
+    request: Request,
+    background_tasks: BackgroundTasks,
     module_folder: str,
     file: UploadFile = File(...),
     name: Optional[str] = Query(
@@ -269,7 +273,14 @@ async def upload_file(
     name_override = name.strip() if name and name.strip() else None
     if name_override and (".." in name_override or "/" in name_override or "\\" in name_override):
         raise HTTPException(status_code=400, detail="Invalid filename")
-    return await save_module_upload(file, module_folder, name_override=name_override)
+    reject_if_content_length_too_large(request.headers.get("content-length"))
+    result = await save_module_upload(file, module_folder, name_override=name_override)
+    background_tasks.add_task(
+        schedule_post_upload_work,
+        result["file_path"],
+        result["size_bytes"],
+    )
+    return result
 
 
 app.include_router(flights_router.router)
