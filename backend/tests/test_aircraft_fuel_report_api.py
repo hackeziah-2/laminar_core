@@ -41,7 +41,7 @@ async def _seed() -> dict:
             AircraftTechnicalLog(
                 aircraft_fk=ac1.id,
                 sequence_no="1001",
-                work_status=WorkStatus.APPROVED,
+                work_status=WorkStatus.PENDING,
                 origin_date=date(2026, 1, 10),
                 airframe_run_time=Decimal("2.00"),
                 fuel_qty_left_prior_departure=Decimal("18"),
@@ -56,7 +56,7 @@ async def _seed() -> dict:
             AircraftTechnicalLog(
                 aircraft_fk=ac1.id,
                 sequence_no="1002",
-                work_status=WorkStatus.COMPLETED,
+                work_status=WorkStatus.PENDING,
                 origin_date=date(2026, 1, 20),
                 airframe_run_time=Decimal("0"),
                 fuel_qty_left_prior_departure=Decimal("10"),
@@ -70,7 +70,7 @@ async def _seed() -> dict:
             AircraftTechnicalLog(
                 aircraft_fk=ac2.id,
                 sequence_no="2001",
-                work_status=WorkStatus.APPROVED,
+                work_status=WorkStatus.PENDING,
                 origin_date=date(2026, 2, 5),
                 airframe_run_time=Decimal("1.50"),
                 fuel_qty_left_prior_departure=Decimal("20"),
@@ -85,7 +85,7 @@ async def _seed() -> dict:
             AircraftTechnicalLog(
                 aircraft_fk=ac2.id,
                 sequence_no="2002",
-                work_status=WorkStatus.APPROVED,
+                work_status=WorkStatus.PENDING,
                 origin_date=date(2026, 2, 15),
                 airframe_run_time=Decimal("1.00"),
                 fuel_qty_left_prior_departure=None,
@@ -96,11 +96,11 @@ async def _seed() -> dict:
                 oil_qty_after_on_blks=Decimal("1"),
                 number_of_landings=1,
             ),
-            # FOR_REVIEW excluded
+            # APPROVED excluded
             AircraftTechnicalLog(
                 aircraft_fk=ac1.id,
                 sequence_no="1003",
-                work_status=WorkStatus.FOR_REVIEW,
+                work_status=WorkStatus.APPROVED,
                 origin_date=date(2026, 1, 25),
                 airframe_run_time=Decimal("9"),
                 fuel_qty_left_prior_departure=Decimal("50"),
@@ -108,6 +108,19 @@ async def _seed() -> dict:
                 fuel_qty_left_after_on_blks=Decimal("1"),
                 fuel_qty_right_after_on_blks=Decimal("1"),
                 number_of_landings=9,
+            ),
+            # COMPLETED excluded
+            AircraftTechnicalLog(
+                aircraft_fk=ac1.id,
+                sequence_no="1004",
+                work_status=WorkStatus.COMPLETED,
+                origin_date=date(2026, 1, 26),
+                airframe_run_time=Decimal("8"),
+                fuel_qty_left_prior_departure=Decimal("40"),
+                fuel_qty_right_prior_departure=Decimal("40"),
+                fuel_qty_left_after_on_blks=Decimal("1"),
+                fuel_qty_right_after_on_blks=Decimal("1"),
+                number_of_landings=8,
             ),
         ]
         session.add_all(logs)
@@ -177,7 +190,7 @@ def test_single_zero_run_time_row_burn_is_null(client: TestClient):
                 AircraftTechnicalLog(
                     aircraft_fk=ac.id,
                     sequence_no="Z1",
-                    work_status=WorkStatus.APPROVED,
+                    work_status=WorkStatus.PENDING,
                     origin_date=date(2026, 5, 1),
                     airframe_run_time=Decimal("0"),
                     fuel_qty_left_prior_departure=Decimal("10"),
@@ -304,7 +317,7 @@ def test_yoy_and_aircraft_month_breakdown(client: TestClient):
                     AircraftTechnicalLog(
                         aircraft_fk=ac_a.id,
                         sequence_no="Y1",
-                        work_status=WorkStatus.APPROVED,
+                        work_status=WorkStatus.PENDING,
                         origin_date=date(2025, 7, 1),
                         airframe_run_time=Decimal("100"),
                         fuel_qty_left_prior_departure=Decimal("50"),
@@ -316,7 +329,7 @@ def test_yoy_and_aircraft_month_breakdown(client: TestClient):
                     AircraftTechnicalLog(
                         aircraft_fk=ac_a.id,
                         sequence_no="Y2",
-                        work_status=WorkStatus.APPROVED,
+                        work_status=WorkStatus.PENDING,
                         origin_date=date(2026, 7, 1),
                         airframe_run_time=Decimal("400"),
                         fuel_qty_left_prior_departure=Decimal("200"),
@@ -329,7 +342,7 @@ def test_yoy_and_aircraft_month_breakdown(client: TestClient):
                     AircraftTechnicalLog(
                         aircraft_fk=ac_a.id,
                         sequence_no="A1",
-                        work_status=WorkStatus.APPROVED,
+                        work_status=WorkStatus.PENDING,
                         origin_date=date(2025, 4, 10),
                         airframe_run_time=Decimal("10"),
                         fuel_qty_left_prior_departure=Decimal("100"),
@@ -341,7 +354,7 @@ def test_yoy_and_aircraft_month_breakdown(client: TestClient):
                     AircraftTechnicalLog(
                         aircraft_fk=ac_c.id,
                         sequence_no="A1b",
-                        work_status=WorkStatus.APPROVED,
+                        work_status=WorkStatus.PENDING,
                         origin_date=date(2025, 4, 10),
                         airframe_run_time=Decimal("10"),
                         fuel_qty_left_prior_departure=Decimal("100"),
@@ -353,7 +366,7 @@ def test_yoy_and_aircraft_month_breakdown(client: TestClient):
                     AircraftTechnicalLog(
                         aircraft_fk=ac_b.id,
                         sequence_no="A2",
-                        work_status=WorkStatus.COMPLETED,
+                        work_status=WorkStatus.PENDING,
                         origin_date=date(2025, 4, 11),
                         airframe_run_time=Decimal("10"),
                         fuel_qty_left_prior_departure=Decimal("30"),
@@ -422,7 +435,7 @@ def test_aircraft_month_zero_hours_burn_null(client: TestClient):
                 AircraftTechnicalLog(
                     aircraft_fk=ac.id,
                     sequence_no="ZB1",
-                    work_status=WorkStatus.APPROVED,
+                    work_status=WorkStatus.PENDING,
                     origin_date=date(2026, 8, 1),
                     airframe_run_time=Decimal("0"),
                     fuel_qty_left_prior_departure=Decimal("10"),
@@ -477,7 +490,7 @@ def test_off_blocks_date_filter_excludes_null_and_uses_exclusive_end(
                     AircraftTechnicalLog(
                         aircraft_fk=ac.id,
                         sequence_no="OB-1",
-                        work_status=WorkStatus.APPROVED,
+                        work_status=WorkStatus.PENDING,
                         origin_date=date(2023, 1, 15),
                         airframe_run_time=Decimal("10"),
                         number_of_landings=1,
@@ -486,7 +499,7 @@ def test_off_blocks_date_filter_excludes_null_and_uses_exclusive_end(
                     AircraftTechnicalLog(
                         aircraft_fk=ac.id,
                         sequence_no="OB-2",
-                        work_status=WorkStatus.APPROVED,
+                        work_status=WorkStatus.PENDING,
                         origin_date=None,
                         airframe_run_time=Decimal("99"),
                         number_of_landings=1,
@@ -495,7 +508,7 @@ def test_off_blocks_date_filter_excludes_null_and_uses_exclusive_end(
                     AircraftTechnicalLog(
                         aircraft_fk=ac.id,
                         sequence_no="OB-3",
-                        work_status=WorkStatus.APPROVED,
+                        work_status=WorkStatus.PENDING,
                         origin_date=date(2024, 1, 1),
                         airframe_run_time=Decimal("50"),
                         number_of_landings=1,
@@ -504,7 +517,7 @@ def test_off_blocks_date_filter_excludes_null_and_uses_exclusive_end(
                     AircraftTechnicalLog(
                         aircraft_fk=ac.id,
                         sequence_no="OB-4",
-                        work_status=WorkStatus.APPROVED,
+                        work_status=WorkStatus.PENDING,
                         origin_date=date(2023, 12, 31),
                         airframe_run_time=Decimal("5"),
                         number_of_landings=1,
