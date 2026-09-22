@@ -3,12 +3,23 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
+import re
+import codecs
+from functools import wraps
+import hashlib
+import tempfile
+import threading
+import time
+import weakref
+import zipfile
+import struct
+from xml.etree import ElementTree
 import os
 import uuid
 from pathlib import Path
 from typing import Optional
 
-import aiofiles
 from fastapi import HTTPException, UploadFile, status
 
 from app.upload_config import UPLOAD_DIR, ensure_uploads_dir
@@ -97,7 +108,7 @@ def upload_timeout_seconds() -> float:
         value = float(raw)
     except ValueError:
         return DEFAULT_UPLOAD_TIMEOUT_SECONDS
-    return value if value > 0 else DEFAULT_UPLOAD_TIMEOUT_SECONDS
+    return value if math.isfinite(value) and value > 0 else DEFAULT_UPLOAD_TIMEOUT_SECONDS
 
 
 def is_safe_module_folder(name: str) -> bool:
@@ -113,7 +124,9 @@ def sanitize_filename(name: str) -> str:
     if not base or ".." in base:
         return "upload"
     safe = "".join(c for c in base if c.isalnum() or c in "._- ")
-    return safe or "upload"
+    suffix = Path(safe).suffix
+    stem = safe[:-len(suffix)] if suffix else safe
+    return (stem.encode("utf-8")[:160].decode("utf-8", errors="ignore") or "upload") + suffix[:20]
 
 
 def build_storage_filename(original_name: str, *, name_override: Optional[str] = None) -> str:
@@ -124,7 +137,7 @@ def build_storage_filename(original_name: str, *, name_override: Optional[str] =
 
 def sniff_content_type(header: bytes, extension: str) -> str:
     """Detect MIME from magic bytes. Office ZIP types use the declared extension."""
-    if header.startswith(b"%PDF"):
+    if header.startswith(b"%PDF-"):
         return "application/pdf"
     if header.startswith(b"\xff\xd8\xff"):
         return "image/jpeg"
@@ -163,7 +176,7 @@ def resolve_stored_upload_path(file_path: str) -> Optional[Path]:
     except OSError:
         return None
     upload_root = UPLOAD_DIR.resolve()
-    if not str(path).startswith(str(upload_root)) or not path.is_file():
+    if not path.is_relative_to(upload_root) or not path.is_file():
         return None
     return path
 
@@ -248,6 +261,8 @@ def _validate_upload_file(file: UploadFile) -> str:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Uploaded file must include a filename",
         )
+    if len(original.encode("utf-8")) > 1024 or any(ord(c) < 32 for c in original):
+        raise HTTPException(status_code=400, detail="Invalid filename")
     return original
 
 
@@ -271,85 +286,193 @@ async def _close_upload(upload_file: UploadFile) -> None:
         logger.debug("Upload file close failed", exc_info=True)
 
 
-async def _read_upload_chunk(upload_file: UploadFile, chunk_size: int) -> bytes:
-    chunk = await upload_file.read(chunk_size)
-    return chunk or b""
+_copy_slots = weakref.WeakKeyDictionary()
 
 
-async def _stream_upload_to_temp(
-    upload_file: UploadFile,
-    part_path: Path,
-    *,
-    max_bytes: int,
-    extension: str,
-) -> tuple[int, str]:
-    """Write chunks to a .part file; return (size, sniffed_content_type)."""
+def _slots() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    if loop not in _copy_slots:
+        _copy_slots[loop] = asyncio.Semaphore(4)
+    return _copy_slots[loop]
+
+
+def _validate_container(path: Path, extension: str, tail: bytes) -> None:
+    """Bounded structural checks; not malware scanning or full document rendering."""
+    invalid = HTTPException(status_code=400, detail="File is corrupted or incomplete.")
+    if extension == ".pdf":
+        match = re.search(rb"startxref\s+(\d+)\s+%%EOF\s*$", tail)
+        if not match:
+            raise invalid
+        offset = int(match.group(1))
+        if offset <= 0 or offset >= path.stat().st_size:
+            raise invalid
+        with path.open("rb") as source:
+            source.seek(offset)
+            xref = source.read(4096)
+        if not xref.startswith(b"xref") and not (
+            re.match(rb"\d+\s+\d+\s+obj\b", xref) and re.search(rb"/Type\s*/XRef", xref)
+        ):
+            raise invalid
+    elif extension in {".jpg", ".jpeg", ".png", ".gif", ".webp"}:
+        from PIL import Image
+        try:
+            with Image.open(path) as image:
+                if image.width * image.height > 40_000_000:
+                    raise invalid
+                image.verify()
+            if extension in {".jpg", ".jpeg"} and not tail.rstrip().endswith(b"\xff\xd9"):
+                raise invalid
+        except (OSError, ValueError, SyntaxError, Image.DecompressionBombError) as exc:
+            raise invalid from exc
+    elif extension in {".docx", ".xlsx"}:
+        # Reject ZIP64/massive directories before ZipFile allocates entries.
+        with path.open("rb") as source:
+            source.seek(max(0, path.stat().st_size - 65557))
+            end = source.read(65557)
+        marker = end.rfind(b"PK\x05\x06")
+        if marker < 0 or len(end) - marker < 22:
+            raise invalid
+        count = struct.unpack_from("<H", end, marker + 10)[0]
+        if count > 4096:
+            raise invalid
+        try:
+            with zipfile.ZipFile(path) as archive:
+                entries = archive.infolist()
+                names = {entry.filename for entry in entries}
+                required = "word/document.xml" if extension == ".docx" else "xl/workbook.xml"
+                if not {"[Content_Types].xml", required}.issubset(names):
+                    raise invalid
+                if len(entries) > 4096 or sum(e.file_size for e in entries) > 100 * 1024 * 1024:
+                    raise invalid
+                for entry in entries:
+                    if entry.flag_bits & 1 or entry.file_size > max(1, entry.compress_size) * 200:
+                        raise invalid
+                # Check core XML + CRC, without expanding every embedded object.
+                for name in ["[Content_Types].xml", required]:
+                    if archive.getinfo(name).file_size > 1024 * 1024:
+                        raise invalid
+                    data = archive.read(name)
+                    if b"<!DOCTYPE" in data or b"<!ENTITY" in data:
+                        raise invalid
+                    ElementTree.fromstring(data)
+        except (OSError, ValueError, zipfile.BadZipFile, ElementTree.ParseError, RuntimeError) as exc:
+            raise invalid from exc
+    elif extension in {".doc", ".xls"}:
+        import olefile
+        try:
+            with olefile.OleFileIO(path) as document:
+                expected = ["WordDocument"] if extension == ".doc" else ["Workbook", "Book"]
+                if not any(document.exists(name) for name in expected):
+                    raise invalid
+        except (OSError, ValueError) as exc:
+            raise invalid from exc
+
+
+def _copy_upload(source, dest_path: Path, max_bytes: int, extension: str,
+                 stop: threading.Event, published: threading.Event, deadline: float):
+    """One worker owns the source, copy, hash, validation and atomic publication."""
+    fd, temporary = tempfile.mkstemp(prefix=".upload-", suffix=".part", dir=dest_path.parent)
+    part_path = Path(temporary)
+    digest = hashlib.sha256()
     total = 0
-    sniffed = ""
-    async with aiofiles.open(part_path, "wb") as output:
-        while True:
-            chunk = await _read_upload_chunk(upload_file, CHUNK_SIZE)
-            if not chunk:
-                break
-            total += len(chunk)
-            if total > max_bytes:
-                raise HTTPException(
-                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                    detail=f"File exceeds the {max_bytes} byte limit.",
-                )
-            if not sniffed:
-                sniffed = _validate_magic(chunk[:64], extension)
-            await output.write(chunk)
-        await output.flush()
-    if total == 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Uploaded file is empty",
-        )
-    return total, sniffed
+    tail = b""
+    decoder = codecs.getincrementaldecoder("utf-8-sig")() if extension == ".csv" else None
+    def check():
+        if stop.is_set():
+            raise InterruptedError("Upload cancelled")
+        if time.monotonic() >= deadline:
+            raise TimeoutError("Upload timed out")
+    try:
+        with os.fdopen(fd, "wb") as output:
+            header = source.read(64)
+            while len(header) < 64:
+                more = source.read(64 - len(header))
+                if not more:
+                    break
+                header += more
+            if not header:
+                raise HTTPException(status_code=400, detail="Uploaded file is empty")
+            sniffed = _validate_magic(header, extension)
+            chunk = header
+            while chunk:
+                check()
+                total += len(chunk)
+                if total > max_bytes:
+                    raise HTTPException(status_code=413, detail=f"File exceeds the {max_bytes} byte limit.")
+                if decoder:
+                    try:
+                        if any(c in chunk for c in (b"\x00", b"\x01", b"\x02")):
+                            raise UnicodeError("Binary CSV")
+                        decoder.decode(chunk)
+                    except UnicodeError as exc:
+                        raise HTTPException(status_code=400, detail="CSV must contain UTF-8 text.") from exc
+                digest.update(chunk)
+                output.write(chunk)
+                tail = chunk[-1024:] if len(chunk) >= 1024 else (tail + chunk)[-1024:]
+                chunk = source.read(min(CHUNK_SIZE, max_bytes - total + 1))
+            if decoder:
+                try:
+                    decoder.decode(b"", final=True)
+                except UnicodeError as exc:
+                    raise HTTPException(status_code=400, detail="CSV must contain UTF-8 text.") from exc
+            output.flush()
+        check()
+        _validate_container(part_path, extension, tail)
+        with part_path.open("rb") as durable:
+            os.fsync(durable.fileno())
+        check()
+        # link is atomic and fails on collision; never delete/overwrite an existing file.
+        os.link(part_path, dest_path)
+        published.set()
+        directory = os.open(dest_path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+        return total, sniffed, digest.hexdigest()
+    finally:
+        part_path.unlink(missing_ok=True)
 
 
 async def _write_upload_to_path(
-    upload_file: UploadFile,
-    dest_path: Path,
-    *,
-    max_bytes: int,
-    extension: str,
-    timeout_seconds: float,
-) -> tuple[int, str]:
-    """Stream to a temp file, then atomically replace into dest_path."""
-    part_path = dest_path.with_name(f"{dest_path.name}.part")
-    _unlink_quietly(part_path, dest_path)
-    try:
-        size_bytes, sniffed = await asyncio.wait_for(
-            _stream_upload_to_temp(
-                upload_file,
-                part_path,
-                max_bytes=max_bytes,
-                extension=extension,
-            ),
-            timeout=timeout_seconds,
-        )
-        os.replace(part_path, dest_path)
-        return size_bytes, sniffed
-    except asyncio.TimeoutError as exc:
-        _unlink_quietly(part_path, dest_path)
-        raise HTTPException(
-            status_code=status.HTTP_408_REQUEST_TIMEOUT,
-            detail="Upload timed out. Please try again.",
-        ) from exc
-    except HTTPException:
-        _unlink_quietly(part_path, dest_path)
-        raise
-    except OSError as exc:
-        _unlink_quietly(part_path, dest_path)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to save file: {exc}",
-        ) from exc
-    except Exception:
-        _unlink_quietly(part_path, dest_path)
-        raise
+    upload_file: UploadFile, dest_path: Path, *, max_bytes: int,
+    extension: str, timeout_seconds: float,
+) -> tuple[int, str, str]:
+    known_size = getattr(upload_file, "size", None)
+    if known_size is not None and known_size > max_bytes:
+        raise HTTPException(status_code=413, detail=f"File exceeds the {max_bytes} byte limit.")
+    stop, published = threading.Event(), threading.Event()
+    async with _slots():
+        job = asyncio.create_task(asyncio.to_thread(
+            _copy_upload, upload_file.file, dest_path, max_bytes, extension,
+            stop, published, time.monotonic() + timeout_seconds,
+        ))
+        try:
+            return await asyncio.wait_for(asyncio.shield(job), timeout_seconds)
+        except BaseException as exc:
+            stop.set()
+            # A thread cannot be cancelled: drain it before closing its input or unlinking.
+            while not job.done():
+                try:
+                    await asyncio.shield(job)
+                except asyncio.CancelledError:
+                    continue
+                except BaseException:
+                    break
+            try:
+                job.result()
+            except BaseException:
+                pass
+            if published.is_set():
+                _unlink_quietly(dest_path)
+            if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+                raise HTTPException(status_code=408, detail="Upload timed out. Please try again.") from exc
+            if isinstance(exc, FileExistsError):
+                raise HTTPException(status_code=409, detail="Upload destination already exists.") from exc
+            if isinstance(exc, OSError):
+                logger.exception("Failed to store upload")
+                raise HTTPException(status_code=500, detail="Failed to save file.") from exc
+            raise
 
 
 def schedule_post_upload_work(file_path: str, size_bytes: int) -> None:
@@ -367,6 +490,18 @@ def schedule_post_upload_work(file_path: str, size_bytes: int) -> None:
         )
 
 
+def _close_after_call(function):
+    @wraps(function)
+    async def wrapped(*args, **kwargs):
+        file = args[0] if args else kwargs.get("file", kwargs.get("upload_file"))
+        try:
+            return await function(*args, **kwargs)
+        finally:
+            await _close_upload(file)
+    return wrapped
+
+
+@_close_after_call
 async def save_upload(file: UploadFile) -> dict:
     """Stream an upload into UPLOAD_DIR with a unique `{uuid}{ext}` name.
 
@@ -381,7 +516,7 @@ async def save_upload(file: UploadFile) -> dict:
     dest_path = UPLOAD_DIR / stored_name
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        size_bytes, sniffed = await _write_upload_to_path(
+        size_bytes, sniffed, checksum = await _write_upload_to_path(
             file,
             dest_path,
             max_bytes=max_upload_bytes(),
@@ -403,6 +538,7 @@ async def save_upload(file: UploadFile) -> dict:
     }
 
 
+@_close_after_call
 async def save_module_upload(
     upload_file: UploadFile,
     module_folder: str,
@@ -410,6 +546,8 @@ async def save_module_upload(
     name_override: Optional[str] = None,
     max_bytes: Optional[int] = None,
     allowed_extensions: Optional[set[str]] = None,
+    include_checksum: bool = False,
+    track_pending: bool = False,
 ) -> dict:
     """
     Persist an upload under uploads/{module_folder}/ with a UUID-prefixed filename.
@@ -424,15 +562,15 @@ async def save_module_upload(
 
     limit = max_bytes if max_bytes is not None else max_upload_bytes()
     original_name = _validate_upload_file(upload_file)
-    extension = _validate_extension(
-        name_override or original_name, allowed=allowed_extensions
-    )
+    extension = _validate_extension(original_name, allowed=allowed_extensions)
+    if name_override and _validate_extension(name_override, allowed_extensions) != extension:
+        raise HTTPException(status_code=400, detail="Filename override must preserve the extension.")
     _validate_declared_mime(upload_file.content_type, extension)
     storage_name = build_storage_filename(original_name, name_override=name_override)
 
     ensure_uploads_dir()
     target_dir = (UPLOAD_DIR / module_folder).resolve()
-    if not str(target_dir).startswith(str(UPLOAD_DIR.resolve())):
+    if not target_dir.is_relative_to(UPLOAD_DIR.resolve()):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid upload destination",
@@ -440,19 +578,27 @@ async def save_module_upload(
     target_dir.mkdir(parents=True, exist_ok=True)
 
     dest_path = target_dir / storage_name
+    pending = dest_path.with_name(dest_path.name + ".pending")
+    if track_pending:
+        pending.touch(exist_ok=False)
     try:
-        size_bytes, sniffed = await _write_upload_to_path(
+        size_bytes, sniffed, checksum = await _write_upload_to_path(
             upload_file,
             dest_path,
             max_bytes=limit,
             extension=extension,
             timeout_seconds=upload_timeout_seconds(),
         )
+    except BaseException:
+        if track_pending:
+            _unlink_quietly(pending)
+        raise
     finally:
         await _close_upload(upload_file)
 
     relative = f"{module_folder}/{storage_name}"
     return {
+        **({"sha256": checksum} if include_checksum else {}),
         "file_path": f"uploads/{relative}",
         "filename": storage_name,
         "size_bytes": size_bytes,
@@ -463,12 +609,14 @@ async def save_module_upload(
     }
 
 
+@_close_after_call
 async def save_upload_to_exact_path(
     upload_file: UploadFile,
     dest_path: Path,
     *,
     max_bytes: Optional[int] = None,
     allowed_extensions: Optional[set[str]] = None,
+    track_pending: bool = False,
 ) -> int:
     """Stream an upload to a caller-chosen path (e.g. ATL import temp files)."""
     limit = max_bytes if max_bytes is not None else max_upload_bytes()
@@ -476,8 +624,11 @@ async def save_upload_to_exact_path(
     extension = _validate_extension(original_name, allowed=allowed_extensions)
     _validate_declared_mime(upload_file.content_type, extension)
     dest_path.parent.mkdir(parents=True, exist_ok=True)
+    pending = dest_path.with_name(dest_path.name + ".pending")
+    if track_pending:
+        pending.touch(exist_ok=False)
     try:
-        size_bytes, _sniffed = await _write_upload_to_path(
+        size_bytes, _sniffed, _checksum = await _write_upload_to_path(
             upload_file,
             dest_path,
             max_bytes=limit,
@@ -485,6 +636,10 @@ async def save_upload_to_exact_path(
             timeout_seconds=upload_timeout_seconds(),
         )
         return size_bytes
+    except BaseException:
+        if track_pending:
+            _unlink_quietly(pending)
+        raise
     finally:
         await _close_upload(upload_file)
 
@@ -495,6 +650,7 @@ async def persist_optional_upload(
     *,
     name_override: Optional[str] = None,
     path_style: str = "uploads",
+    session=None,
 ) -> Optional[str]:
     """Stream an optional multipart file; return stored relative path or None.
 
@@ -506,11 +662,17 @@ async def persist_optional_upload(
         return None
     if not getattr(upload_file, "read", None):
         return None
-    result = await save_module_upload(
-        upload_file,
-        module_folder,
-        name_override=name_override,
-    )
+    from app.services.upload_transaction import release_upload_reads
+    async with release_upload_reads(session):
+        result = await save_module_upload(
+            upload_file,
+            module_folder,
+            name_override=name_override,
+            track_pending=session is not None,
+        )
+    if session is not None:
+        from app.services.upload_transaction import track_upload
+        track_upload(session, UPLOAD_DIR / module_folder / result["filename"])
     if path_style == "module":
         return f"{module_folder}/{result['filename']}"
     return result["file_path"]

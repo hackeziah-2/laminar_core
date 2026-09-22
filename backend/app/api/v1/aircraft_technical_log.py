@@ -53,9 +53,9 @@ def _round_optional_float_2(value: Any) -> Optional[float]:
         return None
 
 
-async def _save_atl_upload(form_file: Any, subdir: str) -> Optional[str]:
+async def _save_atl_upload(form_file: Any, subdir: str, session=None) -> Optional[str]:
     """Stream an ATL file into uploads/<subdir>/; return '{subdir}/{unique}' or None."""
-    return await persist_optional_upload(form_file, subdir, path_style="module")
+    return await persist_optional_upload(form_file, subdir, path_style="module", session=session)
 
 
 router = APIRouter(
@@ -468,7 +468,7 @@ async def api_create(
     return await aircraft_technical_log_read_persisted(session, entry)
 
 
-async def _parse_update_payload(request: Request) -> aircraft_technical_log_schema.AircraftTechnicalLogUpdate:
+async def _parse_update_payload(request: Request, session=None) -> aircraft_technical_log_schema.AircraftTechnicalLogUpdate:
     """Parse request body as either JSON or multipart form with 'data'/'json_data' JSON string (for file upload)."""
     content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
     if content_type == "multipart/form-data":
@@ -497,11 +497,11 @@ async def _parse_update_payload(request: Request) -> aircraft_technical_log_sche
         white_atl_file = form.get("white_atl")
         dfp_file = form.get("dfp")
         if white_atl_file:
-            saved = await _save_atl_upload(white_atl_file, "white_atl")
+            saved = await _save_atl_upload(white_atl_file, "white_atl", session=session)
             if saved:
                 data["white_atl"] = saved
         if dfp_file:
-            saved = await _save_atl_upload(dfp_file, "dfp")
+            saved = await _save_atl_upload(dfp_file, "dfp", session=session)
             if saved:
                 data["dfp"] = saved
     else:
@@ -531,7 +531,7 @@ async def api_update(
     current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update an Aircraft Technical Log entry. Accepts application/json body or multipart/form-data with 'data' or 'json_data' (JSON string). For multipart, optional form fields 'white_atl' and 'dfp' are file uploads; saved under uploads/white_atl/ and uploads/dfp/. Download via GET /api/v1/white_atl/download?name=<filename> and /api/v1/dfp/download?name=<filename>."""
-    log_in = await _parse_update_payload(request)
+    log_in = await _parse_update_payload(request, session=session)
     updated = await update_aircraft_technical_log(
         session=session,
         log_id=log_id,

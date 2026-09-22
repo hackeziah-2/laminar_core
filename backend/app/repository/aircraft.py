@@ -123,8 +123,8 @@ async def _find_active_aircraft_by_field(
     return result.scalar_one_or_none()
 
 
-async def _persist_upload_file(upload_file: UploadFile) -> str:
-    stored = await persist_optional_upload(upload_file, "aircraft")
+async def _persist_upload_file(upload_file: UploadFile, session=None) -> str:
+    stored = await persist_optional_upload(upload_file, "aircraft", session=session)
     if not stored:
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
@@ -309,11 +309,11 @@ async def create_aircraft_with_file(
 ):  
     engine_path = None
     if engine_file:
-        engine_path = await _persist_upload_file(engine_file)
+        engine_path = await _persist_upload_file(engine_file, session=session)
 
     propeller_path = None
     if propeller_file:
-        propeller_path = await _persist_upload_file(propeller_file)
+        propeller_path = await _persist_upload_file(propeller_file, session=session)
 
     aircraft_data = data.dict()
 
@@ -390,11 +390,11 @@ async def update_aircraft_with_file(
 
     # --- Handle engine file ---
     if engine_file:
-        update_data["engine_arc"] = await _persist_upload_file(engine_file)
+        update_data["engine_arc"] = await _persist_upload_file(engine_file, session=session)
 
     # --- Handle propeller file ---
     if propeller_file:
-        update_data["propeller_arc"] = await _persist_upload_file(propeller_file)
+        update_data["propeller_arc"] = await _persist_upload_file(propeller_file, session=session)
 
     # --- Uniqueness checks (exclude current aircraft) ---
     if "registration" in update_data:

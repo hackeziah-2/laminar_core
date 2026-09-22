@@ -16,8 +16,9 @@ from app.database import set_audit_fields
 async def _store_logbook_upload(
     upload_file: Optional[UploadFile],
     target: dict,
+    session=None,
 ) -> None:
-    stored = await persist_optional_upload(upload_file, "logbooks")
+    stored = await persist_optional_upload(upload_file, "logbooks", session=session)
     if stored:
         target["upload_file"] = stored
 from app.models.account import AccountInformation
@@ -178,7 +179,7 @@ async def create_engine_logbook(
 ) -> EngineLogbookRead:
     """Create a new Engine Logbook entry (with optional component_parts)."""
     logbook_data = data.dict(exclude={"component_parts"})
-    await _store_logbook_upload(upload_file, logbook_data)
+    await _store_logbook_upload(upload_file, logbook_data, session=session)
 
     entry = EngineLogbook(**logbook_data)
     try:
@@ -355,7 +356,7 @@ async def update_engine_logbook(
 
     old_data_snapshot = serialize_audit_data(obj)
     update_data = logbook_in.dict(exclude_unset=True, exclude={"component_parts"})
-    await _store_logbook_upload(upload_file, update_data)
+    await _store_logbook_upload(upload_file, update_data, session=session)
 
     for k, v in update_data.items():
         setattr(obj, k, v)
@@ -457,7 +458,7 @@ async def create_airframe_logbook(
 ) -> AirframeLogbookRead:
     """Create a new Airframe Logbook entry (with optional component_parts)."""
     logbook_data = data.dict(exclude={"component_parts"})
-    await _store_logbook_upload(upload_file, logbook_data)
+    await _store_logbook_upload(upload_file, logbook_data, session=session)
 
     entry = AirframeLogbook(**logbook_data)
     try:
@@ -635,7 +636,7 @@ async def update_airframe_logbook(
 
     old_data_snapshot = serialize_audit_data(obj)
     update_data = logbook_in.dict(exclude_unset=True, exclude={"component_parts"})
-    await _store_logbook_upload(upload_file, update_data)
+    await _store_logbook_upload(upload_file, update_data, session=session)
 
     for k, v in update_data.items():
         setattr(obj, k, v)
@@ -737,7 +738,7 @@ async def create_avionics_logbook(
 ) -> AvionicsLogbookRead:
     """Create a new Avionics Logbook entry (with optional component_parts)."""
     logbook_data = data.dict(exclude={"component_parts"})
-    await _store_logbook_upload(upload_file, logbook_data)
+    await _store_logbook_upload(upload_file, logbook_data, session=session)
 
     entry = AvionicsLogbook(**logbook_data)
     try:
@@ -921,7 +922,7 @@ async def update_avionics_logbook(
 
     old_data_snapshot = serialize_audit_data(obj)
     update_data = logbook_in.dict(exclude_unset=True, exclude={"component_parts"})
-    await _store_logbook_upload(upload_file, update_data)
+    await _store_logbook_upload(upload_file, update_data, session=session)
 
     for k, v in update_data.items():
         setattr(obj, k, v)
@@ -1025,7 +1026,7 @@ async def create_propeller_logbook(
     logbook_data = data.dict()
     
     # Handle file upload
-    await _store_logbook_upload(upload_file, logbook_data)
+    await _store_logbook_upload(upload_file, logbook_data, session=session)
     
     entry = PropellerLogbook(**logbook_data)
     try:
@@ -1174,7 +1175,7 @@ async def update_propeller_logbook(
     update_data = logbook_in.dict(exclude_unset=True)
     
     # Handle file upload
-    await _store_logbook_upload(upload_file, update_data)
+    await _store_logbook_upload(upload_file, update_data, session=session)
     
     for k, v in update_data.items():
         setattr(obj, k, v)

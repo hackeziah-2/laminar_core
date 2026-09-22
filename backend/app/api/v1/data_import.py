@@ -82,6 +82,8 @@ async def _run_registered_import(
         inject_fields=inject_fields,
         audit_account_id=current_account.id,
     )
+    # Context resolvers only read IDs. Release auth/context reads before copying/parsing.
+    await session.rollback()
     try:
         result = await ExcelImportService.run(file, session, config)
     except AppError as exc:

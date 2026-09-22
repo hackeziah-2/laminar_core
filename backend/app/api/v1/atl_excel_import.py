@@ -1,4 +1,5 @@
 """ATL Excel import with async job progress (POST /import-excel, GET /import-progress/{job_id})."""
+import asyncio
 import uuid
 from pathlib import Path
 from typing import Optional, Union
@@ -103,6 +104,9 @@ async def start_atl_excel_import(
         code = 404 if exc.code == "not_found" else 400
         raise HTTPException(status_code=code, detail=exc.message) from exc
 
+    account_id = current_account.id
+    # Only prerequisite reads have run; release their transaction before file I/O.
+    await session.rollback()
     ensure_atl_import_jobs_dir()
     job_id = str(uuid.uuid4())
     suffix = Path(fn).suffix or ".xlsx"
@@ -113,6 +117,7 @@ async def start_atl_excel_import(
             file,
             dest_path,
             allowed_extensions={".xlsx", ".xls"},
+            track_pending=True,
         )
         await create_import_job(
             session,
@@ -120,17 +125,29 @@ async def start_atl_excel_import(
             temp_file_path=str(dest_path),
             aircraft_fk=resolved_id,
             atl_batch_fk=resolved_batch_id,
-            started_by=current_account.id,
+            started_by=account_id,
             status="PENDING",
             message="Queued for processing",
         )
         await session.commit()
-    except Exception:
-        dest_path.unlink(missing_ok=True)
+        dest_path.with_name(dest_path.name + ".pending").unlink(missing_ok=True)
+    except BaseException:
         await session.rollback()
+        # Avoid deleting a file if COMMIT succeeded but its acknowledgement was lost.
+        from app.database import AsyncSessionLocal
+        try:
+            async with AsyncSessionLocal() as check:
+                persisted = await get_import_job(check, job_id)
+            if persisted is None:
+                dest_path.unlink(missing_ok=True)
+                dest_path.with_name(dest_path.name + ".pending").unlink(missing_ok=True)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("Import upload requires reconciliation: %s", job_id)
         raise
 
-    background_tasks.add_task(process_atl_excel_import_job, job_id)
+    from app.tasks.file_upload import enqueue_atl_import
+    background_tasks.add_task(enqueue_atl_import, job_id)
 
     return AtlExcelImportStartResponse(
         job_id=job_id,

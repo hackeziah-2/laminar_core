@@ -209,7 +209,7 @@ async def create_ad_monitoring(
 ) -> ADMonitoringRead:
     """Create ADMonitoring with optional file upload."""
     ad_data = data.dict()
-    stored = await persist_optional_upload(upload_file, "ad_monitoring")
+    stored = await persist_optional_upload(upload_file, "ad_monitoring", session=session)
     if stored:
         ad_data["file_path"] = stored
     obj = ADMonitoring(**ad_data)
@@ -267,7 +267,7 @@ async def update_ad_monitoring(
         return None
     old_data_snapshot = serialize_audit_data(obj)
     update_data = data.dict(exclude_unset=True)
-    stored = await persist_optional_upload(upload_file, "ad_monitoring")
+    stored = await persist_optional_upload(upload_file, "ad_monitoring", session=session)
     if stored:
         update_data["file_path"] = stored
     for k, v in update_data.items():

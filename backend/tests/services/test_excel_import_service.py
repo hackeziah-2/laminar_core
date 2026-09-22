@@ -28,6 +28,7 @@ class _MockUploadFile:
         self.filename = filename
         self.content_type = None
         self._buffer = io.BytesIO(content)
+        self.file = self._buffer
 
     async def read(self, size: int = -1) -> bytes:
         return self._buffer.read(size if size is not None and size >= 0 else -1)
