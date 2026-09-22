@@ -19,6 +19,8 @@ from app.repository.aircraft_technical_log import (
 )
 from app.schemas.aircraft_technical_log_schema import (
     AircraftTechnicalLogApiRead,
+    AircraftTechnicalLogCreate,
+    AircraftTechnicalLogUpdate,
     ATLPagedItemWithAutoApiRead,
 )
 from tests.conftest import TestSessionLocal
@@ -1145,3 +1147,53 @@ def test_atl_manage_paged_returns_uppercase_signer_names(
     item = next(i for i in response.json()["items"] if i["id"] == log_id)
     assert item["rts_signed_by"] == "JUAN SANTOS DELA CRUZ"
     assert item["pilot_accepted_by"] == "PEDRO REYES"
+
+
+def test_create_tr_requires_tach_and_hobbs_end():
+    with pytest.raises(Exception) as exc_info:
+        AircraftTechnicalLogCreate.parse_obj(
+            {
+                "aircraft_fk": 1,
+                "sequence_no": "001",
+                "nature_of_flight": "TR",
+                "tachometer_end": None,
+                "hobbs_meter_end": "",
+            }
+        )
+    text = str(exc_info.value)
+    assert "This field is required." in text
+    assert "tachometer_end" in text
+    assert "hobbs_meter_end" in text
+
+
+def test_create_prf_requires_off_blocks_and_signature_details():
+    with pytest.raises(Exception) as exc_info:
+        AircraftTechnicalLogCreate.parse_obj(
+            {
+                "aircraft_fk": 1,
+                "sequence_no": "001",
+                "nature_of_flight": "PRF",
+            }
+        )
+    text = str(exc_info.value)
+    assert "origin_date" in text
+    assert "origin_time" in text
+    assert "rts_signed_by" in text
+    assert "pilot_accepted_by" in text
+
+
+def test_update_work_status_skips_nature_required_fields():
+    updated = AircraftTechnicalLogUpdate.parse_obj({"work_status": "APPROVED"})
+    assert updated.work_status.value == "APPROVED"
+
+
+def test_update_tr_with_null_hobbs_end_is_rejected():
+    with pytest.raises(Exception) as exc_info:
+        AircraftTechnicalLogUpdate.parse_obj(
+            {
+                "nature_of_flight": "TR",
+                "tachometer_end": 1.0,
+                "hobbs_meter_end": None,
+            }
+        )
+    assert "hobbs_meter_end" in str(exc_info.value)
