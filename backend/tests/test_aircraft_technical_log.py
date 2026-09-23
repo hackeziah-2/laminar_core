@@ -188,6 +188,307 @@ def test_list_aircraft_technical_logs_with_search(
     assert blank_search.json()["total"] >= 1
 
 
+def _create_aircraft(client: TestClient, registration: str) -> int:
+    import json
+
+    response = client.post(
+        "/api/v1/aircraft/",
+        data={
+            "json_data": json.dumps(
+                {
+                    "registration": registration,
+                    "model": "737-800",
+                    "msn": f"MSN-{registration}",
+                    "base": "Test Base",
+                    "ownership": "Test Owner",
+                    "status": "Active",
+                }
+            )
+        },
+        files={},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
+
+
+def _create_account(client: TestClient, first: str, last: str, username: str, middle: str = None) -> int:
+    payload = {
+        "first_name": first,
+        "last_name": last,
+        "username": username,
+        "password": "securepassword123",
+        "status": True,
+    }
+    if middle:
+        payload["middle_name"] = middle
+    response = client.post("/api/v1/account-information/", json=payload)
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
+
+
+def _paged_search(client: TestClient, **params) -> dict:
+    query = {"page": 1, "page_size": 50, "sort": "-sequence_no"}
+    query.update(params)
+    response = client.get("/api/v1/aircraft-technical-log/paged", params=query)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_paged_search_matches_atl_fields_parts_and_person_names(
+    client_with_atl_auth: TestClient,
+    test_aircraft_technical_log_data: dict,
+):
+    """Paged search keeps aircraft and batch filters, matches ATL text, parts, and names once."""
+    import asyncio
+
+    from app.repository.aircraft_technical_log import list_aircraft_technical_logs
+    from tests.conftest import TestSessionLocal
+
+    aircraft_a = _create_aircraft(client_with_atl_auth, "RP-SEARCH-A")
+    aircraft_b = _create_aircraft(client_with_atl_auth, "RP-SEARCH-B")
+
+    batch_a = client_with_atl_auth.post(
+        "/api/v1/atl-batch/",
+        json={"name": "Search Batch A", "aircraft_id": aircraft_a},
+    )
+    assert batch_a.status_code == 201, batch_a.text
+    batch_a_id = batch_a.json()["id"]
+
+    batch_b = client_with_atl_auth.post(
+        "/api/v1/atl-batch/",
+        json={"name": "Search Batch B", "aircraft_id": aircraft_a},
+    )
+    assert batch_b.status_code == 201, batch_b.text
+    batch_b_id = batch_b.json()["id"]
+
+    pilot_id = _create_account(
+        client_with_atl_auth, "Marisol", "Quintero", "marisol_atl_search", middle="Ann"
+    )
+    maintenance_id = _create_account(
+        client_with_atl_auth, "Hector", "Bautista", "hector_atl_search"
+    )
+    remark_id = _create_account(
+        client_with_atl_auth, "Inez", "Navarro", "inez_atl_search"
+    )
+    action_id = _create_account(
+        client_with_atl_auth, "Paolo", "Mendieta", "paolo_atl_search"
+    )
+    accepted_id = _create_account(
+        client_with_atl_auth, "Carla", "Villanueva", "carla_atl_search"
+    )
+    rts_id = _create_account(
+        client_with_atl_auth, "Diego", "Salazar", "diego_atl_search"
+    )
+    created_id = _create_account(
+        client_with_atl_auth, "Amara", "Yusuf", "amara_atl_search"
+    )
+    updated_id = _create_account(
+        client_with_atl_auth, "Benito", "Ramos", "benito_atl_search"
+    )
+
+    def _payload(aircraft_id: int, batch_id: int, sequence: str, **extra) -> dict:
+        body = {
+            **test_aircraft_technical_log_data,
+            "aircraft_fk": aircraft_id,
+            "atl_batch_fk": batch_id,
+            "sequence_no": sequence,
+            "origin_station": "ZZZZ",
+            "destination_station": "YYYY",
+            "origin_date": "2020-01-01",
+            "remarks": None,
+            "actions_taken": None,
+            "component_parts": [],
+        }
+        body.update(extra)
+        return body
+
+    target = client_with_atl_auth.post(
+        "/api/v1/aircraft-technical-log/",
+        json=_payload(
+            aircraft_a,
+            batch_a_id,
+            "10",
+            origin_station="RPLL",
+            destination_station="RPMZ",
+            origin_date="2024-06-15",
+            remarks="night defect note",
+            actions_taken="COMPLIED WITH THE LANDING LIGHT DEFECT",
+            engine_tsn="3232.2",
+            engine_tso="910.4",
+            propeller_tsn="4512.8",
+            pilot_fk=pilot_id,
+            maintenance_fk=maintenance_id,
+            remark_person=remark_id,
+            actiontaken_person=action_id,
+            pilot_accepted_by=accepted_id,
+            rts_signed_by=rts_id,
+            component_parts=[
+                {
+                    "qty": 1,
+                    "unit": "EA",
+                    "nomenclature": "Landing Light Switch",
+                    "removed_part_no": "PN-OLD-77",
+                    "removed_serial_no": "SN-OLD-77",
+                    "installed_part_no": "PN-NEW-88",
+                    "installed_serial_no": "SN-NEW-88",
+                    "part_description": "Wing landing light switch assembly",
+                    "ata_chapter": "33-40",
+                    "part_remark": "Replaced during night stop",
+                },
+                {
+                    "qty": 1,
+                    "unit": "EA",
+                    "nomenclature": "Landing Light Switch Cover",
+                    "installed_part_no": "PN-COVER-1",
+                    "installed_serial_no": "SN-COVER-1",
+                    "ata_chapter": "33-41",
+                    "part_description": "Switch cover",
+                    "part_remark": "Cover only",
+                },
+            ],
+        ),
+    )
+    assert target.status_code == 201, target.text
+    target_id = target.json()["id"]
+
+    async def _set_audit_users() -> None:
+        async with TestSessionLocal() as session:
+            row = await session.get(AircraftTechnicalLog, target_id)
+            row.created_by = created_id
+            row.updated_by = updated_id
+            await session.commit()
+
+    asyncio.run(_set_audit_users())
+
+    same_batch_other = client_with_atl_auth.post(
+        "/api/v1/aircraft-technical-log/",
+        json=_payload(
+            aircraft_a,
+            batch_a_id,
+            "20",
+            actions_taken="COMPLIED WITH AD NOTE",
+        ),
+    )
+    assert same_batch_other.status_code == 201, same_batch_other.text
+
+    other_batch = client_with_atl_auth.post(
+        "/api/v1/aircraft-technical-log/",
+        json=_payload(
+            aircraft_a,
+            batch_b_id,
+            "30",
+            engine_tsn="3232.2",
+            actions_taken="COMPLIED ELSEWHERE",
+        ),
+    )
+    assert other_batch.status_code == 201, other_batch.text
+
+    other_aircraft = client_with_atl_auth.post(
+        "/api/v1/aircraft-technical-log/",
+        json=_payload(
+            aircraft_b,
+            batch_a_id,
+            "10",
+            engine_tsn="3232.2",
+            actions_taken="COMPLIED ON OTHER AIRCRAFT",
+        ),
+    )
+    assert other_aircraft.status_code == 201, other_aircraft.text
+
+    scope = {"aircraft_fk": aircraft_a, "atl_batch_fk": batch_a_id}
+
+    def _ids(body: dict) -> list:
+        return [item["id"] for item in body["items"]]
+
+    by_engine = _paged_search(client_with_atl_auth, search="323", **scope)
+    assert by_engine["total"] == 1
+    assert _ids(by_engine) == [target_id]
+
+    by_action = _paged_search(client_with_atl_auth, search="complied", **scope)
+    assert by_action["total"] == 2
+    assert [item["sequence_no"] for item in by_action["items"]] == ["20", "10"]
+
+    by_part = _paged_search(client_with_atl_auth, search="LANDING LIGHT SWITCH", **scope)
+    assert by_part["total"] == 1
+    assert _ids(by_part) == [target_id]
+
+    by_part_no = _paged_search(client_with_atl_auth, search="pn-new-88", **scope)
+    assert _ids(by_part_no) == [target_id]
+    by_serial = _paged_search(client_with_atl_auth, search="SN-NEW-88", **scope)
+    assert _ids(by_serial) == [target_id]
+    by_ata = _paged_search(client_with_atl_auth, search="33-40", **scope)
+    assert _ids(by_ata) == [target_id]
+    by_desc = _paged_search(client_with_atl_auth, search="switch assembly", **scope)
+    assert _ids(by_desc) == [target_id]
+    by_part_remark = _paged_search(client_with_atl_auth, search="night stop", **scope)
+    assert _ids(by_part_remark) == [target_id]
+
+    by_station = _paged_search(client_with_atl_auth, search="rpmz", **scope)
+    assert _ids(by_station) == [target_id]
+    by_date = _paged_search(client_with_atl_auth, search="2024-06-15", **scope)
+    assert _ids(by_date) == [target_id]
+    by_remarks = _paged_search(client_with_atl_auth, search="NIGHT DEFECT", **scope)
+    assert _ids(by_remarks) == [target_id]
+    by_tso = _paged_search(client_with_atl_auth, search="910.4", **scope)
+    assert _ids(by_tso) == [target_id]
+    by_prop = _paged_search(client_with_atl_auth, search="4512", **scope)
+    assert _ids(by_prop) == [target_id]
+
+    for term in (
+        "marisol",
+        "quintero",
+        "Marisol Quintero",
+        "marisol ann quintero",
+        "hector",
+        "bautista",
+        "Hector Bautista",
+        "inez",
+        "navarro",
+        "paolo",
+        "mendieta",
+        "carla",
+        "villanueva",
+        "diego",
+        "salazar",
+        "amara",
+        "yusuf",
+        "Amara Yusuf",
+        "benito",
+        "ramos",
+    ):
+        found = _paged_search(client_with_atl_auth, search=term, **scope)
+        assert found["total"] == 1, term
+        assert _ids(found) == [target_id], term
+
+    async def _pages():
+        async with TestSessionLocal() as session:
+            first, total_first = await list_aircraft_technical_logs(
+                session,
+                limit=1,
+                offset=0,
+                search="COMPLIED",
+                aircraft_fk=aircraft_a,
+                atl_batch_fk=batch_a_id,
+                sort="-sequence_no",
+            )
+            second, total_second = await list_aircraft_technical_logs(
+                session,
+                limit=1,
+                offset=1,
+                search="COMPLIED",
+                aircraft_fk=aircraft_a,
+                atl_batch_fk=batch_a_id,
+                sort="-sequence_no",
+            )
+            return first, total_first, second, total_second
+
+    first_page, total_first, second_page, total_second = asyncio.run(_pages())
+    assert total_first == 2
+    assert total_second == 2
+    assert [row.sequence_no for row in first_page] == ["20"]
+    assert [row.sequence_no for row in second_page] == ["10"]
+
+
 def test_list_aircraft_technical_logs_filter_work_status(
     client_with_atl_auth: TestClient,
     test_aircraft_technical_log_data: dict,
@@ -261,6 +562,115 @@ def test_manage_paged_maintenance_manager_sees_all_work_statuses(
     pending_ids = {item["id"] for item in pending_response.json()["items"]}
     assert pending_log_id in pending_ids
     assert pending_response.json()["total"] >= 1
+
+
+def test_resolve_atl_list_batch_filter_treats_all_as_no_predicate():
+    from app.api.v1.aircraft_technical_log import resolve_atl_list_batch_filter
+
+    assert resolve_atl_list_batch_filter(None, None) is None
+    assert resolve_atl_list_batch_filter("all", None) is None
+    assert resolve_atl_list_batch_filter("all", "all") is None
+    assert resolve_atl_list_batch_filter("", "ALL") is None
+    assert resolve_atl_list_batch_filter("15", None) == 15
+    assert resolve_atl_list_batch_filter("all", "8") == 8
+
+
+def test_manage_paged_all_batches_follows_selected_aircraft(
+    client_with_atl_auth: TestClient,
+    test_aircraft_technical_log_data: dict,
+):
+    """atl_batch=all returns assigned and unassigned rows for the requested aircraft only."""
+    from app.models.aircraft import Aircraft
+    from app.models.atl_batch import AtlBatch
+
+    async def seed_aircraft_and_batches() -> tuple[int, int, int, int]:
+        async with TestSessionLocal() as session:
+            aircraft_a = Aircraft(
+                registration="TEST-ATL-SW-A",
+                model="172",
+                msn="MSN-ATL-SW-A",
+                base="Base",
+                ownership="Owner",
+                status="Active",
+            )
+            aircraft_b = Aircraft(
+                registration="TEST-ATL-SW-B",
+                model="172",
+                msn="MSN-ATL-SW-B",
+                base="Base",
+                ownership="Owner",
+                status="Active",
+            )
+            session.add_all([aircraft_a, aircraft_b])
+            await session.flush()
+            batch_a = AtlBatch(
+                name="Batch switch A",
+                description="pytest",
+                aircraft_id=aircraft_a.id,
+            )
+            batch_b = AtlBatch(
+                name="Batch switch B",
+                description="pytest",
+                aircraft_id=aircraft_b.id,
+            )
+            session.add_all([batch_a, batch_b])
+            await session.commit()
+            await session.refresh(batch_a)
+            await session.refresh(batch_b)
+            return aircraft_a.id, aircraft_b.id, batch_a.id, batch_b.id
+
+    aircraft_a_id, aircraft_b_id, batch_a_id, batch_b_id = asyncio.run(
+        seed_aircraft_and_batches()
+    )
+
+    def create_log(aircraft_fk: int, sequence_no: str, batch_id):
+        payload = {
+            **test_aircraft_technical_log_data,
+            "aircraft_fk": aircraft_fk,
+            "sequence_no": sequence_no,
+        }
+        if batch_id is not None:
+            payload["atl_batch_fk"] = batch_id
+        response = client_with_atl_auth.post(
+            "/api/v1/aircraft-technical-log/",
+            json=payload,
+        )
+        assert response.status_code == 201, response.text
+        return response.json()["id"]
+
+    assigned_a = create_log(aircraft_a_id, "ATL-8101", batch_a_id)
+    unassigned_a = create_log(aircraft_a_id, "ATL-8102", None)
+    assigned_b = create_log(aircraft_b_id, "ATL-8201", batch_b_id)
+    unassigned_b = create_log(aircraft_b_id, "ATL-8202", None)
+
+    previous_page = client_with_atl_auth.get(
+        f"/api/v1/aircraft-technical-log/manage/paged"
+        f"?aircraft_id={aircraft_a_id}&atl_batch={batch_a_id}&page=1&page_size=1"
+    )
+    assert previous_page.status_code == 200, previous_page.text
+    assert previous_page.json()["page"] == 1
+    assert {item["id"] for item in previous_page.json()["items"]} == {assigned_a}
+
+    switched = client_with_atl_auth.get(
+        f"/api/v1/aircraft-technical-log/manage/paged"
+        f"?aircraft_id={aircraft_b_id}&atl_batch=all&atl_batch_fk=all&page=1&page_size=50"
+    )
+    assert switched.status_code == 200, switched.text
+    switched_body = switched.json()
+    assert switched_body["page"] == 1
+    switched_ids = {item["id"] for item in switched_body["items"]}
+    assert assigned_b in switched_ids
+    assert unassigned_b in switched_ids
+    assert assigned_a not in switched_ids
+    assert unassigned_a not in switched_ids
+
+    specific_batch = client_with_atl_auth.get(
+        f"/api/v1/aircraft-technical-log/manage/paged"
+        f"?aircraft_fk={aircraft_b_id}&atl_batch={batch_b_id}&page=1&page_size=50"
+    )
+    assert specific_batch.status_code == 200, specific_batch.text
+    specific_ids = {item["id"] for item in specific_batch.json()["items"]}
+    assert specific_ids == {assigned_b}
 
 
 def test_paged_does_not_apply_atl_rbac_filter(
