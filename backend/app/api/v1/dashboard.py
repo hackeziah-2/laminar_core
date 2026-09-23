@@ -41,7 +41,8 @@ async def api_dashboard(
     response_model=AircraftFuelReportResponse,
     summary="Monthly aircraft fuel consumption report",
     description=(
-        "Monthly fleet fuel/hours rollup from approved/completed ATL Logbook rows. "
+        "Monthly fleet fuel/hours rollup from ATL Logbook rows, excluding "
+        "Approved and Completed work_status. "
         "Month bucket / date-range filter = ATL off_blocks_date (origin_date). "
         "Range is half-open: off_blocks_date >= start_month-01 and "
         "off_blocks_date < first day of the month after end_month. "

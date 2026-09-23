@@ -11,7 +11,8 @@ from app.constants.atl_excel_import import ATL_EXCEL_COLUMN_MAPPING
 from app.database import AsyncSessionLocal
 from app.models.atl_excel_import_job import AtlExcelImportJob
 from app.services.atl_import_service import run_atl_import
-from app.services.excel_import.reader import read_atl_spreadsheet_bytes
+from app.services.excel_import.reader import _records_from_dataframe
+import pandas as pd
 
 from app.services.atl_excel_import_summary_codec import encode_message_with_summary
 
@@ -37,9 +38,7 @@ async def _commit_job(job_id: str, **values: Any) -> None:
 
 def _read_atl_spreadsheet(path: str) -> tuple[list[dict], int, bool]:
     """Read Excel file into record dicts; return (records, source_row_count, has_sequence_no)."""
-    with open(path, "rb") as fh:
-        raw = fh.read()
-    records = read_atl_spreadsheet_bytes(raw, column_mapping=ATL_EXCEL_COLUMN_MAPPING)
+    records = _records_from_dataframe(pd.read_excel(path, dtype=str), ATL_EXCEL_COLUMN_MAPPING)
     has_sequence_no = any("sequence_no" in row for row in records)
     source_row_count = len(records)
     return records, source_row_count, has_sequence_no

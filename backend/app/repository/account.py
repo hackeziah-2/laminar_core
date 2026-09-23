@@ -441,6 +441,7 @@ async def get_all_account_informations_list(
     stmt = (
         select(AccountInformation)
         .where(AccountInformation.is_deleted == False)
+        .where(AccountInformation.status == True)
     )
 
     role_values = [r for r in (role or []) if r]

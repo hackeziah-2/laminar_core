@@ -585,6 +585,8 @@ def test_atl_engine_propeller_tbo_chains_from_previous_remaining(
         "destination_date": "2025-01-20",
         "destination_time": "12:00:00",
         "number_of_landings": 1,
+        "hobbs_meter_start": 100.0,
+        "hobbs_meter_end": 101.0,
         "component_parts": [],
     }
 
@@ -703,6 +705,8 @@ def test_atl_tso_tbo_ignore_manual_previous_values_when_computed_chain_exists(
             "number_of_landings": 1,
             "tachometer_start": 2.0,
             "tachometer_end": 4.5,
+            "hobbs_meter_start": 2.0,
+            "hobbs_meter_end": 4.5,
             "engine_tso": 999.0,
             "engine_tbo": 1.0,
             "propeller_tso": 888.0,

@@ -5,16 +5,25 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.aircraft import Aircraft
 from app.models.aircraft_techinical_log import AircraftTechnicalLog, WorkStatus
 
-_FUEL_REPORT_STATUSES: Sequence[WorkStatus] = (
+# Stored PG enum values are WorkStatus member names (APPROVED / COMPLETED).
+_EXCLUDED_FUEL_REPORT_STATUSES: Sequence[WorkStatus] = (
     WorkStatus.APPROVED,
     WorkStatus.COMPLETED,
 )
+
+
+def _fuel_report_status_filter():
+    """Keep ATLs that are not Approved or Completed (null status is kept)."""
+    return or_(
+        AircraftTechnicalLog.work_status.is_(None),
+        AircraftTechnicalLog.work_status.notin_(_EXCLUDED_FUEL_REPORT_STATUSES),
+    )
 
 # ATL off-blocks date = origin_date (departure / off-blocks on the ATL form).
 # Null off-blocks dates are excluded from the report.
@@ -138,7 +147,7 @@ async def fetch_fuel_report_available_month_bounds(
     *,
     aircraft_ids: Optional[Sequence[int]] = None,
 ) -> tuple[Optional[date], Optional[date]]:
-    """Earliest / latest off_blocks_date among approved/completed ATLs."""
+    """Earliest / latest off_blocks_date among ATLs excluding approved/completed."""
     stmt = (
         select(
             func.min(_OFF_BLOCKS_DATE),
@@ -146,7 +155,7 @@ async def fetch_fuel_report_available_month_bounds(
         )
         .select_from(AircraftTechnicalLog)
         .where(AircraftTechnicalLog.is_deleted.is_(False))
-        .where(AircraftTechnicalLog.work_status.in_(_FUEL_REPORT_STATUSES))
+        .where(_fuel_report_status_filter())
         .where(_OFF_BLOCKS_DATE.is_not(None))
     )
     if aircraft_ids:
@@ -165,7 +174,7 @@ async def fetch_fuel_report_atl_rows(
     aircraft_ids: Optional[Sequence[int]] = None,
 ) -> List[Any]:
     """
-    Load approved/completed ATL rows with off_blocks_date in
+    Load ATL rows (excluding approved/completed) with off_blocks_date in
     ``[start_date, end_date_exclusive)``.
 
     Uses an exclusive upper bound so Date and DateTime columns are handled
@@ -177,7 +186,7 @@ async def fetch_fuel_report_atl_rows(
         .join(Aircraft, Aircraft.id == AircraftTechnicalLog.aircraft_fk)
         .where(AircraftTechnicalLog.is_deleted.is_(False))
         .where(Aircraft.is_deleted.is_(False))
-        .where(AircraftTechnicalLog.work_status.in_(_FUEL_REPORT_STATUSES))
+        .where(_fuel_report_status_filter())
         .where(_OFF_BLOCKS_DATE.is_not(None))
         .where(
             and_(
