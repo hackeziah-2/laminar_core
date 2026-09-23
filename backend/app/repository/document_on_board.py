@@ -294,7 +294,7 @@ async def create_document_on_board(
         document_data.pop("status", None)
 
     # Handle optional file upload (file_path remains None if no file)
-    stored = await persist_optional_upload(upload_file, "document_on_board")
+    stored = await persist_optional_upload(upload_file, "document_on_board", session=session)
     if stored:
         document_data["file_path"] = stored
 
@@ -350,7 +350,7 @@ async def update_document_on_board(
             update_data["status"] = DocumentStatusEnum.ACTIVE.value
 
     # Handle optional file upload (only set file_path if a file is provided)
-    stored = await persist_optional_upload(upload_file, "document_on_board")
+    stored = await persist_optional_upload(upload_file, "document_on_board", session=session)
     if stored:
         update_data["file_path"] = stored
 

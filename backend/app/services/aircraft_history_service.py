@@ -153,10 +153,10 @@ async def update_aircraft_with_history(
     update_data = data.dict(exclude_unset=True)
 
     if engine_file:
-        update_data["engine_arc"] = await _persist_upload_file(engine_file)
+        update_data["engine_arc"] = await _persist_upload_file(engine_file, session=session)
 
     if propeller_file:
-        update_data["propeller_arc"] = await _persist_upload_file(propeller_file)
+        update_data["propeller_arc"] = await _persist_upload_file(propeller_file, session=session)
 
     await _validate_unique_fields(session, aircraft_id, update_data)
 

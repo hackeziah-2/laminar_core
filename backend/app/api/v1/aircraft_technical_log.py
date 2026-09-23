@@ -53,9 +53,9 @@ def _round_optional_float_2(value: Any) -> Optional[float]:
         return None
 
 
-async def _save_atl_upload(form_file: Any, subdir: str) -> Optional[str]:
+async def _save_atl_upload(form_file: Any, subdir: str, session=None) -> Optional[str]:
     """Stream an ATL file into uploads/<subdir>/; return '{subdir}/{unique}' or None."""
-    return await persist_optional_upload(form_file, subdir, path_style="module")
+    return await persist_optional_upload(form_file, subdir, path_style="module", session=session)
 
 
 router = APIRouter(
@@ -109,6 +109,37 @@ def _normalize_optional_search(search: Optional[str]) -> Optional[str]:
     return str(search).strip()
 
 
+def resolve_atl_list_batch_filter(
+    atl_batch: Optional[str],
+    atl_batch_fk: Optional[str],
+) -> Optional[int]:
+    """Batch id for list queries.
+
+    ``atl_batch=all`` (or a blank/omitted value) applies no batch predicate, so
+    rows with an assigned ``atl_batch_fk`` and rows with ``atl_batch_fk IS NULL``
+    are both returned. A concrete id filters to that batch only.
+    """
+    raw = atl_batch_fk if atl_batch_fk is not None else atl_batch
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if text == "" or text.casefold() == "all":
+        return None
+    try:
+        batch_id = int(text)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=422,
+            detail="atl_batch must be a batch id or 'all'",
+        )
+    if batch_id <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail="atl_batch must be a batch id or 'all'",
+        )
+    return batch_id
+
+
 async def _fetch_atl_list_page(
     *,
     session: AsyncSession,
@@ -117,11 +148,11 @@ async def _fetch_atl_list_page(
     aircraft_id: Optional[int],
     aircraft_fk: Optional[int],
     work_status: Optional[WorkStatus],
-    atl_batch: Optional[int],
-    atl_batch_fk: Optional[int],
+    atl_batch: Optional[str],
+    atl_batch_fk: Optional[str],
     sort: str,
 ) -> dict:
-    batch_filter = atl_batch_fk if atl_batch_fk is not None else atl_batch
+    batch_filter = resolve_atl_list_batch_filter(atl_batch, atl_batch_fk)
     filter_aircraft = _resolve_aircraft_id_filter(aircraft_id, aircraft_fk)
     items, total = await list_aircraft_technical_logs(
         session=session,
@@ -150,8 +181,10 @@ async def api_list_paged(
     search: Optional[str] = Query(
         None,
         description=(
-            "Search sequence_no, stations, nature of flight, or aircraft registration. "
-            "Blank is ignored."
+            "Case-insensitive partial match (ILIKE) across ATL fields: sequence_no, "
+            "nature of flight, stations, dates, remarks, actions taken, engine and "
+            "propeller times, component parts, and related person names. Aircraft and "
+            "batch filters still apply. Blank is ignored."
         ),
     ),
     aircraft_id: Optional[int] = Query(None, description="Filter by aircraft ID"),
@@ -167,13 +200,13 @@ async def api_list_paged(
             "REJECTED_QUALITY, PENDING, COMPLETED. Omit for no filter."
         ),
     ),
-    atl_batch: Optional[int] = Query(
+    atl_batch: Optional[str] = Query(
         None,
-        description="Filter by ATL batch id (same as atl_batch_fk).",
+        description="Filter by ATL batch id, or 'all' for assigned and unassigned batches.",
     ),
-    atl_batch_fk: Optional[int] = Query(
+    atl_batch_fk: Optional[str] = Query(
         None,
-        description="Filter by ATL batch id.",
+        description="Filter by ATL batch id, or 'all' for assigned and unassigned batches.",
     ),
     sort: str = Query(
         "-sequence_no",
@@ -351,8 +384,20 @@ async def api_get_latest(
 @router.get("/manage/paged")
 async def api_atl_list_paged(
     pagination: Pagination = Depends(pagination_params),
-    search: Optional[str] = None,
-    aircraft_fk: Optional[int] = Query(None, description="Filter by aircraft ID"),
+    search: Optional[str] = Query(
+        None,
+        description=(
+            "Case-insensitive partial match (ILIKE) across ATL fields: sequence_no, "
+            "nature of flight, stations, dates, remarks, actions taken, engine and "
+            "propeller times, component parts, and related person names. Aircraft and "
+            "batch filters still apply. Blank is ignored."
+        ),
+    ),
+    aircraft_id: Optional[int] = Query(None, description="Filter by aircraft ID"),
+    aircraft_fk: Optional[int] = Query(
+        None,
+        description="Alias for aircraft_id.",
+    ),
     work_status: Optional[WorkStatus] = Query(
         None,
         description=(
@@ -361,13 +406,13 @@ async def api_atl_list_paged(
             "REJECTED_QUALITY, PENDING, COMPLETED. Omit for no filter."
         ),
     ),
-    atl_batch: Optional[int] = Query(
+    atl_batch: Optional[str] = Query(
         None,
-        description="Filter by ATL batch id (same as atl_batch_fk).",
+        description="Filter by ATL batch id, or 'all' for assigned and unassigned batches.",
     ),
-    atl_batch_fk: Optional[int] = Query(
+    atl_batch_fk: Optional[str] = Query(
         None,
-        description="Filter by ATL batch id.",
+        description="Filter by ATL batch id, or 'all' for assigned and unassigned batches.",
     ),
     sort: str = Query(
         "-sequence_no",
@@ -379,14 +424,21 @@ async def api_atl_list_paged(
     session: AsyncSession = Depends(get_session),
     current_account: AccountInformation = Depends(get_current_active_account),
 ):
-    """Get paginated list of Aircraft Technical Log entries (manage). auto_* from persisted columns."""
-    batch_filter = atl_batch_fk if atl_batch_fk is not None else atl_batch
+    """Get paginated list of Aircraft Technical Log entries (manage). auto_* from persisted columns.
+
+    ``atl_batch=all`` (or omitted) returns every ATL for the selected aircraft, including
+    rows with an assigned batch and rows whose ``atl_batch_fk`` is NULL. A specific batch
+    id returns only rows assigned to that batch and aircraft. Pagination is taken from
+    the request (clients reset to page 1 when the aircraft changes).
+    """
+    batch_filter = resolve_atl_list_batch_filter(atl_batch, atl_batch_fk)
+    filter_aircraft = _resolve_aircraft_id_filter(aircraft_id, aircraft_fk)
     items, total = await list_aircraft_technical_logs_manage(
         session=session,
         limit=pagination.limit,
         offset=pagination.offset,
         search=_normalize_optional_search(search),
-        aircraft_fk=aircraft_fk,
+        aircraft_fk=filter_aircraft,
         atl_batch_fk=batch_filter,
         work_status=work_status,
         sort=sort,
@@ -468,7 +520,7 @@ async def api_create(
     return await aircraft_technical_log_read_persisted(session, entry)
 
 
-async def _parse_update_payload(request: Request) -> aircraft_technical_log_schema.AircraftTechnicalLogUpdate:
+async def _parse_update_payload(request: Request, session=None) -> aircraft_technical_log_schema.AircraftTechnicalLogUpdate:
     """Parse request body as either JSON or multipart form with 'data'/'json_data' JSON string (for file upload)."""
     content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
     if content_type == "multipart/form-data":
@@ -497,11 +549,11 @@ async def _parse_update_payload(request: Request) -> aircraft_technical_log_sche
         white_atl_file = form.get("white_atl")
         dfp_file = form.get("dfp")
         if white_atl_file:
-            saved = await _save_atl_upload(white_atl_file, "white_atl")
+            saved = await _save_atl_upload(white_atl_file, "white_atl", session=session)
             if saved:
                 data["white_atl"] = saved
         if dfp_file:
-            saved = await _save_atl_upload(dfp_file, "dfp")
+            saved = await _save_atl_upload(dfp_file, "dfp", session=session)
             if saved:
                 data["dfp"] = saved
     else:
@@ -531,7 +583,7 @@ async def api_update(
     current_account: AccountInformation = Depends(get_current_active_account),
 ):
     """Update an Aircraft Technical Log entry. Accepts application/json body or multipart/form-data with 'data' or 'json_data' (JSON string). For multipart, optional form fields 'white_atl' and 'dfp' are file uploads; saved under uploads/white_atl/ and uploads/dfp/. Download via GET /api/v1/white_atl/download?name=<filename> and /api/v1/dfp/download?name=<filename>."""
-    log_in = await _parse_update_payload(request)
+    log_in = await _parse_update_payload(request, session=session)
     updated = await update_aircraft_technical_log(
         session=session,
         log_id=log_id,

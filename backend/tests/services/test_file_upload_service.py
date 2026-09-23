@@ -18,7 +18,7 @@ from app.services.file_upload_service import (
     sanitize_filename,
 )
 
-PDF_BYTES = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n"
+PDF_BYTES = b"%PDF-1.4\nxref\n0 1\n0000000000 65535 f \ntrailer\n<< /Size 1 >>\nstartxref\n9\n%%EOF\n"
 JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"\x00" * 16
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 8
 
@@ -141,13 +141,16 @@ async def test_persist_optional_upload_module_path_style(tmp_path):
 
 @pytest.mark.asyncio
 async def test_upload_timeout_deletes_incomplete_file(tmp_path):
+    import time
+    class Slow(io.BytesIO):
+        def read(self, size=-1):
+            time.sleep(0.02)
+            return super().read(size)
     with patch("app.services.file_upload_service.UPLOAD_DIR", tmp_path), patch(
-        "app.services.file_upload_service.asyncio.wait_for",
-        new=AsyncMock(side_effect=asyncio.TimeoutError()),
+        "app.services.file_upload_service.upload_timeout_seconds", return_value=0.001,
     ):
-        upload = _upload("doc.pdf", PDF_BYTES)
+        upload = UploadFile(filename="doc.pdf", file=Slow(PDF_BYTES))
         with pytest.raises(HTTPException) as exc:
             await save_module_upload(upload, "test_module")
         assert exc.value.status_code == 408
-        leftover = [p for p in tmp_path.rglob("*") if p.is_file()]
-        assert leftover == []
+        assert [p for p in tmp_path.rglob("*") if p.is_file()] == []

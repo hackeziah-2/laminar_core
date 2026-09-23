@@ -1,23 +1,25 @@
 """Read uploaded Excel/CSV into row dicts."""
 from __future__ import annotations
 
+import asyncio
 import csv
 import os
 import tempfile
+import weakref
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import aiofiles
 import pandas as pd
-from fastapi import UploadFile
+from fastapi import HTTPException, UploadFile
 
 from app.core.exceptions import ValidationError as AppValidationError
 from app.services.excel_import.parsers import sanitize_spreadsheet_value
-from app.services.file_upload_service import CHUNK_SIZE, max_upload_bytes
+from app.services.file_upload_service import save_upload_to_exact_path
 
 
 ALLOWED_EXTENSIONS = (".xlsx", ".xls", ".csv")
+_parse_slots = weakref.WeakKeyDictionary()
 
 
 def normalize_column_mapping(
@@ -46,7 +48,8 @@ def _detect_csv_delimiter(contents: bytes) -> str:
 def _read_csv_dataframe_from_path(
     path: Path, *, preserve_numeric_text: bool = False
 ) -> pd.DataFrame:
-    sample = path.read_bytes()[:8192]
+    with path.open("rb") as source:
+        sample = source.read(8192)
     delimiter = _detect_csv_delimiter(sample)
     read_kwargs: Dict[str, Any] = {"sep": delimiter}
     if preserve_numeric_text:
@@ -64,39 +67,16 @@ def _read_csv_dataframe_from_path(
 
 
 async def _stream_upload_to_temp_path(file: UploadFile, suffix: str) -> Path:
-    """Write the upload in chunks to a temp file; delete the file on failure."""
-    max_bytes = max_upload_bytes()
+    """Use the shared bounded copy/validation and cancellation-safe cleanup."""
     fd, raw_path = tempfile.mkstemp(suffix=suffix or ".bin")
     os.close(fd)
     dest = Path(raw_path)
-    total = 0
+    dest.unlink()  # Release our placeholder; publication refuses collisions.
     try:
-        async with aiofiles.open(dest, "wb") as output:
-            while True:
-                chunk = await file.read(CHUNK_SIZE)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > max_bytes:
-                    raise AppValidationError(
-                        f"File exceeds the {max_bytes} byte limit."
-                    )
-                await output.write(chunk)
-        if total == 0:
-            raise AppValidationError("Uploaded file is empty")
+        await save_upload_to_exact_path(file, dest, allowed_extensions=set(ALLOWED_EXTENSIONS))
         return dest
-    except Exception:
-        dest.unlink(missing_ok=True)
-        raise
-    finally:
-        close = getattr(file, "close", None)
-        if close is not None:
-            try:
-                result = close()
-                if hasattr(result, "__await__"):
-                    await result
-            except Exception:
-                pass
+    except HTTPException as exc:
+        raise AppValidationError(exc.detail) from exc
 
 
 def _records_from_dataframe(
@@ -130,24 +110,40 @@ async def read_upload_records(
 
     suffix = Path(fn).suffix or ".bin"
     dest = await _stream_upload_to_temp_path(file, suffix)
-    try:
+    def parse():
         try:
             if fn.endswith(".csv"):
-                df = _read_csv_dataframe_from_path(
-                    dest, preserve_numeric_text=preserve_numeric_text
-                )
+                df = _read_csv_dataframe_from_path(dest, preserve_numeric_text=preserve_numeric_text)
             else:
-                df = pd.read_excel(
-                    dest,
-                    dtype=str if preserve_numeric_text else None,
-                )
+                df = pd.read_excel(dest, dtype=str if preserve_numeric_text else None)
+            return _records_from_dataframe(df, column_mapping)
         except AppValidationError:
             raise
         except Exception as exc:
             raise AppValidationError(f"Could not parse spreadsheet: {exc}") from exc
-        return _records_from_dataframe(df, column_mapping)
+        finally:
+            dest.unlink(missing_ok=True)
+    slots = _parse_slots.setdefault(asyncio.get_running_loop(), asyncio.Semaphore(2))
+    job = None
+    try:
+        async with slots:
+            job = asyncio.create_task(asyncio.to_thread(parse))
+            try:
+                return await asyncio.shield(job)
+            except asyncio.CancelledError:
+                while not job.done():
+                    try:
+                        await asyncio.shield(job)
+                    except asyncio.CancelledError:
+                        continue
+                    except Exception:
+                        break
+                if not job.cancelled():
+                    job.exception()
+                raise
     finally:
-        dest.unlink(missing_ok=True)
+        if job is None:
+            dest.unlink(missing_ok=True)
 
 
 def read_atl_spreadsheet_bytes(

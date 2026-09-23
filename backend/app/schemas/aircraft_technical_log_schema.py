@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, validator, root_validator
 
 from app.models.aircraft_techinical_log import TypeEnum, WorkStatus
 from app.schemas.atl_batch_schema import AtlBatchBrief
+from app.schemas.atl_nature_required_fields import enforce_atl_nature_required_fields
 
 
 def normalize_datetime(value: Any) -> Any:
@@ -418,7 +419,11 @@ class AircraftTechnicalLogBase(BaseModel):
 
 # ---------- Aircraft Technical Log Create Schema ----------
 class AircraftTechnicalLogCreate(AircraftTechnicalLogBase):
-    pass
+    @root_validator(pre=True)
+    def require_fields_by_nature_of_flight(cls, values: Any) -> Any:
+        return enforce_atl_nature_required_fields(
+            values, cls, skip_if_nature_omitted=False
+        )
 
 
 # ---------- Aircraft Technical Log Import Schema (Excel/CSV) ----------
@@ -439,10 +444,13 @@ class AircraftTechnicalLogImportSchema(AircraftTechnicalLogBase):
         """Coerce empty string and '-' to None for every field in import row."""
         if not isinstance(values, dict):
             return values
-        return {
+        cleaned = {
             k: v if k == "component_parts" else _excel_empty_to_none(v)
             for k, v in values.items()
         }
+        return enforce_atl_nature_required_fields(
+            cleaned, cls, skip_if_nature_omitted=False
+        )
 
     @validator("component_parts", pre=True)
     def normalize_nested_component_parts(cls, v: Any) -> Any:
@@ -872,6 +880,12 @@ class AircraftTechnicalLogUpdate(BaseModel):
     def parse_time_fields(cls, v: Any) -> Any:
         """Accept Zulu time strings (HH:MM or HH:MM:SS) and convert to time."""
         return parse_zulu_time_to_time(v)
+
+    @root_validator(pre=True)
+    def require_fields_by_nature_of_flight_update(cls, values: Any) -> Any:
+        return enforce_atl_nature_required_fields(
+            values, cls, skip_if_nature_omitted=True
+        )
 
     class Config:
         allow_population_by_field_name = True

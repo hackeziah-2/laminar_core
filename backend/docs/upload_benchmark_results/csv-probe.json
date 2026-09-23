@@ -1,0 +1,75 @@
+{
+  "scope": "CSV delimiter probe only; pandas parsing stubbed",
+  "samples": [
+    {
+      "version": "before",
+      "repeat": 0,
+      "mib": 50,
+      "elapsed_ms": 17.284125002333894,
+      "peak_python_mib": 50.00787544250488
+    },
+    {
+      "version": "before",
+      "repeat": 1,
+      "mib": 50,
+      "elapsed_ms": 10.824874996615108,
+      "peak_python_mib": 50.00787544250488
+    },
+    {
+      "version": "before",
+      "repeat": 2,
+      "mib": 50,
+      "elapsed_ms": 10.974000004353002,
+      "peak_python_mib": 50.00789833068848
+    },
+    {
+      "version": "before",
+      "repeat": 3,
+      "mib": 50,
+      "elapsed_ms": 10.62583300517872,
+      "peak_python_mib": 50.00789833068848
+    },
+    {
+      "version": "before",
+      "repeat": 4,
+      "mib": 50,
+      "elapsed_ms": 12.046666997775901,
+      "peak_python_mib": 50.00789833068848
+    },
+    {
+      "version": "after",
+      "repeat": 0,
+      "mib": 50,
+      "elapsed_ms": 2.0607499973266385,
+      "peak_python_mib": 0.1478900909423828
+    },
+    {
+      "version": "after",
+      "repeat": 1,
+      "mib": 50,
+      "elapsed_ms": 2.1285830007400364,
+      "peak_python_mib": 0.1468677520751953
+    },
+    {
+      "version": "after",
+      "repeat": 2,
+      "mib": 50,
+      "elapsed_ms": 2.054959004453849,
+      "peak_python_mib": 0.14689064025878906
+    },
+    {
+      "version": "after",
+      "repeat": 3,
+      "mib": 50,
+      "elapsed_ms": 2.2007090010447428,
+      "peak_python_mib": 0.1468830108642578
+    },
+    {
+      "version": "after",
+      "repeat": 4,
+      "mib": 50,
+      "elapsed_ms": 2.078042001812719,
+      "peak_python_mib": 0.14687538146972656
+    }
+  ]
+}

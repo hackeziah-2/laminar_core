@@ -14,3 +14,13 @@ celery_app.conf.imports = (
     "app.tasks.file_upload",
 )
 register_periodic_jobs(celery_app)
+
+# PENDING import rows are a durable outbox; dispatch recovers broker outages.
+celery_app.conf.beat_schedule.update({
+    "dispatch-pending-imports": {
+        "task": "app.tasks.file_upload.dispatch_pending_imports", "schedule": 60.0,
+    },
+    "reconcile-stale-uploads": {
+        "task": "app.tasks.file_upload.reconcile_uploads", "schedule": 3600.0,
+    },
+})

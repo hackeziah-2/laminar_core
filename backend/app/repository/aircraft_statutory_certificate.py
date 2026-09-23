@@ -30,9 +30,9 @@ from app.repository.aircraft_statutory_certificate_history import (
 UPLOAD_SUBDIR = "statutory_certificates"
 
 
-async def _save_certificate_upload(upload_file: Optional[UploadFile]) -> Optional[str]:
+async def _save_certificate_upload(upload_file: Optional[UploadFile], session=None) -> Optional[str]:
     """Save uploaded file to uploads/statutory_certificates/; return relative path or None."""
-    return await persist_optional_upload(upload_file, UPLOAD_SUBDIR)
+    return await persist_optional_upload(upload_file, UPLOAD_SUBDIR, session=session)
 
 
 async def list_aircraft_statutory_certificates(
@@ -237,7 +237,7 @@ async def create_aircraft_statutory_certificate(
         return AircraftStatutoryCertificateRead.from_orm(result)
 
     cert_data = data.dict()
-    file_path = await _save_certificate_upload(upload_file)
+    file_path = await _save_certificate_upload(upload_file, session=session)
     if file_path:
         cert_data["file_path"] = file_path
     try:
@@ -293,7 +293,7 @@ async def update_aircraft_statutory_certificate(
 
     old_data_snapshot = serialize_audit_data(obj)
     update_data = data.dict(exclude_unset=True)
-    file_path = await _save_certificate_upload(upload_file)
+    file_path = await _save_certificate_upload(upload_file, session=session)
     if file_path:
         update_data["file_path"] = file_path
     for k, v in update_data.items():

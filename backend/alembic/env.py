@@ -32,6 +32,8 @@ from app.models.notification import Notification
 from app.models.advisory_notification_log import AdvisoryNotificationLog
 from app.models.nature_of_flight_description import NatureOfFlightDescription
 
+from app.models.upload_asset import UploadAsset
+
 target_metadata = Base.metadata
 
 def run_migrations_offline():

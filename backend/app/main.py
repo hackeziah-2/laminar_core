@@ -3,7 +3,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, BackgroundTasks, FastAPI, HTTPException, Query, Request
 from pydantic.json import ENCODERS_BY_TYPE
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -178,6 +178,9 @@ async def api_v1_health():
 ensure_uploads_dir()
 
 
+from app.api.v1.file_upload import download_reader
+
+
 def _resolve_and_serve_file(filename: str, module_folder: Optional[str] = None):
     """Normalize filename, resolve path under UPLOAD_DIR, try flat then module subfolder; return FileResponse or raise 404."""
     filename = filename.lstrip("/").replace("\\", "/")
@@ -192,7 +195,7 @@ def _resolve_and_serve_file(filename: str, module_folder: Optional[str] = None):
             if not p or ".." in p or "/" in p or "\\" in p:
                 return None
         path = (UPLOAD_DIR / "/".join(parts)).resolve()
-        if not str(path).startswith(str(UPLOAD_DIR)) or not path.is_file():
+        if not path.is_relative_to(UPLOAD_DIR.resolve()) or not path.is_file():
             return None
         return path
 
@@ -220,7 +223,7 @@ def _resolve_and_serve_file(filename: str, module_folder: Optional[str] = None):
     response_description="File download",
     tags=["files"]
 )
-async def download_file(module_folder: str, filename: str):
+async def download_file(module_folder: str, filename: str, _: int = Depends(download_reader)):
     """Download an uploaded file from the uploads directory (filename in path)."""
     return _resolve_and_serve_file(filename, module_folder)
 
@@ -236,6 +239,7 @@ async def download_file(module_folder: str, filename: str):
 async def download_file_by_name(
     module_folder: str,
     name: Optional[str] = Query(None, description="Filename to download (e.g. ATL.jpg)"),
+    _: int = Depends(download_reader),
 ):
     """Download an uploaded file when filename is passed as query param 'name'."""
     if not name or not name.strip():
@@ -246,41 +250,8 @@ async def download_file_by_name(
     return _resolve_and_serve_file(name.strip(), module_folder)
 
 
-# Generic upload: POST /api/v1/{module_folder}/upload – UUID storage name, module subfolder
-@app.post(
-    "/api/v1/{module_folder}/upload",
-    summary="Upload a file",
-    description=(
-        "Upload a file into uploads/{module_folder}/. Files are stored with a UUID-prefixed "
-        "name for safety. Optional query param 'name' only affects the sanitized suffix "
-        "(not the raw client path). Max size defaults to 50 MiB (MAX_UPLOAD_BYTES env)."
-    ),
-    response_description="Uploaded file metadata",
-    tags=["files"],
-    status_code=201,
-)
-async def upload_file(
-    request: Request,
-    background_tasks: BackgroundTasks,
-    module_folder: str,
-    file: UploadFile = File(...),
-    name: Optional[str] = Query(
-        None,
-        description="Optional sanitized filename suffix; storage name is always UUID-prefixed",
-    ),
-):
-    """Upload a file to the module uploads subfolder with a safe UUID filename."""
-    name_override = name.strip() if name and name.strip() else None
-    if name_override and (".." in name_override or "/" in name_override or "\\" in name_override):
-        raise HTTPException(status_code=400, detail="Invalid filename")
-    reject_if_content_length_too_large(request.headers.get("content-length"))
-    result = await save_module_upload(file, module_folder, name_override=name_override)
-    background_tasks.add_task(
-        schedule_post_upload_work,
-        result["file_path"],
-        result["size_bytes"],
-    )
-    return result
+from app.api.v1.file_upload import router as file_upload_router
+app.include_router(file_upload_router)
 
 
 app.include_router(flights_router.router)

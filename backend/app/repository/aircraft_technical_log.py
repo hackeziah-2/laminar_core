@@ -3,10 +3,10 @@ from datetime import date, time
 from decimal import Decimal, ROUND_HALF_UP
 
 from fastapi import HTTPException, Request
-from sqlalchemy import select, or_, cast, String, Numeric, func
+from sqlalchemy import select, or_, cast, exists, String, Numeric, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.orm import selectinload, joinedload
+from sqlalchemy.orm import aliased, selectinload, joinedload
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.database import set_audit_fields
@@ -763,7 +763,7 @@ async def search_atl_full_by_sequence_no(
 ) -> List[AircraftTechnicalLog]:
     """Aircraft-scoped ATL search matching GET /aircraft-technical-log/paged.
 
-    Uses the same sequence search, aircraft filter, and sequence_no-desc sort as
+    Uses the same search, aircraft filter, and sequence_no-desc sort as
     ``list_aircraft_technical_logs`` so the first row is the latest match.
     Distinct from :func:`search_atl_by_sequence_no` (slim dropdown/reference search).
     """
@@ -1174,6 +1174,187 @@ async def list_atl_paged(
     return items, total
 
 
+_ATL_LIKE_ESCAPE = "\\"
+
+# Text columns matched directly. engine_tsn is text (e.g. "3232.2"), so a search
+# for "323" must hit it without numeric formatting.
+_ATL_SEARCH_TEXT_COLUMNS = (
+    AircraftTechnicalLog.origin_station,
+    AircraftTechnicalLog.destination_station,
+    AircraftTechnicalLog.remarks,
+    AircraftTechnicalLog.actions_taken,
+    AircraftTechnicalLog.engine_tsn,
+)
+
+# Numeric engine/propeller times and date/time columns, compared as text.
+_ATL_SEARCH_CAST_COLUMNS = (
+    AircraftTechnicalLog.engine_prev_time,
+    AircraftTechnicalLog.engine_flight_time,
+    AircraftTechnicalLog.engine_total_time,
+    AircraftTechnicalLog.engine_run_time,
+    AircraftTechnicalLog.engine_tso,
+    AircraftTechnicalLog.engine_tbo,
+    AircraftTechnicalLog.auto_engine_run_time,
+    AircraftTechnicalLog.auto_run_time,
+    AircraftTechnicalLog.auto_engine_tsn,
+    AircraftTechnicalLog.auto_engine_tso,
+    AircraftTechnicalLog.auto_engine_tbo,
+    AircraftTechnicalLog.propeller_prev_time,
+    AircraftTechnicalLog.propeller_flight_time,
+    AircraftTechnicalLog.propeller_total_time,
+    AircraftTechnicalLog.propeller_run_time,
+    AircraftTechnicalLog.propeller_tsn,
+    AircraftTechnicalLog.propeller_tso,
+    AircraftTechnicalLog.propeller_tbo,
+    AircraftTechnicalLog.life_time_limit_engine,
+    AircraftTechnicalLog.life_time_limit_propeller,
+    AircraftTechnicalLog.auto_propeller_run_time,
+    AircraftTechnicalLog.auto_propeller_tsn,
+    AircraftTechnicalLog.auto_propeller_tso,
+    AircraftTechnicalLog.auto_propeller_tbo,
+    AircraftTechnicalLog.origin_date,
+    AircraftTechnicalLog.destination_date,
+    AircraftTechnicalLog.pilot_accept_date,
+    AircraftTechnicalLog.rts_date,
+    AircraftTechnicalLog.date_time_reported,
+    AircraftTechnicalLog.atl_date_time_reported,
+    AircraftTechnicalLog.date_time_released,
+    AircraftTechnicalLog.origin_time,
+    AircraftTechnicalLog.destination_time,
+    AircraftTechnicalLog.pilot_accept_time,
+    AircraftTechnicalLog.rts_time,
+)
+
+_ATL_COMPONENT_PART_SEARCH_COLUMNS = (
+    "nomenclature",
+    "removed_part_no",
+    "installed_part_no",
+    "removed_serial_no",
+    "installed_serial_no",
+    "ata_chapter",
+    "part_description",
+    "part_remark",
+)
+
+# Person FKs are matched on the related account name, not the numeric id.
+_ATL_PERSON_FK_ATTRS = (
+    "pilot_fk",
+    "maintenance_fk",
+    "remark_person",
+    "actiontaken_person",
+    "pilot_accepted_by",
+    "rts_signed_by",
+    "created_by",
+    "updated_by",
+)
+
+
+def _atl_search_like_pattern(term: str) -> str:
+    """Wrap a search term for case-insensitive substring match. '%' and '_' are literal."""
+    escaped = (
+        term.replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+    return f"%{escaped}%"
+
+
+def _ilike_contains(expr, pattern: str):
+    return expr.ilike(pattern, escape=_ATL_LIKE_ESCAPE)
+
+
+def _account_name_expr(account, *attrs: str):
+    """Concatenated account name parts separated by single spaces."""
+    expr = func.coalesce(getattr(account, attrs[0]), "")
+    for attr in attrs[1:]:
+        expr = expr.concat(" ").concat(func.coalesce(getattr(account, attr), ""))
+    return expr
+
+
+def _account_name_matches(account, pattern: str):
+    return or_(
+        _ilike_contains(account.first_name, pattern),
+        _ilike_contains(account.last_name, pattern),
+        _ilike_contains(account.middle_name, pattern),
+        _ilike_contains(_account_name_expr(account, "first_name", "last_name"), pattern),
+        _ilike_contains(
+            _account_name_expr(account, "first_name", "middle_name", "last_name"),
+            pattern,
+        ),
+    )
+
+
+def _linked_person_name_exists(pattern: str):
+    """EXISTS so several person FKs cannot duplicate the parent ATL row."""
+    account = aliased(AccountInformation)
+    linked = or_(
+        *(
+            getattr(AircraftTechnicalLog, name) == account.id
+            for name in _ATL_PERSON_FK_ATTRS
+        )
+    )
+    return exists(
+        select(account.id)
+        .where(linked, _account_name_matches(account, pattern))
+        .correlate(AircraftTechnicalLog)
+    )
+
+
+def _component_part_search_exists(pattern: str):
+    """EXISTS so multiple matching parts cannot duplicate the parent ATL row."""
+    part = aliased(ComponentPartsRecord)
+    return exists(
+        select(part.id)
+        .where(
+            part.atl_fk == AircraftTechnicalLog.id,
+            or_(part.is_deleted.is_(False), part.is_deleted.is_(None)),
+            or_(
+                *(
+                    _ilike_contains(getattr(part, name), pattern)
+                    for name in _ATL_COMPONENT_PART_SEARCH_COLUMNS
+                )
+            ),
+        )
+        .correlate(AircraftTechnicalLog)
+    )
+
+
+def _atl_paged_search_clause(pattern: str, seq_pattern: str):
+    clauses = [
+        _ilike_contains(AircraftTechnicalLog.sequence_no, seq_pattern),
+        *(_ilike_contains(column, pattern) for column in _ATL_SEARCH_TEXT_COLUMNS),
+        cast(AircraftTechnicalLog.nature_of_flight, String).ilike(
+            pattern, escape=_ATL_LIKE_ESCAPE
+        ),
+        Aircraft.registration.ilike(pattern, escape=_ATL_LIKE_ESCAPE),
+        *(
+            _ilike_contains(cast(column, String), pattern)
+            for column in _ATL_SEARCH_CAST_COLUMNS
+        ),
+        _component_part_search_exists(pattern),
+        _linked_person_name_exists(pattern),
+    ]
+    if pattern != seq_pattern:
+        clauses.append(_ilike_contains(AircraftTechnicalLog.sequence_no, pattern))
+    return or_(*clauses)
+
+
+def _apply_atl_paged_search(stmt, search: Optional[str]):
+    """Apply ILIKE search. Returns (statement, aircraft_joined).
+
+    Aircraft and batch filters are applied by the caller before this search.
+    """
+    if not search or not str(search).strip():
+        return stmt, False
+    raw = str(search).strip()
+    pattern = _atl_search_like_pattern(raw)
+    seq_pattern = _atl_search_like_pattern(_sequence_no_digits_only(raw))
+    stmt = stmt.join(Aircraft, AircraftTechnicalLog.aircraft_fk == Aircraft.id)
+    stmt = stmt.where(Aircraft.is_deleted == False)
+    stmt = stmt.where(_atl_paged_search_clause(pattern, seq_pattern))
+    return stmt, True
+
+
 def _build_aircraft_technical_logs_list_statements(
     search: Optional[str] = None,
     aircraft_fk: Optional[int] = None,
@@ -1191,33 +1372,17 @@ def _build_aircraft_technical_logs_list_statements(
         .where(AircraftTechnicalLog.is_deleted == False)
     )
 
-    # Filter by aircraft
+    # Filter by aircraft. A new aircraft_fk replaces any previous aircraft scope.
     if aircraft_fk:
         stmt = stmt.where(AircraftTechnicalLog.aircraft_fk == aircraft_fk)
 
+    # atl_batch=all (or omitted) passes None: no batch predicate, so assigned
+    # atl_batch_fk rows and rows with atl_batch_fk IS NULL are both included.
+    # A concrete id returns only rows assigned to that batch.
     if atl_batch_fk is not None:
         stmt = stmt.where(AircraftTechnicalLog.atl_batch_fk == atl_batch_fk)
 
-    aircraft_joined = False
-
-    # Search functionality; sequence_no stored as number only, so strip ATL- from search for that field
-    if search and str(search).strip():
-        q = f"%{str(search).strip()}%"
-        q_seq = f"%{_sequence_no_digits_only(search)}%"
-        # Join Aircraft table for registration search
-        stmt = stmt.join(Aircraft, AircraftTechnicalLog.aircraft_fk == Aircraft.id)
-        stmt = stmt.where(Aircraft.is_deleted == False)
-        aircraft_joined = True
-        stmt = stmt.where(
-            or_(
-                AircraftTechnicalLog.sequence_no.ilike(q_seq),
-                AircraftTechnicalLog.origin_station.ilike(q),
-                AircraftTechnicalLog.destination_station.ilike(q),
-                cast(AircraftTechnicalLog.nature_of_flight, String).ilike(q),
-                Aircraft.registration.ilike(q),
-            )
-        )
-
+    stmt, aircraft_joined = _apply_atl_paged_search(stmt, search)
     stmt = _apply_atl_paged_sort(stmt, sort, aircraft_joined=aircraft_joined)
 
     # Total count query (same filters, no ORDER BY)
@@ -1237,23 +1402,7 @@ def _build_aircraft_technical_logs_list_statements(
             AircraftTechnicalLog.atl_batch_fk == atl_batch_fk
         )
 
-    if search and str(search).strip():
-        q = f"%{str(search).strip()}%"
-        q_seq = f"%{_sequence_no_digits_only(search)}%"
-        # Join Aircraft table for registration search in count query
-        count_stmt = count_stmt.join(
-            Aircraft, AircraftTechnicalLog.aircraft_fk == Aircraft.id
-        )
-        count_stmt = count_stmt.where(Aircraft.is_deleted == False)
-        count_stmt = count_stmt.where(
-            or_(
-                AircraftTechnicalLog.sequence_no.ilike(q_seq),
-                AircraftTechnicalLog.origin_station.ilike(q),
-                AircraftTechnicalLog.destination_station.ilike(q),
-                cast(AircraftTechnicalLog.nature_of_flight, String).ilike(q),
-                Aircraft.registration.ilike(q),
-            )
-        )
+    count_stmt, _aircraft_joined = _apply_atl_paged_search(count_stmt, search)
 
     return stmt, count_stmt
 
