@@ -10,33 +10,81 @@ from app.api.deps import oauth2_scheme, get_current_active_account, get_current_
 from app.database import AsyncSessionLocal
 from app.services import file_upload_service as storage
 
-from app.core.rbac_modules import (MAINTENANCE_MODULE, LOGBOOK_MODULE, GENERAL_INFORMATION_MODULE, REGULATORY_COMPLIANCE_MODULE)
+from app.core.rbac_modules import (
+    MAINTENANCE_MODULE,
+    LOGBOOK_MODULE,
+    OPERATION_MODULE,
+    GENERAL_INFORMATION_MODULE,
+    REGULATORY_COMPLIANCE_MODULE,
+)
 
 router = APIRouter()
+# ATL White ATL / DFP files are part of the technical log, edited from Operation
+# and Logbook. Maintenance remains valid for maintenance roles. Do not require
+# Maintenance can_update when Operation or Logbook already grants the edit.
+ATL_ATTACHMENT_MODULES = (
+    OPERATION_MODULE,
+    LOGBOOK_MODULE,
+    MAINTENANCE_MODULE,
+    REGULATORY_COMPLIANCE_MODULE,
+)
 MODULES = {
-    'white_atl': MAINTENANCE_MODULE, 'dfp': MAINTENANCE_MODULE,
-    'logbooks': LOGBOOK_MODULE, 'ad_monitoring': MAINTENANCE_MODULE,
-    'document_on_board': GENERAL_INFORMATION_MODULE, 'aircraft': GENERAL_INFORMATION_MODULE,
-    'aircraft_statutory_certificates': REGULATORY_COMPLIANCE_MODULE,
-    'statutory_certificates': REGULATORY_COMPLIANCE_MODULE,
+    'white_atl': ATL_ATTACHMENT_MODULES, 'dfp': ATL_ATTACHMENT_MODULES,
+    'logbooks': (LOGBOOK_MODULE,), 'ad_monitoring': (MAINTENANCE_MODULE,),
+    'document_on_board': (GENERAL_INFORMATION_MODULE,), 'aircraft': (GENERAL_INFORMATION_MODULE,),
+    'aircraft_statutory_certificates': (REGULATORY_COMPLIANCE_MODULE,),
+    'statutory_certificates': (REGULATORY_COMPLIANCE_MODULE,),
 }
+
+
+def permission_modules_for_folder(module_folder: str) -> tuple[str, ...] | None:
+    mapped = MODULES.get(module_folder)
+    if mapped is None:
+        return None
+    if isinstance(mapped, str):
+        return (mapped,)
+    return tuple(mapped)
+
+
+async def ensure_any_folder_permission(session, account, module_folder: str, actions: tuple[str, ...]) -> None:
+    """Allow the action when any mapped module grants one of the actions."""
+    modules = permission_modules_for_folder(module_folder)
+    if not modules:
+        raise HTTPException(status_code=400, detail='Unsupported upload module.')
+    last_denied: HTTPException | None = None
+    last_missing: HTTPException | None = None
+    for action in actions:
+        for module in modules:
+            try:
+                await ensure_account_permission(session, account, module, action)
+                return
+            except HTTPException as exc:
+                if exc.status_code == 403:
+                    last_denied = exc
+                    continue
+                if exc.status_code == 404:
+                    last_missing = exc
+                    continue
+                raise
+    if last_denied is not None:
+        raise last_denied
+    if last_missing is not None:
+        raise last_missing
+
+
 _slots = weakref.WeakKeyDictionary()
 
 
 async def upload_owner(module_folder: str, token: str = Depends(oauth2_scheme)) -> int:
-    module = MODULES.get(module_folder)
-    if module is None:
+    if permission_modules_for_folder(module_folder) is None:
         raise HTTPException(status_code=400, detail='Unsupported upload module.')
     # Auth session closes before multipart parsing or permanent storage starts.
     async with AsyncSessionLocal() as session:
         account = await get_current_account(token=token, session=session)
         account = await get_current_active_account(account=account)
-        try:
-            await ensure_account_permission(session, account, module, 'can_create')
-        except HTTPException as exc:
-            if exc.status_code != 403:
-                raise
-            await ensure_account_permission(session, account, module, 'can_update')
+        await ensure_any_folder_permission(
+            session, account, module_folder, ('can_create', 'can_update')
+        )
         return account.id
 
 
@@ -70,13 +118,19 @@ class _UploadParser(MultiPartParser):
 
 
 async def download_reader(module_folder: str, token: str = Depends(oauth2_scheme)) -> int:
-    module = MODULES.get(module_folder)
-    if module is None:
+    if permission_modules_for_folder(module_folder) is None:
         raise HTTPException(status_code=404, detail='File not found')
     async with AsyncSessionLocal() as session:
         account = await get_current_account(token=token, session=session)
         account = await get_current_active_account(account=account)
-        await ensure_account_permission(session, account, module, 'can_read')
+        try:
+            await ensure_any_folder_permission(
+                session, account, module_folder, ('can_read',)
+            )
+        except HTTPException as exc:
+            if exc.status_code == 400:
+                raise HTTPException(status_code=404, detail='File not found') from exc
+            raise
         return account.id
 
 
