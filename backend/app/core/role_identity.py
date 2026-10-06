@@ -3,6 +3,7 @@
 Displayed role names stay unchanged. Equivalent roles share access behavior.
 """
 
+import re
 from typing import List, Optional, Sequence, Tuple
 
 MAINTENANCE_MANAGER_ROLE = "Maintenance Manager"
@@ -87,6 +88,19 @@ def is_technical_publication_role(role_name: Optional[str]) -> bool:
         or n == "oem tech publication"
         or n.endswith(" technical publication")
     )
+
+
+def is_mechanic_role(role_name: Optional[str]) -> bool:
+    """Mechanic, Mechanic - Document, and any name that contains the word Mechanic.
+
+    Mechanic - Maintenance Manager is a Maintenance Manager alias and is excluded.
+    """
+    if is_maintenance_manager_role(role_name):
+        return False
+    n = _collapsed_role_name(role_name)
+    if not n:
+        return False
+    return re.search(r"(?:^|\s)mechanic(?:\s|$)", n) is not None
 
 
 def is_quality_manager_role(role_name: Optional[str]) -> bool:

@@ -48,7 +48,18 @@ def test_can_edit_atl_matrix():
     assert can_edit_atl_for_role_and_status(
         "Quality Manager", WorkStatus.COMPLETED
     )
+    assert can_edit_atl_for_role_and_status("Mechanic", WorkStatus.FOR_REVIEW)
+    assert can_edit_atl_for_role_and_status(
+        "Mechanic - Document", WorkStatus.FOR_REVIEW
+    )
+    assert can_edit_atl_for_role_and_status("Line Mechanic", WorkStatus.FOR_REVIEW)
     assert not can_edit_atl_for_role_and_status("Mechanic", WorkStatus.PENDING)
+    assert not can_edit_atl_for_role_and_status(
+        "Mechanic - Document", WorkStatus.APPROVED
+    )
+    assert not can_edit_atl_for_role_and_status(
+        "Mechanic - Maintenance Manager", WorkStatus.FOR_REVIEW
+    )
 
 
 def test_validate_raises_standard_message():
