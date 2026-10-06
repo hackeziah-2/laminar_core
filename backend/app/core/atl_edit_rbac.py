@@ -6,6 +6,7 @@ from app.core.role_identity import (
     is_admin_role,
     is_maintenance_manager_role,
     is_maintenance_planner_role,
+    is_mechanic_role,
     is_quality_manager_role,
     is_technical_publication_role,
     normalize_role_name,
@@ -49,6 +50,9 @@ _QUALITY_MANAGER_ALLOWED: FrozenSet[WorkStatus] = frozenset(
     }
 )
 
+# Mechanic, Mechanic - Document, and any role name that contains “Mechanic”.
+_MECHANIC_ALLOWED: FrozenSet[WorkStatus] = frozenset({WorkStatus.FOR_REVIEW})
+
 # Logbook Renew — work_status-only (not full form edit).
 _MAINTENANCE_PLANNER_RENEW_TRANSITIONS: Set[Tuple[WorkStatus, WorkStatus]] = {
     (WorkStatus.REJECTED_QUALITY, WorkStatus.PENDING),
@@ -77,6 +81,8 @@ def _allowed_statuses_for_role(role_name: Optional[str]) -> Optional[FrozenSet[W
         return _MAINTENANCE_MANAGER_ALLOWED
     if is_quality_manager_role(role_name):
         return _QUALITY_MANAGER_ALLOWED
+    if is_mechanic_role(role_name):
+        return _MECHANIC_ALLOWED
     return frozenset()
 
 
