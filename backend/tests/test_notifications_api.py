@@ -66,6 +66,20 @@ async def test_unread_count_endpoint(async_authenticated_client: AsyncClient, au
 
 
 @pytest.mark.asyncio
+async def test_unread_count_uses_recipient_account(
+    async_authenticated_client: AsyncClient,
+    auth_account_id: int,
+):
+    await _seed_recipient_notifications(auth_account_id, count=2)
+
+    response = await async_authenticated_client.get(
+        f"/api/v1/notifications/unread-count?recipient_account={auth_account_id}"
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == {"unread_count": 2}
+
+
+@pytest.mark.asyncio
 async def test_mark_one_notification_read(async_authenticated_client: AsyncClient, auth_account_id: int):
     await _seed_recipient_notifications(auth_account_id, count=1)
     notification_id = (

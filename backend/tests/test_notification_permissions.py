@@ -40,6 +40,28 @@ async def test_user_cannot_mark_another_users_notification(
 
 
 @pytest.mark.asyncio
+async def test_unread_count_rejects_another_recipient(
+    async_client: AsyncClient,
+    auth_account_id: int,
+    async_auth_headers: dict,
+):
+    from tests.conftest import TestSessionLocal
+
+    async with TestSessionLocal() as session:
+        role_id = await seed_role(session)
+        other_account_id = await seed_account(session, role_id=role_id)
+        await session.commit()
+
+    await _seed_other_user_notification(other_account_id)
+
+    response = await async_client.get(
+        f"/api/v1/notifications/unread-count?recipient_account={other_account_id}",
+        headers=async_auth_headers,
+    )
+    assert response.status_code == 403, response.text
+
+
+@pytest.mark.asyncio
 async def test_user_only_sees_own_notifications(async_client: AsyncClient, auth_account_id: int):
     from tests.conftest import TestSessionLocal
 

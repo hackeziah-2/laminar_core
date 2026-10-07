@@ -1095,3 +1095,10 @@ class ATLPagedItemWithAutoApiRead(AircraftTechnicalLogApiRead):
 
     class Config:
         orm_mode = True
+
+
+class ATLAircraftScopedSearchItem(ATLPagedItemWithAutoApiRead):
+    """GET /aircraft/{id}/atl/ item. Signer fields are uppercase full names, same as GET /paged."""
+
+    pilot_accepted_by: Optional[str] = None
+    rts_signed_by: Optional[str] = None

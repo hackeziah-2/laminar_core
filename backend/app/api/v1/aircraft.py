@@ -120,7 +120,7 @@ async def api_reorder_aircraft(
 
 @router.get(
     "/{aircraft_id}/atl/",
-    response_model=List[aircraft_technical_log_schema.ATLPagedItemWithAutoApiRead],
+    response_model=List[aircraft_technical_log_schema.ATLAircraftScopedSearchItem],
     response_model_by_alias=False,
     summary="Search ATL by sequence number (aircraft-scoped)",
     description=(
@@ -128,6 +128,7 @@ async def api_reorder_aircraft(
         "filter, field values, and sequence_no-desc sort as "
         "GET /api/v1/aircraft-technical-log/paged. ATL- prefix on sequence_number is optional. "
         "When multiple rows match, the latest sequence_no is first. "
+        "A sequence_number with no match returns 404 and detail 'ATL Not Found'. "
         "For dropdown label + aircraft only, use GET /api/v1/aircraft-technical-log/search."
     ),
 )
@@ -146,6 +147,8 @@ async def api_aircraft_atl_search(
         aircraft_fk=aircraft_id,
         limit=limit,
     )
+    if not items:
+        raise HTTPException(status_code=404, detail="ATL Not Found")
     return await serialize_atl_paged_api_items(session, items)
 
 

@@ -1150,6 +1150,12 @@ def test_aircraft_scoped_atl_search_returns_full_fields_and_component_parts(
     assert empty.status_code == 200, empty.text
     assert empty.json() == []
 
+    missing = client_with_atl_auth.get(
+        f"/api/v1/aircraft/{aircraft_id}/atl/?sequence_number=999999&limit=5"
+    )
+    assert missing.status_code == 404, missing.text
+    assert missing.json()["detail"] == "ATL Not Found"
+
     response = client_with_atl_auth.get(
         f"/api/v1/aircraft/{aircraft_id}/atl/?sequence_number=24451"
     )
@@ -1173,6 +1179,75 @@ def test_aircraft_scoped_atl_search_returns_full_fields_and_component_parts(
     assert row["component_parts"][0]["nomenclature"] == "Oil Filter"
     assert row["component_parts"][0]["removed_part_no"] == "OF-1"
     assert row["component_parts"][0]["installed_part_no"] == "OF-2"
+
+
+def test_aircraft_scoped_atl_search_returns_uppercase_signer_names(
+    client_with_atl_auth: TestClient,
+    test_aircraft_data: dict,
+):
+    """Signer FKs are returned as uppercase names, matching GET /aircraft-technical-log/paged."""
+    from app.core.security import get_password_hash
+    from app.models.account import AccountInformation
+
+    aircraft_payload = {
+        **test_aircraft_data,
+        "msn": "TEST-MSN-ATL-SEARCH-SIGNERS",
+        "registration": "TEST-ATL-SEARCH-SIGNERS",
+    }
+    aircraft_response = client_with_atl_auth.post(
+        "/api/v1/aircraft/",
+        data={"json_data": json.dumps(aircraft_payload)},
+        files={},
+    )
+    assert aircraft_response.status_code == 200, aircraft_response.text
+    aircraft_id = aircraft_response.json()["id"]
+
+    rts = client_with_atl_auth.post(
+        "/api/v1/account-information/",
+        json={
+            "first_name": "Juan",
+            "middle_name": "Santos",
+            "last_name": "Dela Cruz",
+            "username": "juan_atl_search_rts",
+            "password": "securepassword123",
+            "status": True,
+        },
+    )
+    assert rts.status_code == 201, rts.text
+    rts_id = rts.json()["id"]
+
+    async def seed_row() -> None:
+        async with TestSessionLocal() as session:
+            pilot = AccountInformation(
+                first_name="pedro",
+                middle_name=None,
+                last_name="reyes",
+                username="pedro_atl_search_pilot",
+                password=get_password_hash("securepassword123"),
+                status=True,
+            )
+            session.add(pilot)
+            await session.flush()
+            session.add(
+                AircraftTechnicalLog(
+                    aircraft_fk=aircraft_id,
+                    sequence_no="55123",
+                    rts_signed_by=rts_id,
+                    pilot_accepted_by=pilot.id,
+                )
+            )
+            await session.commit()
+
+    asyncio.run(seed_row())
+
+    response = client_with_atl_auth.get(
+        f"/api/v1/aircraft/{aircraft_id}/atl/?sequence_number=55123&limit=5"
+    )
+    assert response.status_code == 200, response.text
+    items = response.json()
+    assert len(items) == 1
+    assert items[0]["rts_signed_by"] == "JUAN SANTOS DELA CRUZ"
+    assert items[0]["pilot_accepted_by"] == "PEDRO REYES"
 
 
 def test_aircraft_scoped_atl_search_respects_limit(
