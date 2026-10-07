@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +31,21 @@ def _notification_service(session: AsyncSession = Depends(get_session)) -> Notif
     return NotificationService(session)
 
 
+def _resolve_recipient_account_id(
+    recipient_account: Optional[int],
+    current_account: AccountInformation,
+) -> int:
+    """Count or list for recipient_account when sent; it must be the signed-in account."""
+    if recipient_account is None:
+        return current_account.id
+    if recipient_account != current_account.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not allowed to read another account's notifications",
+        )
+    return recipient_account
+
+
 @router.get("", response_model=NotificationPagedResponse)
 @router.get("/", response_model=NotificationPagedResponse, include_in_schema=False)
 async def api_list_notifications(
@@ -38,12 +55,17 @@ async def api_list_notifications(
     ),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
+    recipient_account: Optional[int] = Query(
+        None,
+        description="Account id to list. Must be the authenticated account.",
+    ),
     current_account: AccountInformation = Depends(get_current_active_account),
     service: NotificationService = Depends(_notification_service),
 ):
     """List notifications for the authenticated user."""
+    recipient_id = _resolve_recipient_account_id(recipient_account, current_account)
     return await service.get_notifications(
-        current_account.id,
+        recipient_id,
         status_filter=status,
         page=page,
         limit=limit,
@@ -52,11 +74,16 @@ async def api_list_notifications(
 
 @router.get("/unread-count", response_model=NotificationUnreadCountResponse)
 async def api_unread_count(
+    recipient_account: Optional[int] = Query(
+        None,
+        description="Account id whose unread notifications to count. Must be the authenticated account.",
+    ),
     current_account: AccountInformation = Depends(get_current_active_account),
     service: NotificationService = Depends(_notification_service),
 ):
     """Return unread notification count for the bell badge."""
-    return await service.get_unread_count(current_account.id)
+    recipient_id = _resolve_recipient_account_id(recipient_account, current_account)
+    return await service.get_unread_count(recipient_id)
 
 
 @router.patch("/read-all")
