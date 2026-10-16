@@ -46,6 +46,7 @@ from app.api.v1 import (
     atl_batch as atl_batch_router,
     atl_excel_import as atl_excel_import_router,
     report_generator as report_generator_router,
+    reports as reports_router,
     audit_log as audit_log_router,
     notification as notification_router,
     nature_of_flight_description as nature_of_flight_description_router,
@@ -178,7 +179,7 @@ async def api_v1_health():
 ensure_uploads_dir()
 
 
-from app.api.v1.file_upload import download_reader
+from app.api.v1.file_upload import download_reader, preview_reader
 
 
 def _resolve_and_serve_file(filename: str, module_folder: Optional[str] = None):
@@ -250,6 +251,37 @@ async def download_file_by_name(
     return _resolve_and_serve_file(name.strip(), module_folder)
 
 
+@app.get(
+    "/api/v1/{module_folder}/preview/{filename:path}",
+    summary="Preview uploaded file",
+    description="Return a stored file for in-app preview. "
+                "White ATL and DFP downloads are refused for Mechanic; preview stays available.",
+    tags=["files"],
+)
+async def preview_file(module_folder: str, filename: str, _: int = Depends(preview_reader)):
+    """Serve an uploaded file for preview without the download permission gate."""
+    return _resolve_and_serve_file(filename, module_folder)
+
+
+@app.get(
+    "/api/v1/{module_folder}/preview",
+    summary="Preview uploaded file (by query param)",
+    tags=["files"],
+)
+async def preview_file_by_name(
+    module_folder: str,
+    name: Optional[str] = Query(None, description="Filename to preview"),
+    _: int = Depends(preview_reader),
+):
+    """Serve an uploaded file for preview when the filename is a query parameter."""
+    if not name or not name.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="Query parameter 'name' is required (e.g. ?name=ATL.jpg).",
+        )
+    return _resolve_and_serve_file(name.strip(), module_folder)
+
+
 from app.api.v1.file_upload import router as file_upload_router
 app.include_router(file_upload_router)
 
@@ -304,6 +336,7 @@ app.include_router(personnel_compliance_matrix_2_router.router)
 app.include_router(advisory_router.router)
 app.include_router(advisory_router.router_advisory)
 app.include_router(dashboard_router.router)
+app.include_router(reports_router.router)
 app.include_router(excel_data_router.router)
 app.include_router(report_generator_router.router)
 

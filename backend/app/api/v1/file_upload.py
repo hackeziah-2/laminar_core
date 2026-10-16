@@ -7,6 +7,7 @@ from python_multipart.exceptions import MultipartParseError
 from starlette.datastructures import UploadFile
 
 from app.api.deps import oauth2_scheme, get_current_active_account, get_current_account, ensure_account_permission
+from app.core.role_identity import is_mechanic_role
 from app.database import AsyncSessionLocal
 from app.services import file_upload_service as storage
 
@@ -117,12 +118,39 @@ class _UploadParser(MultiPartParser):
         super().on_end()
 
 
-async def download_reader(module_folder: str, token: str = Depends(oauth2_scheme)) -> int:
+ATL_ATTACHMENT_DOWNLOAD_FOLDERS = frozenset({'white_atl', 'dfp'})
+
+
+def mechanic_atl_attachment_download_denied(module_folder: str, role_name: str | None) -> bool:
+    """White ATL and DFP downloads are open to every role except Mechanic."""
+    return (
+        module_folder in ATL_ATTACHMENT_DOWNLOAD_FOLDERS
+        and is_mechanic_role(role_name)
+    )
+
+
+async def _authorize_file_reader(
+    module_folder: str,
+    token: str,
+    *,
+    deny_mechanic_download: bool,
+) -> int:
     if permission_modules_for_folder(module_folder) is None:
         raise HTTPException(status_code=404, detail='File not found')
     async with AsyncSessionLocal() as session:
         account = await get_current_account(token=token, session=session)
         account = await get_current_active_account(account=account)
+        role = getattr(account, 'role', None)
+        role_name = getattr(role, 'name', None) if role is not None else None
+        if module_folder in ATL_ATTACHMENT_DOWNLOAD_FOLDERS:
+            if deny_mechanic_download and mechanic_atl_attachment_download_denied(
+                module_folder, role_name
+            ):
+                raise HTTPException(
+                    status_code=403,
+                    detail='You do not have permission to download this file.',
+                )
+            return account.id
         try:
             await ensure_any_folder_permission(
                 session, account, module_folder, ('can_read',)
@@ -132,6 +160,20 @@ async def download_reader(module_folder: str, token: str = Depends(oauth2_scheme
                 raise HTTPException(status_code=404, detail='File not found') from exc
             raise
         return account.id
+
+
+async def download_reader(module_folder: str, token: str = Depends(oauth2_scheme)) -> int:
+    """Authorize a file download. Mechanic cannot download White ATL or DFP."""
+    return await _authorize_file_reader(
+        module_folder, token, deny_mechanic_download=True
+    )
+
+
+async def preview_reader(module_folder: str, token: str = Depends(oauth2_scheme)) -> int:
+    """Authorize in-app preview. Mechanic may preview White ATL and DFP, not download them."""
+    return await _authorize_file_reader(
+        module_folder, token, deny_mechanic_download=False
+    )
 
 
 async def _parse_file(request: Request):

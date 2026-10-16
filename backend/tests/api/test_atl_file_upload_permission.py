@@ -4,7 +4,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi import HTTPException
 
-from app.api.v1.file_upload import ensure_any_folder_permission
+from app.api.v1.file_upload import (
+    ensure_any_folder_permission,
+    mechanic_atl_attachment_download_denied,
+)
 from app.core.rbac_modules import MAINTENANCE_MODULE, OPERATION_MODULE
 
 
@@ -46,6 +49,31 @@ async def test_white_atl_upload_still_rejects_when_no_atl_module_can_update():
                 object(), object(), "dfp", ("can_create", "can_update")
             )
     assert exc.value.status_code == 403
+
+
+def test_mechanic_cannot_download_white_atl_or_dfp():
+    for folder in ("white_atl", "dfp"):
+        assert mechanic_atl_attachment_download_denied(folder, "Mechanic") is True
+        assert mechanic_atl_attachment_download_denied(folder, "Mechanic - Document") is True
+        assert mechanic_atl_attachment_download_denied(folder, "Line Mechanic") is True
+
+
+def test_other_roles_can_download_white_atl_and_dfp():
+    for role in (
+        "Admin",
+        "Maintenance Planner",
+        "Maintenance Manager",
+        "Mechanic - Maintenance Manager",
+        "Technical Publication",
+        "Quality Manager",
+        "Pilot",
+    ):
+        assert mechanic_atl_attachment_download_denied("white_atl", role) is False
+        assert mechanic_atl_attachment_download_denied("dfp", role) is False
+
+
+def test_mechanic_download_block_does_not_apply_to_other_modules():
+    assert mechanic_atl_attachment_download_denied("logbooks", "Mechanic") is False
 
 
 @pytest.mark.asyncio
