@@ -18,7 +18,7 @@ from app.repository.fleet_daily_update import (
 )
 from app.repository.aircraft import get_aircraft
 from app.repository.ldnd_monitoring import (
-    get_ldnd_latest_by_aircraft,
+    get_latest_last_done_tach_due_by_aircraft,
     get_ldnd_latest_unfilled_by_aircraft,
 )
 from app.repository.aircraft_technical_log import get_latest_aircraft_technical_log
@@ -75,7 +75,8 @@ def _round1(value: Optional[float]) -> Optional[float]:
 
 async def _enrich_item_with_ldnd(session, orm_item):
     """Build list item with next_insp_due / next_insp_due_unit from latest unfilled LDND row,
-    tach_time_due from LDND latest, tach_time_eod from the stored daily-update value
+    tach_time_due from the latest LDND last_done_tach_due (tach done is not required),
+    tach_time_eod from the stored daily-update value
     (bulk/single update) with ATL tachometer_end as fallback when unset,
     and remaining_time_before_next_isp / remaining_time_before_engine / remaining_time_before_propeller."""
     base = _fleet_daily_update_item_with_aircraft(orm_item)
@@ -87,9 +88,9 @@ async def _enrich_item_with_ldnd(session, orm_item):
     )
     unit = ldnd_unfilled.unit or ""
     base["next_insp_due_unit"] = unit if unit else ""
-    ldnd = await get_ldnd_latest_by_aircraft(session, aircraft_id)
-    # tach_time_due: from next_due_tach_hours (latest record), rounded to one decimal
-    raw_tach_due = ldnd.next_due_tach_hours if ldnd else None
+    # tach_time_due: Last Done Tach Due on the latest LDND row that has one.
+    # last_done_tach_done is not required.
+    raw_tach_due = await get_latest_last_done_tach_due_by_aircraft(session, aircraft_id)
     base["tach_time_due"] = _round1(raw_tach_due)
 
     # Prefer persisted tach_time_eod (set via bulk/PUT); fall back to latest ATL tachometer_end.
@@ -223,8 +224,8 @@ async def api_list_fleet_daily_updates_paged(
     """Get paginated list of Fleet Daily Update entries. Search by aircraft registration; filter by status.
     Each item includes next_insp_due and next_insp_due_unit from the latest unfilled LDND row
     (api/v1/aircraft/{id}/ldnd-monitoring/inspection_type/latest semantics), tach_time_due from
-    api/v1/aircraft/{id}/ldnd-monitoring/latest, and tach_time_eod from the stored daily-update
-    value (bulk/PUT), falling back to latest ATL tachometer_end when unset."""
+    the latest LDND last_done_tach_due (last_done_tach_done is not required), and tach_time_eod
+    from the stored daily-update value (bulk/PUT), falling back to latest ATL tachometer_end when unset."""
     return await _list_fleet_daily_updates_paged_impl(
         pagination=pagination,
         search=search,
