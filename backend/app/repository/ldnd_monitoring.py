@@ -232,6 +232,28 @@ async def get_ldnd_detail_by_aircraft(
     )
 
 
+async def get_latest_last_done_tach_due_by_aircraft(
+    session: AsyncSession, aircraft_id: int
+) -> Optional[float]:
+    """Last Done Tach Due from the latest LDND row that has one.
+
+    last_done_tach_done, next_due_tach_hours, and performed dates are not required.
+    """
+    stmt = (
+        select(LDNDMonitoring.last_done_tach_due)
+        .where(LDNDMonitoring.aircraft_fk == aircraft_id)
+        .where(LDNDMonitoring.is_deleted == False)
+        .where(LDNDMonitoring.last_done_tach_due.is_not(None))
+        .order_by(
+            LDNDMonitoring.created_at.desc().nulls_last(),
+            LDNDMonitoring.id.desc(),
+        )
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
 async def get_ldnd_latest_unfilled_by_aircraft(
     session: AsyncSession, aircraft_id: int
 ) -> LDNDInspectionTypeLatestResponse:
