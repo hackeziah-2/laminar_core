@@ -260,3 +260,53 @@ def test_ldnd_detail_invalid_aircraft_returns_404(client: TestClient):
     response = client.get("/api/v1/aircraft/999999/ldnd-detail")
     assert response.status_code == 404
     assert response.json() == {"detail": "Aircraft not found"}
+
+
+def test_fleet_daily_update_tach_time_due_from_latest_last_done_tach_due(
+    client: TestClient,
+):
+    """Latest Last Done Tach Due is returned even when Last Done Tach Done is blank."""
+    aircraft_id = _create_aircraft(client, "FDU-TACH-DUE")
+    other_id = _create_aircraft(client, "FDU-TACH-OTHER")
+
+    older = client.post(
+        f"/api/v1/aircraft/{aircraft_id}/ldnd-monitoring/",
+        json={
+            "aircraft_fk": aircraft_id,
+            "inspection_type": "50-Hour Inspection",
+            "unit": "HRS",
+            "last_done_tach_due": 1000.0,
+            "last_done_tach_done": 900.0,
+            "next_due_tach_hours": 2000.0,
+            "performed_date_start": "2026-01-01",
+            "performed_date_end": "2026-01-02",
+        },
+    )
+    assert older.status_code == 201, older.text
+
+    latest = client.post(
+        f"/api/v1/aircraft/{aircraft_id}/ldnd-monitoring/",
+        json={
+            "aircraft_fk": aircraft_id,
+            "inspection_type": "100-Hour Inspection",
+            "unit": "HRS",
+            "last_done_tach_due": 1699.7,
+        },
+    )
+    assert latest.status_code == 201, latest.text
+    assert latest.json()["last_done_tach_done"] is None
+
+    _create_ldnd(client, other_id, last_done_tach_due=500.0)
+
+    response = client.get(
+        "/api/v1/fleet-daily-update/",
+        params={"aircraft_fk": aircraft_id},
+    )
+    assert response.status_code == 200, response.text
+    items = response.json()["items"]
+    assert len(items) == 1
+    assert items[0]["aircraft"]["id"] == aircraft_id
+    assert items[0]["tach_time_due"] == 1699.7
+    assert items[0]["remaining_time_before_next_isp"] == 0.0
+    assert items[0]["remaining_time_before_engine"] == 0.0
+    assert items[0]["remaining_time_before_propeller"] == 0.0
