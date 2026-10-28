@@ -1175,15 +1175,15 @@ def test_latest_orders_sequence_no_numerically(
     assert latest.json()["sequence_no"] == "0100"
 
 
-def test_latest_not_found_returns_specified_detail(
+def test_latest_not_found_returns_empty(
     client_with_atl_auth: TestClient,
 ):
-    """GET /latest returns 404 with spec detail when no ATL exists for the filter."""
+    """GET /latest returns an empty body when no ATL exists for the aircraft."""
     response = client_with_atl_auth.get(
         "/api/v1/aircraft-technical-log/latest?aircraft_id=999999"
     )
-    assert response.status_code == 404
-    assert response.json()["detail"] == "No ATL record found."
+    assert response.status_code == 200
+    assert response.json() is None
 
 
 def test_latest_with_sequence_no_returns_previous_atl(

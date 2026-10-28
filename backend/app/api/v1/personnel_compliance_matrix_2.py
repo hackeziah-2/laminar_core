@@ -41,11 +41,11 @@ async def api_matrix_2_paged(
     pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = Query(
         None,
-        description="Search by account name (first, last, middle, or Last, First / First Last patterns) or auth stamp.",
+        description="Case-insensitive partial match on name, authorization number (auth stamp), or license.",
     ),
     name: Optional[str] = Query(
         None,
-        description="Alias for search (account name / auth stamp).",
+        description="Alias for search (name, authorization number, or license).",
     ),
     sort: Optional[str] = Query(
         "",

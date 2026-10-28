@@ -297,6 +297,7 @@ app.include_router(document_on_board_router.router_aircraft_scoped)
 app.include_router(ldnd_monitoring_router.router_aircraft_scoped)
 app.include_router(ad_monitoring_router.router_aircraft_scoped)
 app.include_router(tcc_maintenance_router.router_aircraft_scoped)
+app.include_router(tcc_maintenance_router.router_profile_scoped)
 app.include_router(fleet_daily_update_router.router_aircraft_scoped)
 # ATL paged under /api/v1/aircraft/{id}/atl/paged before generic /{aircraft_id} routes
 app.include_router(atl_paged_router.router)

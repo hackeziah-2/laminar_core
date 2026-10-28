@@ -38,6 +38,48 @@ async def test_user_cannot_mark_another_users_notification(
     )
     assert response.status_code == 404
 
+    unread_response = await async_client.patch(
+        f"/api/v1/notifications/{notification_id}/unread",
+        headers=async_auth_headers,
+    )
+    assert unread_response.status_code == 404
+
+    delete_response = await async_client.delete(
+        f"/api/v1/notifications/{notification_id}",
+        headers=async_auth_headers,
+    )
+    assert delete_response.status_code == 404
+    assert delete_response.json()["detail"] == "Notification not found."
+
+
+@pytest.mark.asyncio
+async def test_bulk_actions_reject_another_recipient(
+    async_client: AsyncClient,
+    auth_account_id: int,
+    async_auth_headers: dict,
+):
+    from tests.conftest import TestSessionLocal
+
+    async with TestSessionLocal() as session:
+        role_id = await seed_role(session)
+        other_account_id = await seed_account(session, role_id=role_id)
+        await session.commit()
+
+    await _seed_other_user_notification(other_account_id)
+    await _seed_other_user_notification(auth_account_id)
+
+    for path in ("/api/v1/notifications/read-all", "/api/v1/notifications/clear-all"):
+        response = await async_client.patch(
+            f"{path}?recipient_account={other_account_id}",
+            headers=async_auth_headers,
+        )
+        assert response.status_code == 403, response.text
+
+    own = await async_client.get("/api/v1/notifications?status=all", headers=async_auth_headers)
+    assert own.status_code == 200
+    assert own.json()["total"] == 1
+    assert own.json()["unread_count"] == 1
+
 
 @pytest.mark.asyncio
 async def test_unread_count_rejects_another_recipient(

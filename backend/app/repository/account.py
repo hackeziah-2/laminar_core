@@ -156,7 +156,9 @@ async def get_account_information_by_auth_stamp(
                 func.lower(AccountInformation.last_name).like(pattern, escape="\\"),
             )
         )
+        .where(AccountInformation.status == True)
         .where(AccountInformation.is_deleted == False)
+        .where(AccountInformation.role_id != 1)
         .limit(limit)
     )
     return list(result.scalars().all())
@@ -375,6 +377,7 @@ async def list_account_informations(
                 AccountInformation.middle_name.ilike(q),
                 AccountInformation.designation.ilike(q),
                 AccountInformation.license_no.ilike(q),
+                AccountInformation.auth_stamp.ilike(q),
             )
         )
         count_stmt = count_stmt.where(

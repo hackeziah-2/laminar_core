@@ -14,8 +14,10 @@ from app.enums.notification import NotificationListStatusFilter
 from app.models.account import AccountInformation
 from app.repository.account_auth import get_account_by_id
 from app.schemas.notification_schema import (
+    NotificationMutationResponse,
     NotificationPagedResponse,
     NotificationRead,
+    NotificationStateResponse,
     NotificationUnreadCountResponse,
 )
 from app.services.notification_service import NotificationService
@@ -41,7 +43,7 @@ def _resolve_recipient_account_id(
     if recipient_account != current_account.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not allowed to read another account's notifications",
+            detail="Not allowed to access another account's notifications.",
         )
     return recipient_account
 
@@ -86,44 +88,146 @@ async def api_unread_count(
     return await service.get_unread_count(recipient_id)
 
 
-@router.patch("/read-all")
+def _state_response(
+    notification: NotificationRead,
+    notice: str,
+    counts: NotificationUnreadCountResponse,
+) -> NotificationStateResponse:
+    return NotificationStateResponse(
+        notice=notice,
+        unread_count=counts.unread_count,
+        total=counts.total,
+        read_count=counts.read_count,
+        **notification.dict(),
+    )
+
+
+def _mutation_response(
+    message: str,
+    counts: NotificationUnreadCountResponse,
+    *,
+    updated_count: int = 0,
+    deleted_count: int = 0,
+) -> NotificationMutationResponse:
+    return NotificationMutationResponse(
+        message=message,
+        unread_count=counts.unread_count,
+        total=counts.total,
+        read_count=counts.read_count,
+        updated_count=updated_count,
+        deleted_count=deleted_count,
+    )
+
+
+@router.patch("/read-all", response_model=NotificationMutationResponse)
 async def api_mark_all_read(
+    recipient_account: Optional[int] = Query(
+        None,
+        description="Account id to update. Must be the authenticated account.",
+    ),
     current_account: AccountInformation = Depends(get_current_active_account),
     service: NotificationService = Depends(_notification_service),
 ):
-    """Mark all unread notifications as read."""
-    updated_count = await service.mark_all_as_read(current_account.id)
-    return {"updated_count": updated_count}
+    """Mark every unread notification in the authenticated user's inbox as read."""
+    recipient_id = _resolve_recipient_account_id(recipient_account, current_account)
+    updated_count = await service.mark_all_as_read(recipient_id)
+    counts = await service.inbox_counts(recipient_id)
+    return _mutation_response(
+        "All notifications marked as read.",
+        counts,
+        updated_count=updated_count,
+    )
 
 
-@router.patch("/clear-all")
+@router.patch("/clear-all", response_model=NotificationMutationResponse)
 async def api_clear_all(
+    recipient_account: Optional[int] = Query(
+        None,
+        description="Account id to clear. Must be the authenticated account.",
+    ),
     current_account: AccountInformation = Depends(get_current_active_account),
     service: NotificationService = Depends(_notification_service),
 ):
-    """Soft-archive all notifications (clear all)."""
-    archived_count = await service.clear_all_notifications(current_account.id)
-    return {"archived_count": archived_count}
+    """Permanently delete every notification belonging to the authenticated user."""
+    recipient_id = _resolve_recipient_account_id(recipient_account, current_account)
+    deleted_count = await service.clear_all_notifications(recipient_id)
+    counts = await service.inbox_counts(recipient_id)
+    message = (
+        "All notifications deleted."
+        if deleted_count
+        else "No notifications to delete."
+    )
+    return _mutation_response(message, counts, deleted_count=deleted_count)
 
 
-@router.patch("/{notification_id}/read", response_model=NotificationRead)
+@router.patch("/{notification_id}/read", response_model=NotificationStateResponse)
 async def api_mark_read(
     notification_id: int,
+    recipient_account: Optional[int] = Query(
+        None,
+        description="Account id that owns the notification. Must be the authenticated account.",
+    ),
     current_account: AccountInformation = Depends(get_current_active_account),
     service: NotificationService = Depends(_notification_service),
 ):
-    """Mark a single notification as read."""
-    return await service.mark_as_read(notification_id, current_account.id)
+    """Mark one notification in the authenticated user's inbox as read."""
+    recipient_id = _resolve_recipient_account_id(recipient_account, current_account)
+    notification = await service.mark_as_read(notification_id, recipient_id)
+    counts = await service.inbox_counts(recipient_id)
+    return _state_response(notification, "Notification marked as read.", counts)
+
+
+@router.patch("/{notification_id}/unread", response_model=NotificationStateResponse)
+async def api_mark_unread(
+    notification_id: int,
+    recipient_account: Optional[int] = Query(
+        None,
+        description="Account id that owns the notification. Must be the authenticated account.",
+    ),
+    current_account: AccountInformation = Depends(get_current_active_account),
+    service: NotificationService = Depends(_notification_service),
+):
+    """Mark one notification in the authenticated user's inbox as unread."""
+    recipient_id = _resolve_recipient_account_id(recipient_account, current_account)
+    notification = await service.mark_as_unread(notification_id, recipient_id)
+    counts = await service.inbox_counts(recipient_id)
+    return _state_response(notification, "Notification marked as unread.", counts)
+
+
+@router.delete("/{notification_id}", response_model=NotificationMutationResponse)
+async def api_delete_notification(
+    notification_id: int,
+    recipient_account: Optional[int] = Query(
+        None,
+        description="Account id that owns the notification. Must be the authenticated account.",
+    ),
+    current_account: AccountInformation = Depends(get_current_active_account),
+    service: NotificationService = Depends(_notification_service),
+):
+    """Permanently delete one notification from the authenticated user's inbox."""
+    recipient_id = _resolve_recipient_account_id(recipient_account, current_account)
+    await service.delete_notification(notification_id, recipient_id)
+    counts = await service.inbox_counts(recipient_id)
+    return _mutation_response(
+        "Notification deleted.",
+        counts,
+        deleted_count=1,
+    )
 
 
 @router.patch("/{notification_id}/archive", response_model=NotificationRead)
 async def api_archive_notification(
     notification_id: int,
+    recipient_account: Optional[int] = Query(
+        None,
+        description="Account id that owns the notification. Must be the authenticated account.",
+    ),
     current_account: AccountInformation = Depends(get_current_active_account),
     service: NotificationService = Depends(_notification_service),
 ):
-    """Archive a single notification."""
-    return await service.archive_notification(notification_id, current_account.id)
+    """Archive a single notification owned by the authenticated user."""
+    recipient_id = _resolve_recipient_account_id(recipient_account, current_account)
+    return await service.archive_notification(notification_id, recipient_id)
 
 
 async def _authenticate_websocket(

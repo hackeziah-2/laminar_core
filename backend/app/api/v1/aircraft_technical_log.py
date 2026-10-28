@@ -316,7 +316,7 @@ async def api_get_latest_in_batch(
 
 @router.get(
     "/latest",
-    response_model=aircraft_technical_log_schema.AircraftTechnicalLogRead,
+    response_model=Optional[aircraft_technical_log_schema.AircraftTechnicalLogRead],
     response_model_by_alias=False,
 )
 async def api_get_latest(
@@ -374,10 +374,7 @@ async def api_get_latest(
             aircraft_fk=filter_aircraft,
         )
         if not obj:
-            raise HTTPException(
-                status_code=404,
-                detail="No ATL record found.",
-            )
+            return None
     return await aircraft_technical_log_read_persisted(session, obj)
 
 
