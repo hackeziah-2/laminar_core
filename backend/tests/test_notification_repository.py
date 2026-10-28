@@ -1,9 +1,11 @@
 """Repository tests for notifications."""
 
 import pytest
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.enums.notification import NotificationListStatusFilter, NotificationSeverity, NotificationStatus, NotificationType
+from app.models.notification import Notification
 from app.repository import notification as notification_repo
 from app.schemas.notification_schema import NotificationCreate
 from tests.factories.notification import seed_notification
@@ -121,3 +123,59 @@ async def test_pagination_limits_results(db_session: AsyncSession):
 
     assert total == 5
     assert len(items) == 2
+
+
+@pytest.mark.asyncio
+async def test_mark_unread_and_bulk_actions_stay_on_one_recipient(db_session: AsyncSession):
+    role_id = await seed_role(db_session)
+    owner_id = await seed_account(db_session, role_id=role_id)
+    other_id = await seed_account(db_session, role_id=role_id)
+    await db_session.commit()
+
+    own = await seed_notification(db_session, recipient_account_id=owner_id, title="Mine")
+    other = await seed_notification(db_session, recipient_account_id=other_id, title="Theirs")
+    await notification_repo.mark_notification_read(db_session, own)
+    await notification_repo.mark_notification_unread(db_session, own)
+
+    assert own.status == NotificationStatus.UNREAD
+    assert own.read_at is None
+
+    updated = await notification_repo.mark_all_notifications_read(db_session, owner_id)
+    assert updated == 1
+    assert own.status == NotificationStatus.READ
+    assert other.status == NotificationStatus.UNREAD
+
+    await seed_notification(
+        db_session,
+        recipient_account_id=owner_id,
+        title="Archived",
+        status=NotificationStatus.ARCHIVED,
+    )
+    removed = await notification_repo.delete_all_notifications(db_session, owner_id)
+    assert removed == 2
+    assert other.status == NotificationStatus.UNREAD
+
+    _items, other_total = await notification_repo.list_notifications_for_recipient(
+        db_session,
+        recipient_account_id=other_id,
+    )
+    owner_items, owner_total = await notification_repo.list_notifications_for_recipient(
+        db_session,
+        recipient_account_id=owner_id,
+    )
+    assert other_total == 1
+    assert owner_total == 0
+    assert owner_items == []
+    db_session.expire_all()
+    owner_stored = await db_session.scalar(
+        select(func.count())
+        .select_from(Notification)
+        .where(Notification.recipient_account_id == owner_id)
+    )
+    other_stored = await db_session.scalar(
+        select(func.count())
+        .select_from(Notification)
+        .where(Notification.recipient_account_id == other_id)
+    )
+    assert owner_stored == 0
+    assert other_stored == 1

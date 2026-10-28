@@ -55,6 +55,28 @@ class NotificationRead(BaseModel):
 
 class NotificationUnreadCountResponse(BaseModel):
     unread_count: int
+    total: int
+    read_count: int
+
+
+class NotificationMutationResponse(BaseModel):
+    """Result of an inbox change, including the recipient's updated counts."""
+
+    message: str
+    unread_count: int
+    total: int
+    read_count: int
+    updated_count: int = 0
+    deleted_count: int = 0
+
+
+class NotificationStateResponse(NotificationRead):
+    """One notification after a read or unread change, plus inbox counts."""
+
+    notice: str
+    unread_count: int
+    total: int
+    read_count: int
 
 
 class NotificationPagedResponse(BaseModel):
@@ -64,6 +86,8 @@ class NotificationPagedResponse(BaseModel):
     total: int
     total_pages: int
     unread_count: int
+    read_count: int
+    inbox_total: int
 
 
 class NotificationWebSocketEvent(BaseModel):

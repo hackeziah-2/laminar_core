@@ -298,3 +298,97 @@ def test_personnel_compliance_matrix_2_from_personnel_authorization_fallback_aut
         pa, others_expiry_date=date(2027, 1, 2)
     )
     assert item2.others_expiry_date == date(2027, 1, 2)
+
+
+def test_personnel_compliance_matrix_2_search_matches_name_auth_and_license(
+    client_with_regulatory_compliance_auth: TestClient,
+):
+    client = client_with_regulatory_compliance_auth
+    alpha = client.post(
+        "/api/v1/account-information/",
+        json={
+            "first_name": "Matrix",
+            "last_name": "SearchAlpha",
+            "username": "m2_search_alpha",
+            "password": "securepassword123",
+            "status": True,
+            "auth_stamp": "AUTH-M2-ALPHA",
+            "license_no": "LIC-M2-ALPHA",
+        },
+    )
+    assert alpha.status_code == 201, alpha.text
+    alpha_id = alpha.json()["id"]
+    beta = client.post(
+        "/api/v1/account-information/",
+        json={
+            "first_name": "Matrix",
+            "last_name": "SearchBeta",
+            "username": "m2_search_beta",
+            "password": "securepassword123",
+            "status": True,
+            "auth_stamp": "AUTH-M2-BETA",
+            "license_no": "LIC-M2-BETA",
+        },
+    )
+    assert beta.status_code == 201, beta.text
+    for account_id in (alpha_id, beta.json()["id"]):
+        created = client.post(
+            "/api/v1/personnel-authorization/",
+            json={"account_information_id": account_id, "is_withhold": False},
+        )
+        assert created.status_code == 201, created.text
+
+    def listed_account_ids(query: str) -> list[int]:
+        response = client.get(
+            f"/api/v1/personnel-compliance-matrix-2/paged?{query}"
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["page"] == 1
+        assert body["total"] == len(body["items"])
+        return [item["account_information_id"] for item in body["items"]]
+
+    assert listed_account_ids("page=1&limit=50&name=searchalpha") == [alpha_id]
+    assert listed_account_ids("page=1&limit=50&name=m2-alpha") == [alpha_id]
+    assert listed_account_ids("page=1&limit=50&search=lic-m2-alpha") == [alpha_id]
+
+
+def test_personnel_compliance_matrix_2_sorts_by_authorization_number(
+    client_with_regulatory_compliance_auth: TestClient,
+):
+    client = client_with_regulatory_compliance_auth
+
+    def create_account(username: str, auth_stamp: str) -> int:
+        created = client.post(
+            "/api/v1/account-information/",
+            json={
+                "first_name": "Matrix",
+                "last_name": "AuthOrder",
+                "username": username,
+                "password": "securepassword123",
+                "status": True,
+                "auth_stamp": auth_stamp,
+            },
+        )
+        assert created.status_code == 201, created.text
+        account_id = created.json()["id"]
+        authorization = client.post(
+            "/api/v1/personnel-authorization/",
+            json={"account_information_id": account_id, "is_withhold": False},
+        )
+        assert authorization.status_code == 201, authorization.text
+        return account_id
+
+    later_id = create_account("m2_sort_auth_b", "AUTH-M2-SORT-B")
+    earlier_id = create_account("m2_sort_auth_a", "AUTH-M2-SORT-A")
+
+    def ordered_ids(sort: str) -> list[int]:
+        response = client.get(
+            "/api/v1/personnel-compliance-matrix-2/paged"
+            f"?page=1&limit=50&name=authorder&sort={sort}"
+        )
+        assert response.status_code == 200, response.text
+        return [item["account_information_id"] for item in response.json()["items"]]
+
+    assert ordered_ids("authorization_no") == [earlier_id, later_id]
+    assert ordered_ids("-authorization_no") == [later_id, earlier_id]

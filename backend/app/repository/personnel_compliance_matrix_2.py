@@ -115,6 +115,7 @@ async def list_personnel_compliance_matrix_2_paged(
             AccountInformation.last_name.ilike(q),
             AccountInformation.middle_name.ilike(q),
             AccountInformation.auth_stamp.ilike(q),
+            AccountInformation.license_no.ilike(q),
             concat_last_first.ilike(q),
             concat_first_last.ilike(q),
         )

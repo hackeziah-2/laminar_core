@@ -35,6 +35,16 @@ router = APIRouter(
 )
 
 
+def _effective_personnel_search(
+    search: Optional[str],
+    name: Optional[str],
+) -> Optional[str]:
+    for value in (search, name):
+        if value and value.strip():
+            return value.strip()
+    return None
+
+
 async def _list_paged(
     session: AsyncSession,
     pagination: Pagination,
@@ -69,11 +79,15 @@ async def api_list(
     pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = Query(
         None,
-        description="Search by account name: first_name, last_name, middle_name, or combined patterns (e.g. Last, First or First Last).",
+        description="Case-insensitive partial match on name, authorization number (auth stamp), or license.",
+    ),
+    name: Optional[str] = Query(
+        None,
+        description="Alias for search (name, authorization number, or license).",
     ),
     sort: Optional[str] = Query(
         "",
-        description="Sort: full_name, -full_name, expiry_date, -expiry_date, auth_initial_doi, item_type, id, created_at, account_information_id__auth_stamp, etc.",
+        description="Sort: authorization_no, -authorization_no, full_name, -full_name, expiry_date, -expiry_date, auth_initial_doi, item_type, id, created_at, account_information_id__auth_stamp, etc.",
     ),
     account_information__designation: Optional[str] = Query(
         None,
@@ -91,7 +105,7 @@ async def api_list(
     return await _list_paged(
         session=session,
         pagination=pagination,
-        search=search,
+        search=_effective_personnel_search(search, name),
         sort=sort,
         account_information__designation=account_information__designation,
         item_type=item_type,
@@ -103,11 +117,15 @@ async def api_list_paged(
     pagination: Pagination = Depends(pagination_params),
     search: Optional[str] = Query(
         None,
-        description="Search by account name: first_name, last_name, middle_name, or combined patterns (e.g. Last, First or First Last).",
+        description="Case-insensitive partial match on name, authorization number (auth stamp), or license.",
+    ),
+    name: Optional[str] = Query(
+        None,
+        description="Alias for search (name, authorization number, or license).",
     ),
     sort: Optional[str] = Query(
         "",
-        description="Sort: full_name, -full_name, expiry_date, -expiry_date, auth_initial_doi, item_type, id, created_at, account_information_id__auth_stamp, etc.",
+        description="Sort: authorization_no, -authorization_no, full_name, -full_name, expiry_date, -expiry_date, auth_initial_doi, item_type, id, created_at, account_information_id__auth_stamp, etc.",
     ),
     account_information__designation: Optional[str] = Query(
         None,
@@ -125,7 +143,7 @@ async def api_list_paged(
     return await _list_paged(
         session=session,
         pagination=pagination,
-        search=search,
+        search=_effective_personnel_search(search, name),
         sort=sort,
         account_information__designation=account_information__designation,
         item_type=item_type,

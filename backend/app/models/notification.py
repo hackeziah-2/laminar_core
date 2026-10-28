@@ -100,6 +100,11 @@ class Notification(Base, TimestampMixin, PublicUuidMixin):
         self.status = NotificationStatus.READ
         self.read_at = ph_now()
 
+    def mark_unread(self) -> None:
+        """Transition back to UNREAD and clear the read timestamp."""
+        self.status = NotificationStatus.UNREAD
+        self.read_at = None
+
     def mark_archived(self) -> None:
         """Soft-archive the notification."""
         self.status = NotificationStatus.ARCHIVED

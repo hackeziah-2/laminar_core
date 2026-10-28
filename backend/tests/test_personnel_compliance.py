@@ -350,3 +350,115 @@ def test_personnel_compliance_piper_pa34_crud_filter_and_existing_types(
     )
     assert baron.status_code == 201, baron.text
     assert baron.json()["item_type"] == "BARON"
+
+
+def test_personnel_compliance_paged_search_matches_name_auth_and_license(
+    client_with_regulatory_compliance_auth: TestClient,
+):
+    client = client_with_regulatory_compliance_auth
+
+    def create_account(**fields):
+        payload = {
+            "password": "securepassword123",
+            "status": True,
+            **fields,
+        }
+        created = client.post("/api/v1/account-information/", json=payload)
+        assert created.status_code == 201, created.text
+        return created.json()["id"]
+
+    alpha_id = create_account(
+        first_name="Searchable",
+        last_name="AlphaPerson",
+        username="search_alpha_pc",
+        auth_stamp="AUTH-ALPHA-77",
+        license_no="LIC-ALPHA-42",
+    )
+    beta_id = create_account(
+        first_name="Other",
+        last_name="BetaPerson",
+        username="search_beta_pc",
+        auth_stamp="AUTH-BETA-88",
+        license_no="LIC-BETA-99",
+    )
+    for account_id in (alpha_id, beta_id):
+        created = client.post(
+            "/api/v1/personnel-compliance/",
+            json={
+                "account_information_id": account_id,
+                "item_type": PersonnelComplianceItemType.HF_TRAINING.value,
+                "is_withhold": False,
+            },
+        )
+        assert created.status_code == 201, created.text
+
+    def listed_account_ids(query: str) -> list[int]:
+        response = client.get(f"/api/v1/personnel-compliance/paged?{query}")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["page"] == 1
+        assert body["total"] == len(body["items"])
+        return [item["account_information_id"] for item in body["items"]]
+
+    assert listed_account_ids("page=1&page_size=50&name=alphaperson") == [alpha_id]
+    assert listed_account_ids("page=1&page_size=50&name=alpha-77") == [alpha_id]
+    assert listed_account_ids("page=1&page_size=50&search=lic-alpha") == [alpha_id]
+    assert (
+        listed_account_ids(
+            "page=1&page_size=50&name=alphaperson&item_type=CESSNA"
+        )
+        == []
+    )
+    filtered = client.get(
+        "/api/v1/personnel-compliance/paged?page=1&page_size=50&name=alphaperson&item_type=HF_TRAINING"
+    )
+    assert filtered.status_code == 200, filtered.text
+    filtered_body = filtered.json()
+    assert filtered_body["total"] == 1
+    assert filtered_body["page"] == 1
+    assert filtered_body["items"][0]["account_information_id"] == alpha_id
+
+
+def test_personnel_compliance_paged_sorts_by_authorization_number(
+    client_with_regulatory_compliance_auth: TestClient,
+):
+    client = client_with_regulatory_compliance_auth
+
+    def create_account(username: str, auth_stamp: str) -> int:
+        created = client.post(
+            "/api/v1/account-information/",
+            json={
+                "first_name": "Sort",
+                "last_name": "AuthOrder",
+                "username": username,
+                "password": "securepassword123",
+                "status": True,
+                "auth_stamp": auth_stamp,
+            },
+        )
+        assert created.status_code == 201, created.text
+        account_id = created.json()["id"]
+        compliance = client.post(
+            "/api/v1/personnel-compliance/",
+            json={
+                "account_information_id": account_id,
+                "item_type": PersonnelComplianceItemType.HF_TRAINING.value,
+                "is_withhold": False,
+            },
+        )
+        assert compliance.status_code == 201, compliance.text
+        return account_id
+
+    later_id = create_account("sort_auth_b_pc", "AUTH-SORT-B")
+    earlier_id = create_account("sort_auth_a_pc", "AUTH-SORT-A")
+
+    def ordered_ids(sort: str) -> list[int]:
+        response = client.get(
+            "/api/v1/personnel-compliance/paged"
+            f"?page=1&page_size=50&name=authorder&sort={sort}"
+        )
+        assert response.status_code == 200, response.text
+        return [item["account_information_id"] for item in response.json()["items"]]
+
+    assert ordered_ids("authorization_no") == [earlier_id, later_id]
+    assert ordered_ids("-authorization_no") == [later_id, earlier_id]

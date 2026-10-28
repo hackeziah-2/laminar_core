@@ -402,3 +402,251 @@ async def api_delete_tcc_maintenance_by_aircraft(
             detail="TCC Maintenance not found",
         )
     return None
+
+
+# Profile-scoped routes: /api/v1/profile/{id}/maintenance-tcc
+# `{id}` is the aircraft profile id (same value as aircraft_id).
+router_profile_scoped = APIRouter(
+    prefix="/api/v1/profile",
+    tags=["tcc-maintenance"],
+)
+
+
+@router_profile_scoped.get(
+    "/{id}/maintenance-tcc/paged",
+    response_model=tcc_maintenance_schema.TCCMaintenancePagedResponse,
+    summary="List Maintenance TCC for a profile (paginated)",
+)
+async def api_list_profile_maintenance_tcc_paged(
+    id: int,
+    pagination: Pagination = Depends(pagination_params),
+    search: Optional[str] = Query(None),
+    atl_ref: Optional[int] = Query(None),
+    category: Optional[str] = Query(
+        None,
+        description="Filter by category: Powerplant, Airframe, Inspection Servicing",
+    ),
+    sort: Optional[str] = Query(""),
+    session: AsyncSession = Depends(get_session),
+):
+    """List Maintenance TCC rows for the profile id."""
+    return await api_list_tcc_maintenances_by_aircraft_paged(
+        aircraft_id=id,
+        pagination=pagination,
+        search=search,
+        atl_ref=atl_ref,
+        category=category,
+        sort=sort,
+        session=session,
+    )
+
+
+@router_profile_scoped.get(
+    "/{id}/maintenance-tcc/{maintenance_id}",
+    response_model=tcc_maintenance_schema.TCCMaintenanceRead,
+    summary="Get Maintenance TCC by ID for a profile",
+)
+async def api_get_profile_maintenance_tcc(
+    id: int,
+    maintenance_id: int,
+    session: AsyncSession = Depends(get_session),
+):
+    """Get one Maintenance TCC row. Path id is the profile id."""
+    return await api_get_tcc_maintenance_by_aircraft(
+        aircraft_id=id,
+        maintenance_id=maintenance_id,
+        session=session,
+    )
+
+
+@router_profile_scoped.post(
+    "/{id}/maintenance-tcc",
+    response_model=tcc_maintenance_schema.TCCMaintenanceRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create Maintenance TCC for a profile",
+)
+async def api_create_profile_maintenance_tcc(
+    request: Request,
+    id: int,
+    payload: tcc_maintenance_schema.TCCMaintenanceCreate,
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
+):
+    """Create a Maintenance TCC row for the profile id."""
+    return await api_create_tcc_maintenance_by_aircraft(
+        request=request,
+        aircraft_id=id,
+        payload=payload,
+        session=session,
+        current_account=current_account,
+    )
+
+
+@router_profile_scoped.put(
+    "/{id}/maintenance-tcc/{maintenance_id}",
+    response_model=tcc_maintenance_schema.TCCMaintenanceRead,
+    summary="Update Maintenance TCC for a profile",
+)
+async def api_update_profile_maintenance_tcc(
+    request: Request,
+    id: int,
+    maintenance_id: int,
+    payload: tcc_maintenance_schema.TCCMaintenanceUpdate,
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
+):
+    """Update a Maintenance TCC row. Path id is the profile id."""
+    return await api_update_tcc_maintenance_by_aircraft(
+        request=request,
+        aircraft_id=id,
+        maintenance_id=maintenance_id,
+        payload=payload,
+        session=session,
+        current_account=current_account,
+    )
+
+
+@router_profile_scoped.delete(
+    "/{id}/maintenance-tcc/{maintenance_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Soft delete Maintenance TCC for a profile",
+)
+async def api_delete_profile_maintenance_tcc(
+    request: Request,
+    id: int,
+    maintenance_id: int,
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
+):
+    """Soft delete a Maintenance TCC row for a profile."""
+    return await api_delete_tcc_maintenance_by_aircraft(
+        request=request,
+        aircraft_id=id,
+        maintenance_id=maintenance_id,
+        session=session,
+        current_account=current_account,
+    )
+
+
+# Profile-scoped routes: /api/v1/profile/{id}/maintenance-tcc
+# `{id}` is the aircraft profile id (same value as aircraft_id).
+router_profile_scoped = APIRouter(
+    prefix="/api/v1/profile",
+    tags=["tcc-maintenance"],
+)
+
+
+@router_profile_scoped.get(
+    "/{id}/maintenance-tcc/paged",
+    response_model=tcc_maintenance_schema.TCCMaintenancePagedResponse,
+    summary="List Maintenance TCC for a profile (paginated)",
+)
+async def api_list_profile_maintenance_tcc_paged(
+    id: int,
+    pagination: Pagination = Depends(pagination_params),
+    search: Optional[str] = Query(None),
+    atl_ref: Optional[int] = Query(None),
+    category: Optional[str] = Query(
+        None,
+        description="Filter by category: Powerplant, Airframe, Inspection Servicing",
+    ),
+    sort: Optional[str] = Query(""),
+    session: AsyncSession = Depends(get_session),
+):
+    """List Maintenance TCC rows for the profile id."""
+    return await api_list_tcc_maintenances_by_aircraft_paged(
+        aircraft_id=id,
+        pagination=pagination,
+        search=search,
+        atl_ref=atl_ref,
+        category=category,
+        sort=sort,
+        session=session,
+    )
+
+
+@router_profile_scoped.get(
+    "/{id}/maintenance-tcc/{maintenance_id}",
+    response_model=tcc_maintenance_schema.TCCMaintenanceRead,
+    summary="Get Maintenance TCC by ID for a profile",
+)
+async def api_get_profile_maintenance_tcc(
+    id: int,
+    maintenance_id: int,
+    session: AsyncSession = Depends(get_session),
+):
+    """Get one Maintenance TCC row. Path id is the profile id."""
+    return await api_get_tcc_maintenance_by_aircraft(
+        aircraft_id=id,
+        maintenance_id=maintenance_id,
+        session=session,
+    )
+
+
+@router_profile_scoped.post(
+    "/{id}/maintenance-tcc",
+    response_model=tcc_maintenance_schema.TCCMaintenanceRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create Maintenance TCC for a profile",
+)
+async def api_create_profile_maintenance_tcc(
+    request: Request,
+    id: int,
+    payload: tcc_maintenance_schema.TCCMaintenanceCreate,
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
+):
+    """Create a Maintenance TCC row for the profile id."""
+    return await api_create_tcc_maintenance_by_aircraft(
+        request=request,
+        aircraft_id=id,
+        payload=payload,
+        session=session,
+        current_account=current_account,
+    )
+
+
+@router_profile_scoped.put(
+    "/{id}/maintenance-tcc/{maintenance_id}",
+    response_model=tcc_maintenance_schema.TCCMaintenanceRead,
+    summary="Update Maintenance TCC for a profile",
+)
+async def api_update_profile_maintenance_tcc(
+    request: Request,
+    id: int,
+    maintenance_id: int,
+    payload: tcc_maintenance_schema.TCCMaintenanceUpdate,
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
+):
+    """Update a Maintenance TCC row. Path id is the profile id."""
+    return await api_update_tcc_maintenance_by_aircraft(
+        request=request,
+        aircraft_id=id,
+        maintenance_id=maintenance_id,
+        payload=payload,
+        session=session,
+        current_account=current_account,
+    )
+
+
+@router_profile_scoped.delete(
+    "/{id}/maintenance-tcc/{maintenance_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Soft delete Maintenance TCC for a profile",
+)
+async def api_delete_profile_maintenance_tcc(
+    request: Request,
+    id: int,
+    maintenance_id: int,
+    session: AsyncSession = Depends(get_session),
+    current_account: AccountInformation = Depends(get_current_active_account),
+):
+    """Soft delete a Maintenance TCC row for a profile."""
+    return await api_delete_tcc_maintenance_by_aircraft(
+        request=request,
+        aircraft_id=id,
+        maintenance_id=maintenance_id,
+        session=session,
+        current_account=current_account,
+    )
