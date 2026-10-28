@@ -18,6 +18,30 @@ from app.schemas.personnel_compliance_schema import (
 )
 
 
+def _account_personnel_search_filter(term: str):
+    """Case-insensitive partial match on name, authorization number, or license."""
+    q = f"%{term.strip()}%"
+    concat_last_first = func.concat(
+        func.coalesce(AccountInformation.last_name, ""),
+        ", ",
+        func.coalesce(AccountInformation.first_name, ""),
+    )
+    concat_first_last = func.concat(
+        func.coalesce(AccountInformation.first_name, ""),
+        " ",
+        func.coalesce(AccountInformation.last_name, ""),
+    )
+    return or_(
+        AccountInformation.first_name.ilike(q),
+        AccountInformation.last_name.ilike(q),
+        AccountInformation.middle_name.ilike(q),
+        AccountInformation.auth_stamp.ilike(q),
+        AccountInformation.license_no.ilike(q),
+        concat_last_first.ilike(q),
+        concat_first_last.ilike(q),
+    )
+
+
 def _latest_personnel_authorization_subquery():
     ranked = (
         select(
@@ -89,7 +113,10 @@ async def list_personnel_compliances(
     if designation is not None and str(designation).strip() != "":
         need_join = True
     sort_lower = (sort or "").lower()
-    if "account_information_id__auth_stamp" in sort_lower:
+    if (
+        "account_information_id__auth_stamp" in sort_lower
+        or "authorization_no" in sort_lower
+    ):
         need_join = True
     if "auth_initial_doi" in sort_lower:
         need_join = True
@@ -109,26 +136,7 @@ async def list_personnel_compliances(
     if need_join:
         stmt = stmt.join(PersonnelCompliance.account_information)
     if search and search.strip():
-        q = f"%{search.strip()}%"
-        concat_last_first = func.concat(
-            func.coalesce(AccountInformation.last_name, ""),
-            ", ",
-            func.coalesce(AccountInformation.first_name, ""),
-        )
-        concat_first_last = func.concat(
-            func.coalesce(AccountInformation.first_name, ""),
-            " ",
-            func.coalesce(AccountInformation.last_name, ""),
-        )
-        stmt = stmt.where(
-            or_(
-                AccountInformation.first_name.ilike(q),
-                AccountInformation.last_name.ilike(q),
-                AccountInformation.middle_name.ilike(q),
-                concat_last_first.ilike(q),
-                concat_first_last.ilike(q),
-            )
-        )
+        stmt = stmt.where(_account_personnel_search_filter(search))
     if designation is not None and str(designation).strip() != "":
         stmt = stmt.where(AccountInformation.designation == designation.strip())
     if item_type is not None:
@@ -138,6 +146,7 @@ async def list_personnel_compliances(
         "id": PersonnelCompliance.id,
         "account_information_id": PersonnelCompliance.account_information_id,
         "account_information_id__auth_stamp": AccountInformation.auth_stamp,
+        "authorization_no": AccountInformation.auth_stamp,
         "item_type": PersonnelCompliance.item_type,
         "auth_issue_date": PersonnelCompliance.auth_issue_date,
         "expiry_date": PersonnelCompliance.expiry_date,
@@ -201,26 +210,7 @@ async def list_personnel_compliances(
     if need_join:
         count_stmt = count_stmt.join(PersonnelCompliance.account_information)
     if search and search.strip():
-        q = f"%{search.strip()}%"
-        concat_last_first = func.concat(
-            func.coalesce(AccountInformation.last_name, ""),
-            ", ",
-            func.coalesce(AccountInformation.first_name, ""),
-        )
-        concat_first_last = func.concat(
-            func.coalesce(AccountInformation.first_name, ""),
-            " ",
-            func.coalesce(AccountInformation.last_name, ""),
-        )
-        count_stmt = count_stmt.where(
-            or_(
-                AccountInformation.first_name.ilike(q),
-                AccountInformation.last_name.ilike(q),
-                AccountInformation.middle_name.ilike(q),
-                concat_last_first.ilike(q),
-                concat_first_last.ilike(q),
-            )
-        )
+        count_stmt = count_stmt.where(_account_personnel_search_filter(search))
     if designation is not None and str(designation).strip() != "":
         count_stmt = count_stmt.where(AccountInformation.designation == designation.strip())
     if item_type is not None:

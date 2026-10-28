@@ -42,7 +42,7 @@ Table: `notifications`
 - `metadata` JSONB for extensible payloads
 - Composite index: `(recipient_account_id, status, created_at)`
 
-Archived rows are excluded from list/count queries. Clear-all sets `status = ARCHIVED` and `archived_at = ph_now()` — no hard deletes.
+Archived rows are excluded from list/count queries. Single-item archive sets `status = ARCHIVED` and `archived_at = ph_now()`. Clear-all permanently deletes every row for the authenticated recipient and does not touch other recipients.
 
 ## API Endpoints
 
@@ -53,7 +53,7 @@ Archived rows are excluded from list/count queries. Clear-all sets `status = ARC
 | PATCH | `/api/v1/notifications/{id}/read` | Mark one as read |
 | PATCH | `/api/v1/notifications/read-all` | Mark all as read |
 | PATCH | `/api/v1/notifications/{id}/archive` | Archive one |
-| PATCH | `/api/v1/notifications/clear-all` | Soft-archive all |
+| PATCH | `/api/v1/notifications/clear-all` | Permanently delete the authenticated user's notifications |
 | WS | `/api/v1/notifications/ws?token=<JWT>` | Realtime events |
 
 ### Example list response

@@ -5,7 +5,7 @@ from __future__ import annotations
 from math import ceil
 from typing import List, Optional, Tuple
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import ph_now
@@ -100,6 +100,38 @@ async def count_unread_for_recipient(
     return int((await session.execute(stmt)).scalar() or 0)
 
 
+async def count_inbox_for_recipient(
+    session: AsyncSession,
+    recipient_account_id: int,
+) -> int:
+    """Count notifications still in a recipient's inbox."""
+    stmt = (
+        select(func.count())
+        .select_from(Notification)
+        .where(
+            Notification.recipient_account_id == recipient_account_id,
+            Notification.status != NotificationStatus.ARCHIVED,
+        )
+    )
+    return int((await session.execute(stmt)).scalar() or 0)
+
+
+async def count_read_for_recipient(
+    session: AsyncSession,
+    recipient_account_id: int,
+) -> int:
+    """Count read notifications still in a recipient's inbox."""
+    stmt = (
+        select(func.count())
+        .select_from(Notification)
+        .where(
+            Notification.recipient_account_id == recipient_account_id,
+            Notification.status == NotificationStatus.READ,
+        )
+    )
+    return int((await session.execute(stmt)).scalar() or 0)
+
+
 async def mark_notification_read(
     session: AsyncSession,
     notification: Notification,
@@ -114,26 +146,66 @@ async def mark_notification_read(
     return notification
 
 
+async def mark_notification_unread(
+    session: AsyncSession,
+    notification: Notification,
+) -> Notification:
+    """Mark a single inbox notification as unread."""
+    if notification.status != NotificationStatus.READ:
+        return notification
+    notification.mark_unread()
+    session.add(notification)
+    await session.commit()
+    await session.refresh(notification)
+    return notification
+
+
+async def _load_recipient_notifications(
+    session: AsyncSession,
+    recipient_account_id: int,
+    *extra_filters,
+) -> List[Notification]:
+    result = await session.execute(
+        select(Notification).where(
+            Notification.recipient_account_id == recipient_account_id,
+            *extra_filters,
+        )
+    )
+    return list(result.scalars().all())
+
+
 async def mark_all_notifications_read(
     session: AsyncSession,
     recipient_account_id: int,
 ) -> int:
-    """Mark all unread notifications as read for a recipient."""
+    """Mark all unread notifications as read for one recipient."""
+    rows = await _load_recipient_notifications(
+        session,
+        recipient_account_id,
+        Notification.status == NotificationStatus.UNREAD,
+    )
     now = ph_now()
+    for row in rows:
+        row.mark_read()
+        row.updated_at = now
+    await session.commit()
+    return len(rows)
+
+
+async def delete_notification_for_recipient(
+    session: AsyncSession,
+    notification_id: int,
+    recipient_account_id: int,
+) -> bool:
+    """Permanently delete one notification when it belongs to the recipient."""
     result = await session.execute(
-        update(Notification)
-        .where(
+        delete(Notification).where(
+            Notification.id == notification_id,
             Notification.recipient_account_id == recipient_account_id,
-            Notification.status == NotificationStatus.UNREAD,
-        )
-        .values(
-            status=NotificationStatus.READ,
-            read_at=now,
-            updated_at=now,
         )
     )
     await session.commit()
-    return int(result.rowcount or 0)
+    return int(result.rowcount or 0) > 0
 
 
 async def archive_notification(
@@ -150,26 +222,24 @@ async def archive_notification(
     return notification
 
 
-async def archive_all_notifications(
+async def delete_all_notifications(
     session: AsyncSession,
     recipient_account_id: int,
 ) -> int:
-    """Soft-archive all non-archived notifications for a recipient."""
-    now = ph_now()
-    result = await session.execute(
-        update(Notification)
-        .where(
-            Notification.recipient_account_id == recipient_account_id,
-            Notification.status != NotificationStatus.ARCHIVED,
-        )
-        .values(
-            status=NotificationStatus.ARCHIVED,
-            archived_at=now,
-            updated_at=now,
-        )
+    """Permanently delete every notification owned by one recipient."""
+    count_result = await session.execute(
+        select(func.count())
+        .select_from(Notification)
+        .where(Notification.recipient_account_id == recipient_account_id)
+    )
+    deleted_count = int(count_result.scalar_one())
+    if deleted_count == 0:
+        return 0
+    await session.execute(
+        delete(Notification).where(Notification.recipient_account_id == recipient_account_id)
     )
     await session.commit()
-    return int(result.rowcount or 0)
+    return deleted_count
 
 
 def compute_total_pages(total: int, limit: int) -> int:

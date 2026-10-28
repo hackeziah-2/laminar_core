@@ -181,6 +181,14 @@ class NotificationService:
             self.session,
             recipient_account_id,
         )
+        inbox_total = await notification_repo.count_inbox_for_recipient(
+            self.session,
+            recipient_account_id,
+        )
+        read_count = await notification_repo.count_read_for_recipient(
+            self.session,
+            recipient_account_id,
+        )
         return NotificationPagedResponse(
             items=[self.to_read_schema(item) for item in items],
             page=page,
@@ -188,14 +196,32 @@ class NotificationService:
             total=total,
             total_pages=notification_repo.compute_total_pages(total, limit),
             unread_count=unread_count,
+            read_count=read_count,
+            inbox_total=inbox_total,
         )
 
-    async def get_unread_count(self, recipient_account_id: int) -> NotificationUnreadCountResponse:
-        count = await notification_repo.count_unread_for_recipient(
+    async def inbox_counts(self, recipient_account_id: int) -> NotificationUnreadCountResponse:
+        """Unread, read, and total counts for one recipient's inbox."""
+        unread_count = await notification_repo.count_unread_for_recipient(
             self.session,
             recipient_account_id,
         )
-        return NotificationUnreadCountResponse(unread_count=count)
+        total = await notification_repo.count_inbox_for_recipient(
+            self.session,
+            recipient_account_id,
+        )
+        read_count = await notification_repo.count_read_for_recipient(
+            self.session,
+            recipient_account_id,
+        )
+        return NotificationUnreadCountResponse(
+            unread_count=unread_count,
+            total=total,
+            read_count=read_count,
+        )
+
+    async def get_unread_count(self, recipient_account_id: int) -> NotificationUnreadCountResponse:
+        return await self.inbox_counts(recipient_account_id)
 
     async def mark_as_read(
         self,
@@ -204,14 +230,32 @@ class NotificationService:
     ) -> NotificationRead:
         notification = await self._get_owned_notification(notification_id, recipient_account_id)
         if notification.status != NotificationStatus.UNREAD:
-            return self.to_read_schema(notification)
+            read_schema = self.to_read_schema(notification)
+            await self._push_inbox_counts(recipient_account_id)
+            return read_schema
         updated = await notification_repo.mark_notification_read(self.session, notification)
-        unread_count = await notification_repo.count_unread_for_recipient(
-            self.session,
-            recipient_account_id,
-        )
         read_schema = self.to_read_schema(updated)
-        await self._push_unread_count(recipient_account_id, unread_count)
+        await self._push_inbox_counts(recipient_account_id)
+        return read_schema
+
+    async def mark_as_unread(
+        self,
+        notification_id: int,
+        recipient_account_id: int,
+    ) -> NotificationRead:
+        notification = await self._get_owned_notification(notification_id, recipient_account_id)
+        if notification.status == NotificationStatus.ARCHIVED:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Notification not found.",
+            )
+        if notification.status == NotificationStatus.UNREAD:
+            read_schema = self.to_read_schema(notification)
+            await self._push_inbox_counts(recipient_account_id)
+            return read_schema
+        updated = await notification_repo.mark_notification_unread(self.session, notification)
+        read_schema = self.to_read_schema(updated)
+        await self._push_inbox_counts(recipient_account_id)
         return read_schema
 
     async def mark_all_as_read(self, recipient_account_id: int) -> int:
@@ -219,7 +263,7 @@ class NotificationService:
             self.session,
             recipient_account_id,
         )
-        await self._push_unread_count(recipient_account_id, 0)
+        await self._push_inbox_counts(recipient_account_id)
         return updated_count
 
     async def archive_notification(
@@ -229,20 +273,35 @@ class NotificationService:
     ) -> NotificationRead:
         notification = await self._get_owned_notification(notification_id, recipient_account_id)
         updated = await notification_repo.archive_notification(self.session, notification)
-        unread_count = await notification_repo.count_unread_for_recipient(
-            self.session,
-            recipient_account_id,
-        )
-        await self._push_unread_count(recipient_account_id, unread_count)
+        await self._push_inbox_counts(recipient_account_id)
         return self.to_read_schema(updated)
 
+    async def delete_notification(
+        self,
+        notification_id: int,
+        recipient_account_id: int,
+    ) -> None:
+        """Permanently remove one notification from the recipient's inbox."""
+        await self._get_owned_notification(notification_id, recipient_account_id)
+        deleted = await notification_repo.delete_notification_for_recipient(
+            self.session,
+            notification_id,
+            recipient_account_id,
+        )
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Notification not found.",
+            )
+        await self._push_inbox_counts(recipient_account_id)
+
     async def clear_all_notifications(self, recipient_account_id: int) -> int:
-        archived_count = await notification_repo.archive_all_notifications(
+        deleted_count = await notification_repo.delete_all_notifications(
             self.session,
             recipient_account_id,
         )
-        await self._push_unread_count(recipient_account_id, 0)
-        return archived_count
+        await self._push_inbox_counts(recipient_account_id)
+        return deleted_count
 
     async def _get_owned_notification(
         self,
@@ -257,7 +316,7 @@ class NotificationService:
         if notification is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Notification not found",
+                detail="Notification not found.",
             )
         return notification
 
@@ -295,10 +354,15 @@ class NotificationService:
                 exc_info=True,
             )
 
-    async def _push_unread_count(self, recipient_account_id: int, unread_count: int) -> None:
+    async def _push_inbox_counts(self, recipient_account_id: int) -> None:
+        counts = await self.inbox_counts(recipient_account_id)
         payload = {
             "event": "unread_count_updated",
-            "data": {"unread_count": unread_count},
+            "data": {
+                "unread_count": counts.unread_count,
+                "total": counts.total,
+                "read_count": counts.read_count,
+            },
         }
         try:
             await publish_notification_realtime(recipient_account_id, payload)
