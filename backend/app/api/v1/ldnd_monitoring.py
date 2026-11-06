@@ -17,6 +17,7 @@ from app.repository.ldnd_monitoring import (
     get_ldnd_monitoring_by_aircraft,
     get_ldnd_latest_by_aircraft,
     get_ldnd_latest_unfilled_by_aircraft,
+    get_previous_next_due_tach_hours,
     get_ldnd_detail_by_aircraft,
     list_ldnd_monitoring,
     create_ldnd_monitoring,
@@ -242,6 +243,42 @@ async def api_list_ldnd_monitoring_by_aircraft_paged(
         total=total,
         page=pagination.page,
         page_size=pagination.page_size,
+    )
+
+
+@router_aircraft_scoped.get(
+    "/{aircraft_id}/ldnd-monitoring/previous-next-due",
+    response_model=ldnd_monitoring_schema.LDNDPreviousNextDueResponse,
+    summary="Next Due Tach Hours from the latest matching maintenance record",
+)
+async def api_get_previous_next_due_tach_hours(
+    aircraft_id: int,
+    inspection_type: str = Query(
+        ...,
+        description="Maintenance item. Matched to inspection type, ignoring case and line endings.",
+    ),
+    exclude_id: Optional[int] = Query(
+        None,
+        description="LDND record to skip, such as the entry currently being edited.",
+    ),
+    session: AsyncSession = Depends(get_session),
+):
+    """Latest same-aircraft, same-item row by Performed Date End, descending.
+
+    Missing performed dates sort after dated rows. The response is that row's
+    Next Due Tach Hours, or null when there is no match or no value.
+    """
+    aircraft = await get_aircraft(session, aircraft_id)
+    if not aircraft:
+        raise HTTPException(status_code=404, detail="Aircraft not found")
+    value = await get_previous_next_due_tach_hours(
+        session,
+        aircraft_id,
+        inspection_type,
+        exclude_id=exclude_id,
+    )
+    return ldnd_monitoring_schema.LDNDPreviousNextDueResponse(
+        next_due_tach_hours=value
     )
 
 

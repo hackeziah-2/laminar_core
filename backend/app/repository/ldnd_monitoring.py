@@ -1,4 +1,5 @@
-from typing import Optional, List, Tuple
+from datetime import date
+from typing import Any, Iterable, Optional, List, Tuple
 
 from fastapi import Request
 from sqlalchemy import select, func, or_, cast, String
@@ -21,6 +22,87 @@ from app.schemas.ldnd_monitoring_schema import (
     LDNDDetailLastUpdated,
     LDNDDetailResponse,
 )
+
+
+def normalize_ldnd_inspection_type(value: Optional[str]) -> str:
+    """Compare inspection types without case, blank lines, or line-ending differences."""
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = [line.strip() for line in text.split("\n")]
+    return "\n".join(line for line in lines if line).casefold()
+
+
+def _finite_tach_hours(value: Any) -> Optional[float]:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number != number or number in (float("inf"), float("-inf")):
+        return None
+    return number
+
+
+def select_latest_next_due_tach_hours(
+    rows: Iterable[Any],
+    inspection_type: Optional[str],
+    exclude_id: Optional[int] = None,
+) -> Optional[float]:
+    """Next Due Tach Hours from the latest same-item row.
+
+    Latest is the greatest Performed Date End. Rows with no date sort after
+    every dated row. The same date uses the greater id. A latest row with no
+    Next Due Tach Hours stays blank instead of using an older row.
+    """
+    wanted = normalize_ldnd_inspection_type(inspection_type)
+    if not wanted:
+        return None
+
+    matches = []
+    for row in rows:
+        row_id = getattr(row, "id", None)
+        if exclude_id is not None and row_id == exclude_id:
+            continue
+        if normalize_ldnd_inspection_type(getattr(row, "inspection_type", None)) != wanted:
+            continue
+        performed = getattr(row, "performed_date_end", None)
+        if performed is not None and not isinstance(performed, date):
+            performed = None
+        matches.append((performed, row_id if isinstance(row_id, int) else 0, row))
+
+    if not matches:
+        return None
+
+    matches.sort(
+        key=lambda item: (
+            item[0] is None,
+            -(item[0].toordinal() if item[0] is not None else 0),
+            -item[1],
+        )
+    )
+    return _finite_tach_hours(getattr(matches[0][2], "next_due_tach_hours", None))
+
+
+async def get_previous_next_due_tach_hours(
+    session: AsyncSession,
+    aircraft_id: int,
+    inspection_type: str,
+    exclude_id: Optional[int] = None,
+) -> Optional[float]:
+    """Latest matching LDND Next Due Tach Hours for one aircraft and inspection."""
+    stmt = (
+        select(LDNDMonitoring)
+        .where(LDNDMonitoring.aircraft_fk == aircraft_id)
+        .where(LDNDMonitoring.is_deleted == False)
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(LDNDMonitoring.id != exclude_id)
+    result = await session.execute(stmt)
+    return select_latest_next_due_tach_hours(
+        result.scalars().all(),
+        inspection_type,
+        exclude_id=exclude_id,
+    )
 
 
 async def get_ldnd_monitoring(
@@ -99,7 +181,7 @@ async def get_ldnd_latest_by_aircraft(
         unit = (
             getattr(latest_row.unit, "value", None) or str(latest_row.unit)
             if latest_row.unit is not None
-            else "HRS"
+            else None
         )
         last_done_tach_due = latest_row.last_done_tach_due
         last_done_tach_done = latest_row.last_done_tach_done
@@ -281,7 +363,7 @@ async def get_ldnd_latest_unfilled_by_aircraft(
     unit_str = (
         getattr(row.unit, "value", None) or str(row.unit)
         if row.unit is not None
-        else "HRS"
+        else ""
     )
     return LDNDInspectionTypeLatestResponse(
         inspection_type=row.inspection_type or "",
@@ -373,10 +455,17 @@ async def list_ldnd_monitoring(
 
 
 def _unit_to_enum(value: Optional[str]):
-    if not value:
+    if value is None:
+        return None
+    u = str(value).strip()
+    if not u or u.lower() == "none":
+        return None
+    u = u.upper()
+    if u == "CYCLES":
+        return UnitEnum.CYCLES
+    if u == "HRS":
         return UnitEnum.HRS
-    u = str(value).upper().strip()
-    return UnitEnum.CYCLES if u == "CYCLES" else UnitEnum.HRS
+    return None
 
 
 async def create_ldnd_monitoring(
@@ -391,7 +480,8 @@ async def create_ldnd_monitoring(
 ) -> LDNDMonitoringRead:
     """Create a new LDNDMonitoring entry."""
     payload = data.dict()
-    payload["unit"] = _unit_to_enum(payload.get("unit")).value
+    unit_enum = _unit_to_enum(payload.get("unit"))
+    payload["unit"] = unit_enum.value if unit_enum is not None else None
     obj = LDNDMonitoring(**payload)
     session.add(obj)
     if audit_account_id is not None:
@@ -439,8 +529,9 @@ async def update_ldnd_monitoring(
         return None
     old_data_snapshot = serialize_audit_data(obj)
     update_data = data.dict(exclude_unset=True)
-    if "unit" in update_data and update_data["unit"] is not None:
-        update_data["unit"] = _unit_to_enum(update_data["unit"]).value
+    if "unit" in update_data:
+        unit_enum = _unit_to_enum(update_data.get("unit"))
+        update_data["unit"] = unit_enum.value if unit_enum is not None else None
     for k, v in update_data.items():
         setattr(obj, k, v)
     session.add(obj)

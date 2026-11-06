@@ -27,8 +27,7 @@ class LDNDMonitoring(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     inspection_type = Column(String(100), nullable=False, index=True)
     unit = Column(
         PGEnum("HRS", "CYCLES", name="ldnd_unit", create_type=True),
-        default="HRS",
-        nullable=False,
+        nullable=True,
     )
     last_done_tach_due = Column(Float, nullable=True)
     last_done_tach_done = Column(Float, nullable=True)

@@ -392,3 +392,62 @@ def test_personnel_compliance_matrix_2_sorts_by_authorization_number(
 
     assert ordered_ids("authorization_no") == [earlier_id, later_id]
     assert ordered_ids("-authorization_no") == [later_id, earlier_id]
+
+
+def test_personnel_compliance_matrix_2_paged_excludes_inactive_accounts(
+    client_with_regulatory_compliance_auth: TestClient,
+):
+    client = client_with_regulatory_compliance_auth
+
+    def create_account(username: str, active: bool, *, with_authorization: bool) -> int:
+        created = client.post(
+            "/api/v1/account-information/",
+            json={
+                "first_name": "Active" if active else "Inactive",
+                "last_name": "MatrixStatus",
+                "username": username,
+                "password": "securepassword123",
+                "status": active,
+            },
+        )
+        assert created.status_code == 201, created.text
+        account_id = created.json()["id"]
+        if with_authorization:
+            authorization = client.post(
+                "/api/v1/personnel-authorization/",
+                json={"account_information_id": account_id, "is_withhold": False},
+            )
+            assert authorization.status_code == 201, authorization.text
+        else:
+            compliance = client.post(
+                "/api/v1/personnel-compliance/",
+                json={
+                    "account_information_id": account_id,
+                    "item_type": "HF_TRAINING",
+                    "is_withhold": False,
+                },
+            )
+            assert compliance.status_code == 201, compliance.text
+        return account_id
+
+    active_id = create_account("m2_status_active", True, with_authorization=True)
+    inactive_auth_id = create_account(
+        "m2_status_inactive_auth", False, with_authorization=True
+    )
+    inactive_compliance_id = create_account(
+        "m2_status_inactive_pc", False, with_authorization=False
+    )
+
+    response = client.get(
+        "/api/v1/personnel-compliance-matrix-2/paged"
+        "?page=1&limit=50&name=matrixstatus"
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    account_ids = [item["account_information_id"] for item in body["items"]]
+    assert account_ids == [active_id]
+    assert inactive_auth_id not in account_ids
+    assert inactive_compliance_id not in account_ids
+    assert body["total"] == 1
+    assert body["page"] == 1
+    assert body["items"][0]["name"] == "MATRIXSTATUS, ACTIVE"

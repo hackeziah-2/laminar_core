@@ -35,6 +35,7 @@ async def list_personnel_compliance_matrix_2_paged(
     """
     One row per account_information_id: union of accounts that have matrix-type
     personnel_compliance rows and/or a latest non-deleted PersonnelAuthorization.
+    Only active accounts (account_information.status is True) are included.
     """
     ranked = (
         select(
@@ -78,7 +79,10 @@ async def list_personnel_compliance_matrix_2_paged(
     stmt = (
         select(AccountInformation, PersonnelAuthorization)
         .select_from(account_scope)
-        .where(AccountInformation.is_deleted == False)
+        .where(
+            AccountInformation.is_deleted == False,
+            AccountInformation.status.is_(True),
+        )
         .options(
             selectinload(PersonnelAuthorization.authorization_scope_cessna),
             selectinload(PersonnelAuthorization.authorization_scope_baron),
@@ -95,7 +99,10 @@ async def list_personnel_compliance_matrix_2_paged(
                 AccountInformation.id == combined_union.c.account_information_id,
             )
         )
-        .where(AccountInformation.is_deleted == False)
+        .where(
+            AccountInformation.is_deleted == False,
+            AccountInformation.status.is_(True),
+        )
     )
 
     if search and search.strip():

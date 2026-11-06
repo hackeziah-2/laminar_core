@@ -462,3 +462,49 @@ def test_personnel_compliance_paged_sorts_by_authorization_number(
 
     assert ordered_ids("authorization_no") == [earlier_id, later_id]
     assert ordered_ids("-authorization_no") == [later_id, earlier_id]
+
+
+def test_personnel_compliance_paged_excludes_inactive_accounts(
+    client_with_regulatory_compliance_auth: TestClient,
+):
+    client = client_with_regulatory_compliance_auth
+
+    def create_account(username: str, active: bool) -> int:
+        created = client.post(
+            "/api/v1/account-information/",
+            json={
+                "first_name": "Active" if active else "Inactive",
+                "last_name": "ComplianceStatus",
+                "username": username,
+                "password": "securepassword123",
+                "status": active,
+            },
+        )
+        assert created.status_code == 201, created.text
+        account_id = created.json()["id"]
+        compliance = client.post(
+            "/api/v1/personnel-compliance/",
+            json={
+                "account_information_id": account_id,
+                "item_type": PersonnelComplianceItemType.HF_TRAINING.value,
+                "is_withhold": False,
+            },
+        )
+        assert compliance.status_code == 201, compliance.text
+        return account_id
+
+    active_id = create_account("pc_status_active", True)
+    inactive_id = create_account("pc_status_inactive", False)
+
+    response = client.get(
+        "/api/v1/personnel-compliance/paged"
+        "?page=1&page_size=50&name=compliancestatus"
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    account_ids = [item["account_information_id"] for item in body["items"]]
+    assert account_ids == [active_id]
+    assert inactive_id not in account_ids
+    assert body["total"] == 1
+    assert body["page"] == 1
+    assert body["items"][0]["account_information"]["full_name"] == "COMPLIANCESTATUS, ACTIVE"
