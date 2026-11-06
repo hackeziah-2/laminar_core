@@ -85,6 +85,7 @@ class AircraftOut(AircraftBase):
     )
     created_at: Optional[datetime] = None
     atl_count: Optional[int] = 0
+    operational_status: Optional[str] = None
     # For Aircraft Details: download button and modal view when image
     engine_arc_download_url: Optional[str] = None
     propeller_arc_download_url: Optional[str] = None
@@ -104,7 +105,7 @@ class AircraftOut(AircraftBase):
             "engine_tsn", "engine_tso",
             "propeller_model", "propeller_serial_number", "propeller_life_time_limit",
             "propeller_tsn", "propeller_tso",
-            "atl_count",
+            "atl_count", "operational_status",
             "engine_arc", "propeller_arc",
         ]
         d = {k: getattr(v, k, None) for k in base_keys if hasattr(v, k)}

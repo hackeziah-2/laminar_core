@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from app.database import set_audit_fields
 from app.models.account import AccountInformation
-from app.models.aircraft import Aircraft, StatusEnum
+from app.models.aircraft import Aircraft
 from app.models.audit_log import AuditAction
 from app.models.fleet_daily_update import FleetDailyUpdate, FleetDailyUpdateStatusEnum
 from app.services.audit_trail_service import create_audit_log, serialize_audit_data
@@ -71,18 +71,6 @@ async def create_fleet_daily_update(
 
     obj = FleetDailyUpdate(**payload)
     session.add(obj)
-    if payload["status"] == FleetDailyUpdateStatusEnum.ONGOING_MAINTENANCE.value:
-        ac_res = await session.execute(
-            select(Aircraft)
-            .where(Aircraft.id == payload["aircraft_fk"])
-            .where(Aircraft.is_deleted == False)
-        )
-        ac = ac_res.scalar_one_or_none()
-        if ac:
-            ac.status = StatusEnum.MAINTENANCE
-            if audit_account_id is not None:
-                await set_audit_fields(ac, audit_account_id, is_create=False)
-            session.add(ac)
     if audit_account_id is not None:
         await set_audit_fields(obj, audit_account_id, is_create=True)
     await session.commit()
@@ -129,8 +117,13 @@ async def get_fleet_daily_update_by_aircraft(
         .options(selectinload(FleetDailyUpdate.aircraft))
         .where(FleetDailyUpdate.aircraft_fk == aircraft_id)
         .where(FleetDailyUpdate.is_deleted == False)
+        .order_by(
+            FleetDailyUpdate.updated_at.desc().nulls_last(),
+            FleetDailyUpdate.id.desc(),
+        )
+        .limit(1)
     )
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 
 async def list_fleet_daily_updates(
@@ -242,20 +235,6 @@ async def update_fleet_daily_update(
         if hasattr(obj, k):
             setattr(obj, k, v)
 
-    if (
-        obj.aircraft
-        and obj.status == FleetDailyUpdateStatusEnum.ONGOING_MAINTENANCE.value
-    ):
-        ac_status = obj.aircraft.status
-        ac_status_val = (
-            ac_status.value if hasattr(ac_status, "value") else str(ac_status)
-        )
-        if ac_status_val != StatusEnum.MAINTENANCE.value:
-            obj.aircraft.status = StatusEnum.MAINTENANCE
-            if audit_account_id is not None:
-                await set_audit_fields(obj.aircraft, audit_account_id, is_create=False)
-            session.add(obj.aircraft)
-
     session.add(obj)
     if audit_account_id is not None:
         await set_audit_fields(obj, audit_account_id, is_create=False)
@@ -299,28 +278,6 @@ def _apply_fleet_daily_update_changes(
     for k, v in update_data.items():
         if hasattr(obj, k):
             setattr(obj, k, v)
-
-
-async def _sync_aircraft_maintenance_from_fleet_status(
-    session: AsyncSession,
-    obj: FleetDailyUpdate,
-    *,
-    audit_account_id: Optional[int] = None,
-) -> None:
-    """When status is Ongoing Maintenance, align linked aircraft to Maintenance if needed."""
-    if (
-        obj.aircraft
-        and obj.status == FleetDailyUpdateStatusEnum.ONGOING_MAINTENANCE.value
-    ):
-        ac_status = obj.aircraft.status
-        ac_status_val = (
-            ac_status.value if hasattr(ac_status, "value") else str(ac_status)
-        )
-        if ac_status_val != StatusEnum.MAINTENANCE.value:
-            obj.aircraft.status = StatusEnum.MAINTENANCE
-            if audit_account_id is not None:
-                await set_audit_fields(obj.aircraft, audit_account_id, is_create=False)
-            session.add(obj.aircraft)
 
 
 async def bulk_update_fleet_daily_updates(
@@ -393,11 +350,6 @@ async def bulk_update_fleet_daily_updates(
                 update_data["aircraft_fk"] = aircraft_id
 
             _apply_fleet_daily_update_changes(obj, update_data)
-            await _sync_aircraft_maintenance_from_fleet_status(
-                session,
-                obj,
-                audit_account_id=audit_account_id,
-            )
             session.add(obj)
             if audit_account_id is not None:
                 await set_audit_fields(obj, audit_account_id, is_create=False)

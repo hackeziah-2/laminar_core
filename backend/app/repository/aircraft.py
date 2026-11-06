@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.file_upload_service import persist_optional_upload
 
-from app.models.aircraft import Aircraft, StatusEnum
+from app.models.aircraft import Aircraft
 from app.models.fleet_daily_update import FleetDailyUpdate, FleetDailyUpdateStatusEnum
 from app.models.aircraft_logbook_entries import AircraftLogbookEntry
 from app.models.aircraft_techinical_log import AircraftTechnicalLog
@@ -79,35 +79,6 @@ async def place_restored_aircraft_at_end(
     session.add(aircraft)
 
 
-async def _sync_fleet_daily_update_when_aircraft_maintenance(
-    session: AsyncSession,
-    aircraft: Aircraft,
-    *,
-    audit_account_id: Optional[int] = None,
-) -> None:
-    """If aircraft is in Maintenance, align Fleet Daily Update status to Ongoing Maintenance."""
-    st = aircraft.status
-    st_val = st.value if hasattr(st, "value") else str(st)
-    if st_val != StatusEnum.MAINTENANCE.value:
-        return
-    fd_res = await session.execute(
-        select(FleetDailyUpdate).where(
-            FleetDailyUpdate.aircraft_fk == aircraft.id,
-            FleetDailyUpdate.is_deleted == False,
-        )
-    )
-    fd = fd_res.scalar_one_or_none()
-    if not fd:
-        return
-    fd_st = fd.status
-    fd_st_val = fd_st.value if hasattr(fd_st, "value") else str(fd_st)
-    if fd_st_val != FleetDailyUpdateStatusEnum.ONGOING_MAINTENANCE.value:
-        fd.status = FleetDailyUpdateStatusEnum.ONGOING_MAINTENANCE.value
-        if audit_account_id is not None:
-            await set_audit_fields(fd, audit_account_id, is_create=False)
-        session.add(fd)
-
-
 async def _find_active_aircraft_by_field(
     session: AsyncSession,
     field_name: str,
@@ -172,8 +143,28 @@ async def list_aircraft(
         .scalar_subquery()
     )
 
+    def operational_status_sq():
+        return (
+            select(FleetDailyUpdate.status)
+            .where(
+                FleetDailyUpdate.aircraft_fk == Aircraft.id,
+                FleetDailyUpdate.is_deleted == False,
+            )
+            .order_by(
+                FleetDailyUpdate.updated_at.desc().nulls_last(),
+                FleetDailyUpdate.id.desc(),
+            )
+            .limit(1)
+            .correlate(Aircraft)
+            .scalar_subquery()
+        )
+
     stmt = (
-        select(Aircraft, atl_count_subquery.label("atl_count"))
+        select(
+            Aircraft,
+            atl_count_subquery.label("atl_count"),
+            operational_status_sq().label("operational_status"),
+        )
         .where(Aircraft.is_deleted == False)
     )
 
@@ -189,9 +180,15 @@ async def list_aircraft(
             )
         )
 
-    # Status filter (accept string or enum; normalize to string)
+    # Profile Status is the Daily Update operational status.
+    # Active / Inactive / Maintenance still filter the stored aircraft status.
     status_val = _normalize_status(status)
-    if status_val and status_val.lower() != "all":
+    operational_filters = {"operational", "ongoing maintenance", "aog"}
+    if status_val and status_val.lower() in operational_filters:
+        stmt = stmt.where(
+            func.lower(cast(operational_status_sq(), String)) == status_val.lower()
+        )
+    elif status_val and status_val.lower() != "all":
         stmt = stmt.where(
             func.lower(cast(Aircraft.status, String)) == status_val.lower()
         )
@@ -244,7 +241,11 @@ async def list_aircraft(
             )
         )
 
-    if status_val and status_val.lower() != "all":
+    if status_val and status_val.lower() in operational_filters:
+        count_stmt = count_stmt.where(
+            func.lower(cast(operational_status_sq(), String)) == status_val.lower()
+        )
+    elif status_val and status_val.lower() != "all":
         count_stmt = count_stmt.where(
             func.lower(cast(Aircraft.status, String)) == status_val.lower()
         )
@@ -257,8 +258,14 @@ async def list_aircraft(
     result = await session.execute(stmt)
     rows = result.all()
     items = []
-    for aircraft, atl_count in rows:
+    for aircraft, atl_count, operational_status in rows:
         setattr(aircraft, "atl_count", int(atl_count or 0))
+        status_text = (
+            operational_status.value
+            if hasattr(operational_status, "value")
+            else operational_status
+        )
+        setattr(aircraft, "operational_status", status_text)
         items.append(aircraft)
 
     return items, total_count
@@ -285,9 +292,6 @@ async def update_aircraft(
         return None
     for k, v in aircraft_in.dict(exclude_unset=True).items():
         setattr(obj, k, v)
-    await _sync_fleet_daily_update_when_aircraft_maintenance(
-        session, obj, audit_account_id=audit_account_id
-    )
     session.add(obj)
     if audit_account_id is not None:
         await set_audit_fields(obj, audit_account_id, is_create=False)
@@ -418,9 +422,6 @@ async def update_aircraft_with_file(
     # --- Apply updates ---
     for key, value in update_data.items():
         setattr(aircraft, key, value)
-    await _sync_fleet_daily_update_when_aircraft_maintenance(
-        session, aircraft, audit_account_id=audit_account_id
-    )
     if audit_account_id is not None:
         await set_audit_fields(aircraft, audit_account_id, is_create=False)
     await session.commit()
