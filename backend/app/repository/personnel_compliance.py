@@ -103,38 +103,15 @@ async def list_personnel_compliances(
             selectinload(PersonnelCompliance.authorization_scope_others),
             selectinload(PersonnelCompliance.authorization_scope_piper_pa34),
         )
+        .join(PersonnelCompliance.account_information)
         .outerjoin(latest_pa, latest_pa.c.acc_id == PersonnelCompliance.account_information_id)
         .outerjoin(PersonnelAuthorization, PersonnelAuthorization.id == latest_pa.c.pa_id)
-        .where(PersonnelCompliance.is_deleted == False)
-    )
-    need_join = False
-    if search and search.strip():
-        need_join = True
-    if designation is not None and str(designation).strip() != "":
-        need_join = True
-    sort_lower = (sort or "").lower()
-    if (
-        "account_information_id__auth_stamp" in sort_lower
-        or "authorization_no" in sort_lower
-    ):
-        need_join = True
-    if "auth_initial_doi" in sort_lower:
-        need_join = True
-    for _part in (sort or "").split(","):
-        _n = _part.lstrip("-").strip().lower()
-        if _n in (
-            "full_name",
-            "account_information__full_name",
-            "account_information.last_name",
-            "account_information.first_name",
-            "account_information__last_name",
-            "account_information__first_name",
-        ):
-            need_join = True
-            break
+        .where(
+            PersonnelCompliance.is_deleted == False,
+            AccountInformation.status.is_(True),
+        )
 
-    if need_join:
-        stmt = stmt.join(PersonnelCompliance.account_information)
+    )
     if search and search.strip():
         stmt = stmt.where(_account_personnel_search_filter(search))
     if designation is not None and str(designation).strip() != "":
@@ -205,10 +182,12 @@ async def list_personnel_compliances(
     count_stmt = (
         select(func.count())
         .select_from(PersonnelCompliance)
-        .where(PersonnelCompliance.is_deleted == False)
+        .join(PersonnelCompliance.account_information)
+        .where(
+            PersonnelCompliance.is_deleted == False,
+            AccountInformation.status.is_(True),
+        )
     )
-    if need_join:
-        count_stmt = count_stmt.join(PersonnelCompliance.account_information)
     if search and search.strip():
         count_stmt = count_stmt.where(_account_personnel_search_filter(search))
     if designation is not None and str(designation).strip() != "":

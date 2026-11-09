@@ -1,9 +1,41 @@
+import re
 from datetime import date, datetime
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field, validator
 
 from app.services.excel_import.parsers import parse_import_date
+
+
+_NOT_PLAIN_ANNUAL = re.compile(r"(?i)\b(?:semi[-\s]?annual|bi[-\s]?annual)\b")
+_ANNUAL_WORD = re.compile(r"(?i)\bannual\b")
+
+
+def is_annual_inspection(inspection_type: Any) -> bool:
+    """Annual inspections do not use HRS or CYCLES. Semi-annual and bi-annual still can."""
+    text = str(inspection_type or "").replace("\r\n", "\n").replace("\r", "\n")
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line or _NOT_PLAIN_ANNUAL.search(line):
+            continue
+        if _ANNUAL_WORD.search(line):
+            return True
+    return False
+
+
+def normalize_ldnd_unit(value: Any) -> Optional[str]:
+    """HRS, CYCLES, or blank. Blank is stored as null and is not replaced with HRS."""
+    if value is None:
+        return None
+    if hasattr(value, "value"):
+        value = value.value
+    text = str(value).strip()
+    if not text or text.lower() == "none":
+        return None
+    unit = text.upper()
+    if unit not in ("HRS", "CYCLES"):
+        raise ValueError("unit must be HRS or CYCLES")
+    return unit
 
 
 class AircraftSummary(BaseModel):
@@ -19,7 +51,10 @@ class AircraftSummary(BaseModel):
 class LDNDMonitoringBase(BaseModel):
     aircraft_fk: int
     inspection_type: str = Field(..., max_length=100)
-    unit: str = Field(default="HRS", description="HRS or CYCLES")
+    unit: Optional[str] = Field(
+        default=None,
+        description="HRS, CYCLES, or blank. Annual inspections may omit a unit.",
+    )
     last_done_tach_due: Optional[float] = None
     last_done_tach_done: Optional[float] = None
     next_due_tach_hours: Optional[float] = None
@@ -28,12 +63,7 @@ class LDNDMonitoringBase(BaseModel):
 
     @validator("unit", pre=True)
     def validate_unit(cls, v):
-        if v is None:
-            return "HRS"
-        u = str(v).upper().strip()
-        if u not in ("HRS", "CYCLES"):
-            raise ValueError("unit must be HRS or CYCLES")
-        return u
+        return normalize_ldnd_unit(v)
 
     class Config:
         orm_mode = True
@@ -64,7 +94,7 @@ class LDNDMonitoringImportSchema(BaseModel):
 
     aircraft_fk: int
     inspection_type: str = Field(..., max_length=100)
-    unit: str = Field(default="HRS")
+    unit: Optional[str] = None
     last_done_tach_due: Optional[float] = None
     last_done_tach_done: Optional[float] = None
     next_due_tach_hours: Optional[float] = None
@@ -77,14 +107,14 @@ class LDNDMonitoringImportSchema(BaseModel):
             raise ValueError("inspection_type is required")
         return str(v).strip()
 
-    @validator("unit", pre=True)
-    def validate_unit(cls, v: Any) -> str:
-        if v is None:
+    @validator("unit", pre=True, always=True)
+    def validate_unit(cls, v: Any, values: dict) -> Optional[str]:
+        blank = v is None or (isinstance(v, str) and not v.strip())
+        if blank and is_annual_inspection(values.get("inspection_type")):
+            return None
+        if blank:
             return "HRS"
-        u = str(v).upper().strip()
-        if u not in ("HRS", "CYCLES"):
-            raise ValueError("unit must be HRS or CYCLES")
-        return u
+        return normalize_ldnd_unit(v)
 
     @validator(
         "last_done_tach_due",
@@ -125,12 +155,7 @@ class LDNDMonitoringUpdate(BaseModel):
 
     @validator("unit", pre=True)
     def validate_unit(cls, v):
-        if v is None:
-            return None
-        u = str(v).upper().strip()
-        if u not in ("HRS", "CYCLES"):
-            raise ValueError("unit must be HRS or CYCLES")
-        return u
+        return normalize_ldnd_unit(v)
 
     class Config:
         orm_mode = True
@@ -144,12 +169,16 @@ class LDNDMonitoringRead(LDNDMonitoringBase):
 
     @validator("unit", pre=True)
     def unit_to_str(cls, v):
-        if hasattr(v, "value"):
-            return v.value
-        return str(v) if v is not None else "HRS"
+        return normalize_ldnd_unit(v)
 
     class Config:
         orm_mode = True
+
+
+class LDNDPreviousNextDueResponse(BaseModel):
+    """Next Due Tach Hours from the latest matching LDND row for an aircraft."""
+
+    next_due_tach_hours: Optional[float] = None
 
 
 class LDNDInspectionTypeLatestResponse(BaseModel):
