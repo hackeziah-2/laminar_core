@@ -1576,7 +1576,7 @@ def test_create_tr_requires_tach_and_hobbs_end():
     assert "hobbs_meter_end" in text
 
 
-def test_create_prf_requires_off_blocks_and_signature_details():
+def test_create_prf_requires_off_blocks_not_signatures():
     with pytest.raises(Exception) as exc_info:
         AircraftTechnicalLogCreate.parse_obj(
             {
@@ -1588,8 +1588,32 @@ def test_create_prf_requires_off_blocks_and_signature_details():
     text = str(exc_info.value)
     assert "origin_date" in text
     assert "origin_time" in text
-    assert "rts_signed_by" in text
-    assert "pilot_accepted_by" in text
+    assert "rts_signed_by" not in text
+    assert "pilot_accepted_by" not in text
+    assert "rts_date" not in text
+    assert "pilot_accept_date" not in text
+
+
+def test_create_prf_allows_blank_return_to_service_and_pilot_acceptance():
+    created = AircraftTechnicalLogCreate.parse_obj(
+        {
+            "aircraft_fk": 1,
+            "sequence_no": "001",
+            "nature_of_flight": "PRF",
+            "origin_date": "2026-09-22",
+            "origin_time": "10:30",
+            "rts_signed_by": None,
+            "rts_date": None,
+            "rts_time": None,
+            "pilot_accepted_by": "None",
+            "pilot_accept_date": None,
+            "pilot_accept_time": "",
+        }
+    )
+    assert created.rts_signed_by is None
+    assert created.pilot_accepted_by is None
+    assert created.rts_date is None
+    assert created.pilot_accept_time is None
 
 
 def test_update_work_status_skips_nature_required_fields():

@@ -15,17 +15,6 @@ _FIELD_ALIASES: Dict[str, Tuple[str, ...]] = {
     "hobbs_meter_end": ("hobbs_meter_end", "hobbsMeterEnd", "hobbs_end", "hobbsEnd"),
     "origin_date": ("origin_date", "originDate", "off_blocks_date", "offBlocksDate"),
     "origin_time": ("origin_time", "originTime", "off_blocks_time", "offBlocksTime"),
-    "rts_signed_by": ("rts_signed_by", "rtsSignedBy"),
-    "rts_date": ("rts_date", "rtsDate"),
-    "rts_time": ("rts_time", "rtsTime"),
-    "pilot_accepted_by": (
-        "pilot_accepted_by",
-        "pilotAcceptedBy",
-        "pilot_fk",
-        "pilotFk",
-    ),
-    "pilot_accept_date": ("pilot_accept_date", "pilotAcceptDate"),
-    "pilot_accept_time": ("pilot_accept_time", "pilotAcceptTime"),
 }
 
 
@@ -58,26 +47,6 @@ def _is_blank(value: Any) -> bool:
     return False
 
 
-def _is_blank_assignee(value: Any) -> bool:
-    if _is_blank(value):
-        return True
-    if isinstance(value, str) and value.strip().lower() in (
-        "none",
-        "null",
-        "undefined",
-        "-",
-        "na",
-        "n/a",
-        "no selected name",
-    ):
-        return True
-    try:
-        number = int(str(value).strip())
-    except (TypeError, ValueError):
-        return False
-    return number <= 0
-
-
 def _lookup(values: Dict[str, Any], canonical: str) -> Tuple[bool, Any]:
     for alias in _FIELD_ALIASES[canonical]:
         if alias in values:
@@ -101,24 +70,20 @@ def collect_atl_nature_required_field_errors(
 
     errors: List[Tuple[str, str]] = []
 
-    def require(canonical: str, blank_fn=_is_blank) -> None:
+    def require(canonical: str) -> None:
         found, value = _lookup(values, canonical)
-        if not found or blank_fn(value):
+        if not found or _is_blank(value):
             errors.append((canonical, ATL_REQUIRED_FIELD_MESSAGE))
 
     if nature in _TACH_HOBBS_NATURES:
         require("tachometer_end")
         require("hobbs_meter_end")
 
+    # Return to Service and Pilot's Acceptance stay optional. A blank name,
+    # date, or time is stored as NULL and must not fail create or update.
     if nature in _PRF_NATURES:
         require("origin_date")
         require("origin_time")
-        require("rts_signed_by", _is_blank_assignee)
-        require("rts_date")
-        require("rts_time")
-        require("pilot_accepted_by", _is_blank_assignee)
-        require("pilot_accept_date")
-        require("pilot_accept_time")
 
     return errors
 
