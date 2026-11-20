@@ -148,6 +148,7 @@ async def _fetch_atl_list_page(
     aircraft_id: Optional[int],
     aircraft_fk: Optional[int],
     work_status: Optional[WorkStatus],
+    nature_of_flight: Optional[List[str]],
     atl_batch: Optional[str],
     atl_batch_fk: Optional[str],
     sort: str,
@@ -162,6 +163,7 @@ async def _fetch_atl_list_page(
         aircraft_fk=filter_aircraft,
         atl_batch_fk=batch_filter,
         work_status=work_status,
+        nature_of_flight=nature_of_flight,
         sort=sort,
     )
     result_items = await serialize_atl_paged_api_items(session, items)
@@ -200,6 +202,14 @@ async def api_list_paged(
             "REJECTED_QUALITY, PENDING, COMPLETED. Omit for no filter."
         ),
     ),
+    nature_of_flight: Optional[List[str]] = Query(
+        None,
+        description=(
+            "Filter by Nature of Flight. Repeat the parameter or pass a comma-separated "
+            "list (e.g. nature_of_flight=ME&nature_of_flight=TR_WITH_PIREM). "
+            "Omit for every nature."
+        ),
+    ),
     atl_batch: Optional[str] = Query(
         None,
         description="Filter by ATL batch id, or 'all' for assigned and unassigned batches.",
@@ -226,6 +236,7 @@ async def api_list_paged(
         aircraft_id=aircraft_id,
         aircraft_fk=aircraft_fk,
         work_status=work_status,
+        nature_of_flight=nature_of_flight,
         atl_batch=atl_batch,
         atl_batch_fk=atl_batch_fk,
         sort=sort,
@@ -403,6 +414,14 @@ async def api_atl_list_paged(
             "REJECTED_QUALITY, PENDING, COMPLETED. Omit for no filter."
         ),
     ),
+    nature_of_flight: Optional[List[str]] = Query(
+        None,
+        description=(
+            "Filter by Nature of Flight. Repeat the parameter or pass a comma-separated "
+            "list (e.g. nature_of_flight=ME&nature_of_flight=TR_WITH_PIREM). "
+            "Omit for every nature."
+        ),
+    ),
     atl_batch: Optional[str] = Query(
         None,
         description="Filter by ATL batch id, or 'all' for assigned and unassigned batches.",
@@ -438,6 +457,7 @@ async def api_atl_list_paged(
         aircraft_fk=filter_aircraft,
         atl_batch_fk=batch_filter,
         work_status=work_status,
+        nature_of_flight=nature_of_flight,
         sort=sort,
         current_account=current_account,
     )

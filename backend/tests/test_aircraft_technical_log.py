@@ -10,12 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_account
 from app.core.atl_derived_times import ATL_AUTO_FIELD_KEYS, apply_computed_auto_fields_to_row
-from app.models.aircraft_techinical_log import AircraftTechnicalLog, WorkStatus
+from app.models.aircraft_techinical_log import AircraftTechnicalLog, TypeEnum, WorkStatus
 from app.main import app
 from app.models.role import Role
 from app.repository.aircraft_technical_log import (
     _clean_atl_update_data,
     _round_tachometer_total_2,
+    parse_nature_of_flight_query,
 )
 from app.schemas.aircraft_technical_log_schema import (
     AircraftTechnicalLogApiRead,
@@ -24,6 +25,19 @@ from app.schemas.aircraft_technical_log_schema import (
     ATLPagedItemWithAutoApiRead,
 )
 from tests.conftest import TestSessionLocal
+
+
+def test_parse_nature_of_flight_query_keeps_reliability_monitoring_values():
+    assert parse_nature_of_flight_query(["ME", "TR_WITH_PIREM"]) == [
+        TypeEnum.ME,
+        TypeEnum.TR_WITH_PIREM,
+    ]
+    assert parse_nature_of_flight_query(["ME,TR W/ PIREM"]) == [
+        TypeEnum.ME,
+        TypeEnum.TR_WITH_PIREM,
+    ]
+    assert parse_nature_of_flight_query(None) == []
+    assert parse_nature_of_flight_query(["NOT_A_NATURE"]) == []
 
 
 def test_round_tachometer_total_to_two_decimals():
@@ -1576,7 +1590,7 @@ def test_create_tr_requires_tach_and_hobbs_end():
     assert "hobbs_meter_end" in text
 
 
-def test_create_prf_requires_off_blocks_and_signature_details():
+def test_create_prf_requires_off_blocks_not_signatures():
     with pytest.raises(Exception) as exc_info:
         AircraftTechnicalLogCreate.parse_obj(
             {
@@ -1588,8 +1602,32 @@ def test_create_prf_requires_off_blocks_and_signature_details():
     text = str(exc_info.value)
     assert "origin_date" in text
     assert "origin_time" in text
-    assert "rts_signed_by" in text
-    assert "pilot_accepted_by" in text
+    assert "rts_signed_by" not in text
+    assert "pilot_accepted_by" not in text
+    assert "rts_date" not in text
+    assert "pilot_accept_date" not in text
+
+
+def test_create_prf_allows_blank_return_to_service_and_pilot_acceptance():
+    created = AircraftTechnicalLogCreate.parse_obj(
+        {
+            "aircraft_fk": 1,
+            "sequence_no": "001",
+            "nature_of_flight": "PRF",
+            "origin_date": "2026-09-22",
+            "origin_time": "10:30",
+            "rts_signed_by": None,
+            "rts_date": None,
+            "rts_time": None,
+            "pilot_accepted_by": "None",
+            "pilot_accept_date": None,
+            "pilot_accept_time": "",
+        }
+    )
+    assert created.rts_signed_by is None
+    assert created.pilot_accepted_by is None
+    assert created.rts_date is None
+    assert created.pilot_accept_time is None
 
 
 def test_update_work_status_skips_nature_required_fields():

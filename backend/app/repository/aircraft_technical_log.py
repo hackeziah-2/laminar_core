@@ -1463,6 +1463,44 @@ async def serialize_atl_paged_api_items(
     return await apply_uppercase_signer_names_to_atl_dicts(session, result_items)
 
 
+_NATURE_OF_FLIGHT_QUERY_ALIASES = {
+    "TR_W/_PIREM": TypeEnum.TR_WITH_PIREM,
+    "TR_W/PIREM": TypeEnum.TR_WITH_PIREM,
+    "TR_WITH_PIREM": TypeEnum.TR_WITH_PIREM,
+}
+
+
+def parse_nature_of_flight_query(
+    values: Optional[List[str]],
+) -> List[TypeEnum]:
+    """Repeatable or comma-separated Nature of Flight query values."""
+    parsed: List[TypeEnum] = []
+    seen = set()
+    for raw in values or []:
+        for part in str(raw).split(","):
+            token = part.strip().upper().replace(" ", "_")
+            if not token:
+                continue
+            nature = _NATURE_OF_FLIGHT_QUERY_ALIASES.get(token)
+            if nature is None:
+                try:
+                    nature = TypeEnum(token)
+                except ValueError:
+                    continue
+            if nature in seen:
+                continue
+            seen.add(nature)
+            parsed.append(nature)
+    return parsed
+
+
+def _apply_nature_of_flight_filter(stmt, count_stmt, natures: List[TypeEnum]):
+    if not natures:
+        return stmt, count_stmt
+    clause = AircraftTechnicalLog.nature_of_flight.in_(tuple(natures))
+    return stmt.where(clause), count_stmt.where(clause)
+
+
 async def list_aircraft_technical_logs(
     session: AsyncSession,
     limit: int = 0,
@@ -1471,6 +1509,7 @@ async def list_aircraft_technical_logs(
     aircraft_fk: Optional[int] = None,
     atl_batch_fk: Optional[int] = None,
     work_status: Optional[WorkStatus] = None,
+    nature_of_flight: Optional[List[str]] = None,
     sort: Optional[str] = "-sequence_no",
 ) -> Tuple[List[AircraftTechnicalLog], int]:
     """List Aircraft Technical Log entries with pagination."""
@@ -1484,6 +1523,12 @@ async def list_aircraft_technical_logs(
     if work_status:
         stmt = stmt.where(AircraftTechnicalLog.work_status == work_status)
         count_stmt = count_stmt.where(AircraftTechnicalLog.work_status == work_status)
+
+    stmt, count_stmt = _apply_nature_of_flight_filter(
+        stmt,
+        count_stmt,
+        parse_nature_of_flight_query(nature_of_flight),
+    )
 
     total = (await session.execute(count_stmt)).scalar()
     total = int(total) if total is not None else 0
@@ -1503,6 +1548,7 @@ async def list_aircraft_technical_logs_manage(
     aircraft_fk: Optional[int] = None,
     atl_batch_fk: Optional[int] = None,
     work_status: Optional[WorkStatus] = None,
+    nature_of_flight: Optional[List[str]] = None,
     sort: Optional[str] = "-sequence_no",
     current_account: Optional[AccountInformation] = None,
 ) -> Tuple[List[AircraftTechnicalLog], int]:
@@ -1512,6 +1558,11 @@ async def list_aircraft_technical_logs_manage(
         aircraft_fk=aircraft_fk,
         atl_batch_fk=atl_batch_fk,
         sort=sort,
+    )
+    stmt, count_stmt = _apply_nature_of_flight_filter(
+        stmt,
+        count_stmt,
+        parse_nature_of_flight_query(nature_of_flight),
     )
     return stmt, count_stmt
 

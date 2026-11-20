@@ -25,3 +25,5 @@ env.test/
 env.staging/
 env.development/
 env.production/
+backend/celerybeat-schedule
+celerybeat-schedule
