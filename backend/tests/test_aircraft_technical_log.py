@@ -10,12 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_account
 from app.core.atl_derived_times import ATL_AUTO_FIELD_KEYS, apply_computed_auto_fields_to_row
-from app.models.aircraft_techinical_log import AircraftTechnicalLog, WorkStatus
+from app.models.aircraft_techinical_log import AircraftTechnicalLog, TypeEnum, WorkStatus
 from app.main import app
 from app.models.role import Role
 from app.repository.aircraft_technical_log import (
     _clean_atl_update_data,
     _round_tachometer_total_2,
+    parse_nature_of_flight_query,
 )
 from app.schemas.aircraft_technical_log_schema import (
     AircraftTechnicalLogApiRead,
@@ -24,6 +25,19 @@ from app.schemas.aircraft_technical_log_schema import (
     ATLPagedItemWithAutoApiRead,
 )
 from tests.conftest import TestSessionLocal
+
+
+def test_parse_nature_of_flight_query_keeps_reliability_monitoring_values():
+    assert parse_nature_of_flight_query(["ME", "TR_WITH_PIREM"]) == [
+        TypeEnum.ME,
+        TypeEnum.TR_WITH_PIREM,
+    ]
+    assert parse_nature_of_flight_query(["ME,TR W/ PIREM"]) == [
+        TypeEnum.ME,
+        TypeEnum.TR_WITH_PIREM,
+    ]
+    assert parse_nature_of_flight_query(None) == []
+    assert parse_nature_of_flight_query(["NOT_A_NATURE"]) == []
 
 
 def test_round_tachometer_total_to_two_decimals():
